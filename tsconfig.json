@@ -1,0 +1,23 @@
+{
+    "compilerOptions": {
+        "module": "commonjs",
+        "moduleResolution": "node",
+        "lib": ["ES2022"],
+        "noImplicitReturns": false,
+        "noImplicitAny": false,
+        "noUnusedLocals": true,
+        "outDir": "lib",
+        "sourceMap": true,
+        "strict": true,
+        "esModuleInterop": true,
+        "target": "es2022",
+        "types": ["node"],
+        "baseUrl": ".",
+        "skipLibCheck": true,
+        "paths": {
+            "@/*": ["src/*"]
+        }
+    },
+    "compileOnSave": true,
+    "include": ["src/**/*"]
+}

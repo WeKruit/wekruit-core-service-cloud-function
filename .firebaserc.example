@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "staging": "wekruit-core-service-staging",
+    "production": "wekruit-core-service-production"
+  }
+}
