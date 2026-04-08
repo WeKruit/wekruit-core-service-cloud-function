@@ -7,6 +7,7 @@ It is designed to host multiple services, not just `outbound`.
 Current live service scope:
 
 - `outbound`
+- `matching` (implemented in repo, pending deploy)
 
 Current Firebase projects:
 
@@ -88,6 +89,13 @@ src/
       functions/
         http/
         tasks/
+    matching/
+      application/
+      domain/
+      repositories/
+      integrations/
+      functions/
+        http/
 ```
 
 ### Layer meanings
@@ -150,6 +158,26 @@ For any service named `<service-name>`:
 - `OUTBOUND_BOOKING_LEAD_HOURS`
 - `OUTBOUND_BOOKING_REMINDER_HOURS`
 
+### Current matching resources
+
+#### Functions
+
+- `matching-api`
+
+#### Firestore collections
+
+- `platform-users`
+- `matching-jobs`
+- `matching-feedback`
+- `matching-saved-jobs`
+
+#### Secrets and params
+
+- `MATCHING_SYNC_API_KEY`
+- `MATCHING_SUPABASE_URL`
+- `MATCHING_SUPABASE_SERVICE_ROLE_KEY`
+- `MATCHING_OPENAI_API_KEY`
+
 ## Runtime Export Model
 
 `src/index.ts` is the repo-level runtime registry.
@@ -170,10 +198,37 @@ export = {
       call: outboundStartCall,
     },
   },
+  matching: {
+    api: matchingApi,
+  },
 };
 ```
 
 When a second service is added, it must appear here as a second top-level key.
+
+## Matching Service Flow
+
+### User sync
+
+1. Supabase Database Webhook posts `INSERT` or `UPDATE` events for VALET `users` rows to `matching-api`.
+2. `matching-api` validates the `X-Webhook-Signature` header.
+3. The service loads the full VALET aggregate from Supabase (`users`, `user_application_profiles`, `resumes`).
+4. The aggregate is mapped into `platform-users/{uid}` and deduplicated by payload hash.
+
+### Job sync
+
+1. The Mac Mini pipeline posts batched payloads to `POST /api/sync/jobs`.
+2. `matching-api` validates the `X-API-Key` header.
+3. The service upserts only jobs whose `content_hash` or `status` changed.
+4. Inactive jobs stay in Firestore with `status = inactive`; they are never deleted by sync.
+
+### Matching and job board
+
+1. Callers request matches through `POST /api/matching/matches`.
+2. The service loads the caller's `platform-users` profile plus stored feedback history.
+3. Firestore equality and array filters reduce candidates before cosine scoring runs in memory.
+4. The 7-signal scorer ranks the filtered jobs.
+5. `GET /api/matching/jobs` and `GET /api/matching/jobs/:jobId` expose the same Firestore corpus for browsing.
 
 ## Outbound Service Flow
 

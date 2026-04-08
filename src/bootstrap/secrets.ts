@@ -10,6 +10,11 @@ export const outboundGoogleServiceAccountPrivateKey = defineSecret(
   'OUTBOUND_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY',
 );
 export const outboundAppBaseUrl = defineSecret('OUTBOUND_APP_BASE_URL');
+export const matchingSyncApiKey = defineSecret('MATCHING_SYNC_API_KEY');
+export const matchingLegacyApiKey = defineSecret('MATCHING_LEGACY_API_KEY');
+export const matchingSupabaseUrl = defineSecret('MATCHING_SUPABASE_URL');
+export const matchingSupabaseServiceRoleKey = defineSecret('MATCHING_SUPABASE_SERVICE_ROLE_KEY');
+export const matchingOpenAiApiKey = defineSecret('MATCHING_OPENAI_API_KEY');
 
 export const outboundAppTimezone = defineString('OUTBOUND_APP_TIMEZONE', {
   default: 'America/Chicago',
@@ -42,4 +47,12 @@ export const outboundSecrets = [
   outboundGoogleServiceAccountEmail,
   outboundGoogleServiceAccountPrivateKey,
   outboundAppBaseUrl
+];
+
+export const matchingSecrets = [
+  matchingSyncApiKey,
+  matchingLegacyApiKey,
+  matchingSupabaseUrl,
+  matchingSupabaseServiceRoleKey,
+  matchingOpenAiApiKey,
 ];

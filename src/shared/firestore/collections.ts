@@ -5,3 +5,10 @@ export const outboundCollections = {
   bookings: 'outbound-bookings',
   callArtifacts: 'outbound-call-artifacts'
 } as const;
+
+export const matchingCollections = {
+  platformUsers: 'platform-users',
+  jobs: 'matching-jobs',
+  feedback: 'matching-feedback',
+  savedJobs: 'matching-saved-jobs',
+} as const;

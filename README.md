@@ -13,6 +13,7 @@ This repo is not "the outbound repo moved into Firebase". It is the shared backe
 Current live service coverage:
 
 - `outbound`
+- `matching` (implemented in repo, pending deploy)
 
 Related repos:
 
@@ -42,6 +43,7 @@ If a service does not fit those rules, it should not be added here.
 | Service | Status | Resource Prefix | Notes |
 |---|---|---|---|
 | `outbound` | live | `outbound-*` | interview booking, invite sends, reminders, Retell calls |
+| `matching` | implemented | `matching-*` + `platform-*` | VALET user sync, Mac Mini job sync, TypeScript matching API, Firestore job board |
 
 ## Firebase Environment Model
 
@@ -238,6 +240,49 @@ The naming rule is simple:
 - `OUTBOUND_BOOKING_WORKDAY_END_HOUR`
 - `OUTBOUND_BOOKING_LEAD_HOURS`
 - `OUTBOUND_BOOKING_REMINDER_HOURS`
+
+### Current `matching` resources
+
+#### Functions
+
+- `matching-api`
+
+#### Firestore collections
+
+- `platform-users`
+- `matching-jobs`
+- `matching-feedback`
+- `matching-saved-jobs`
+
+#### HTTPS routes
+
+- `GET /health`
+- `POST /api/sync/user-changed`
+- `POST /api/sync/jobs`
+- `POST /api/matching/matches`
+- `POST /api/matching/feedback`
+- `POST /api/matching/saved-jobs`
+- `DELETE /api/matching/saved-jobs/:userId/:jobId`
+- `GET /api/matching/jobs`
+- `GET /api/matching/jobs/:jobId`
+
+#### Secret Manager / params
+
+- `MATCHING_SYNC_API_KEY`
+- `MATCHING_SUPABASE_URL`
+- `MATCHING_SUPABASE_SERVICE_ROLE_KEY`
+- `MATCHING_OPENAI_API_KEY`
+
+## Matching Service Responsibilities
+
+`matching` currently owns:
+
+1. Supabase DB Webhook ingestion for VALET user profile sync into `platform-users`
+2. Mac Mini batch job sync ingestion into `matching-jobs` with `content_hash` diffing
+3. TypeScript filter-first job matching over Firestore job docs plus OpenAI query embeddings
+4. Feedback persistence for `like`, `dislike`, and `applied` reactions in `matching-feedback`
+5. Saved-job persistence in `matching-saved-jobs`
+6. Paginated job board browse and job detail reads from Firestore
 
 ## Outbound Service Responsibilities
 

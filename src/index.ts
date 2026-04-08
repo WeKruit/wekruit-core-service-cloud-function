@@ -1,4 +1,5 @@
 import { initializeFirebaseAdmin } from './bootstrap/firebase';
+import { matchingApi } from './services/matching/functions/http/api';
 import { outboundApi } from './services/outbound/functions/http/api';
 import { outboundRetellWebhook } from './services/outbound/functions/http/retellWebhook';
 import { outboundSendReminder } from './services/outbound/functions/tasks/sendReminder';
@@ -18,6 +19,9 @@ const firebaseExports = {
     start: {
       call: outboundStartCall,
     },
+  },
+  matching: {
+    api: matchingApi,
   },
 };
 
