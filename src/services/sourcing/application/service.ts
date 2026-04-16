@@ -1,0 +1,336 @@
+import { randomUUID } from 'node:crypto';
+
+import {
+  buildEvidenceDedupCandidate,
+  buildNameInstitutionDedupCandidate,
+} from './dedup';
+import {
+  buildNameInstitutionKey,
+  extractEvidenceFromSourceRecord,
+  stableHash,
+} from './extraction';
+import type {
+  ApprovedEntity,
+  BatchUpsertSourceRecordsInput,
+  CreateReviewLabelInput,
+  CreateSourceRunInput,
+  DedupCandidate,
+  EvidenceRecord,
+  ReviewLabelRecord,
+  SourceRecord,
+  SourceRunRecord,
+} from '../domain/records';
+import { SourcingRepository } from '../repositories/sourcingRepository';
+
+function sortedUnique(values: string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+function buildSourceRecordId(input: {
+  sourceName: string;
+  entityType: string;
+  sourceNativeId?: string;
+  sourceUrl?: string;
+  displayName?: string;
+}): string {
+  const stableKey = [
+    input.sourceName,
+    input.entityType,
+    input.sourceNativeId ?? '',
+    input.sourceUrl ?? '',
+    input.displayName ?? '',
+  ].join(':');
+  return stableHash(`source-record:${stableKey}`).slice(0, 32);
+}
+
+function stringFromRecord(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function pickDisplayField(record: {
+  display?: Record<string, unknown>;
+  rawSummary?: Record<string, unknown>;
+}, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const displayValue = stringFromRecord(record.display?.[key]);
+    if (displayValue) {
+      return displayValue;
+    }
+    const summaryValue = stringFromRecord(record.rawSummary?.[key]);
+    if (summaryValue) {
+      return summaryValue;
+    }
+  }
+  return undefined;
+}
+
+function pickDisplayName(records: SourceRecord[]): string | null {
+  return records.find((record) => Boolean(record.displayName))?.displayName ?? null;
+}
+
+function valuesFromEvidence(evidence: EvidenceRecord[], type: EvidenceRecord['evidenceType']): string[] {
+  return sortedUnique(
+    evidence
+      .filter((entry) => entry.evidenceType === type)
+      .map((entry) => entry.normalizedValue),
+  );
+}
+
+export class SourcingService {
+  constructor(private readonly repository = new SourcingRepository()) {}
+
+  async createSourceRun(input: CreateSourceRunInput): Promise<SourceRunRecord> {
+    const now = new Date().toISOString();
+    const sourceName = input.sourceName ?? input.source;
+    const sourceDomain = input.sourceDomain ?? input.domain;
+    if (!sourceName) {
+      throw new Error('sourceName or source is required.');
+    }
+    if (!sourceDomain) {
+      throw new Error('sourceDomain or domain is required.');
+    }
+    const run: SourceRunRecord = {
+      id: input.id ?? input.runId ?? randomUUID(),
+      sourceName,
+      sourceDomain,
+      pipelineName: input.pipelineName,
+      trigger: input.trigger,
+      storagePath: input.storagePath,
+      metadata: input.metadata,
+      status: 'running',
+      sourceRecordCount: 0,
+      evidenceCount: 0,
+      dedupCandidateCount: 0,
+      startedAt: input.startedAt ?? now,
+      completedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    return this.repository.createSourceRun(run);
+  }
+
+  async batchUpsertSourceRecords(input: BatchUpsertSourceRecordsInput): Promise<{
+    sourceRun: SourceRunRecord;
+    sourceRecords: SourceRecord[];
+    evidence: EvidenceRecord[];
+    dedupCandidates: DedupCandidate[];
+  }> {
+    const sourceRun = await this.repository.getSourceRun(input.runId);
+    if (!sourceRun) {
+      throw new Error(`Source run "${input.runId}" was not found.`);
+    }
+
+    const now = new Date().toISOString();
+    const sourceRecords: SourceRecord[] = input.records.map((record) => {
+      const displayName = record.displayName ?? pickDisplayField(record, ['name', 'displayName', 'display_name', 'title']);
+      const institution = record.institution ?? pickDisplayField(record, ['institution', 'affiliation']);
+      const sourceNativeId = record.sourceNativeId ?? stringFromRecord(record.rawSummary.sourceNativeId);
+      const sourceUrl = record.sourceUrl ?? stringFromRecord(record.rawSummary.sourceUrl);
+      const id =
+        record.id ??
+        record.sourceRecordId ??
+        buildSourceRecordId({
+          sourceName: sourceRun.sourceName,
+          entityType: record.entityType,
+          sourceNativeId,
+          sourceUrl,
+          displayName,
+        });
+      return {
+        ...record,
+        id,
+        sourceNativeId,
+        sourceUrl,
+        displayName,
+        institution,
+        storagePath: record.storagePath ?? record.rawStoragePath,
+        sourceRunId: sourceRun.id,
+        sourceName: sourceRun.sourceName,
+        sourceDomain: sourceRun.sourceDomain,
+        pipelineName: sourceRun.pipelineName,
+        nameInstitutionKey: buildNameInstitutionKey(displayName, institution),
+        observedAt: record.observedAt ?? now,
+        createdAt: record.createdAt ?? now,
+        updatedAt: now,
+      };
+    });
+
+    await this.repository.upsertSourceRecords(sourceRecords);
+
+    const evidence = sourceRecords.flatMap((record) => extractEvidenceFromSourceRecord(record, now));
+    await this.repository.upsertEvidence(evidence);
+
+    const dedupCandidates = await this.generateDedupCandidates(sourceRecords, evidence, now);
+
+    const updatedRun = await this.refreshRunCounts(sourceRun.id, now);
+    return {
+      sourceRun: updatedRun,
+      sourceRecords,
+      evidence,
+      dedupCandidates,
+    };
+  }
+
+  async completeSourceRun(runId: string): Promise<SourceRunRecord> {
+    const sourceRun = await this.repository.getSourceRun(runId);
+    if (!sourceRun) {
+      throw new Error(`Source run "${runId}" was not found.`);
+    }
+    const now = new Date().toISOString();
+    const withCounts = await this.refreshRunCounts(runId, now);
+    return this.repository.updateSourceRun({
+      ...withCounts,
+      status: 'completed',
+      completedAt: now,
+      updatedAt: now,
+    });
+  }
+
+  async listDedupCandidates(status?: DedupCandidate['status']): Promise<DedupCandidate[]> {
+    return this.repository.listDedupCandidates(status);
+  }
+
+  async listDedupCandidateDetails(status?: DedupCandidate['status']): Promise<Array<{
+    candidate: DedupCandidate;
+    sourceRecords: SourceRecord[];
+    evidence: EvidenceRecord[];
+  }>> {
+    const candidates = await this.repository.listDedupCandidates(status);
+    return Promise.all(
+      candidates.map(async (candidate) => ({
+        candidate,
+        sourceRecords: await this.repository.getSourceRecordsByIds(candidate.sourceRecordIds),
+        evidence: await this.repository.getEvidenceByIds(candidate.evidenceIds),
+      })),
+    );
+  }
+
+  async createReviewLabel(input: CreateReviewLabelInput): Promise<{
+    reviewLabel: ReviewLabelRecord;
+    approvedEntity: ApprovedEntity | null;
+  }> {
+    const candidate = await this.repository.getDedupCandidate(input.dedupCandidateId);
+    if (!candidate) {
+      throw new Error(`Dedup candidate "${input.dedupCandidateId}" was not found.`);
+    }
+
+    const now = new Date().toISOString();
+    const reviewLabel: ReviewLabelRecord = {
+      id: randomUUID(),
+      ...input,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await this.repository.createReviewLabel(reviewLabel);
+    await this.repository.markDedupCandidateReviewed(candidate, input.label, now);
+
+    if (input.label !== 'same_person') {
+      return { reviewLabel, approvedEntity: null };
+    }
+
+    const approvedEntity = await this.materializeApprovedEntity(candidate, reviewLabel.id, now);
+    return { reviewLabel, approvedEntity };
+  }
+
+  async listApprovedEntities(): Promise<ApprovedEntity[]> {
+    return this.repository.listApprovedEntities();
+  }
+
+  private async refreshRunCounts(runId: string, now: string): Promise<SourceRunRecord> {
+    const sourceRun = await this.repository.getSourceRun(runId);
+    if (!sourceRun) {
+      throw new Error(`Source run "${runId}" was not found.`);
+    }
+    const [sourceRecordCount, evidenceCount, dedupCandidateCount] = await Promise.all([
+      this.repository.countSourceRecordsForRun(runId),
+      this.repository.countEvidenceForRun(runId),
+      this.repository.countDedupCandidatesForRun(runId),
+    ]);
+    return this.repository.updateSourceRun({
+      ...sourceRun,
+      sourceRecordCount,
+      evidenceCount,
+      dedupCandidateCount,
+      updatedAt: now,
+    });
+  }
+
+  private async generateDedupCandidates(
+    sourceRecords: SourceRecord[],
+    evidence: EvidenceRecord[],
+    now: string,
+  ): Promise<DedupCandidate[]> {
+    const candidates = new Map<string, DedupCandidate>();
+
+    for (const evidenceEntry of evidence) {
+      const matchingEvidence = await this.repository.listEvidenceByValueHash(evidenceEntry.valueHash);
+      const matchingRecords = await this.repository.getSourceRecordsByIds(
+        sortedUnique(matchingEvidence.map((entry) => entry.sourceRecordId)),
+      );
+      const candidate = buildEvidenceDedupCandidate({
+        seed: evidenceEntry,
+        matchingEvidence,
+        recordsById: new Map(matchingRecords.map((record) => [record.id, record])),
+        now,
+      });
+      if (candidate) {
+        candidates.set(candidate.id, await this.repository.upsertDedupCandidate(candidate));
+      }
+    }
+
+    for (const sourceRecord of sourceRecords) {
+      if (!sourceRecord.nameInstitutionKey) {
+        continue;
+      }
+      const matchingRecords = await this.repository.listRecordsByNameInstitutionKey(sourceRecord.nameInstitutionKey);
+      const matchingEvidence = await this.repository.listEvidenceBySourceRecordIds(
+        matchingRecords.map((record) => record.id),
+      );
+      const candidate = buildNameInstitutionDedupCandidate({
+        nameInstitutionKey: sourceRecord.nameInstitutionKey,
+        sourceRunId: sourceRecord.sourceRunId,
+        matchingRecords,
+        evidence: matchingEvidence,
+        now,
+      });
+      if (candidate) {
+        candidates.set(candidate.id, await this.repository.upsertDedupCandidate(candidate));
+      }
+    }
+
+    return [...candidates.values()];
+  }
+
+  private async materializeApprovedEntity(
+    candidate: DedupCandidate,
+    reviewLabelId: string,
+    now: string,
+  ): Promise<ApprovedEntity> {
+    const [sourceRecords, evidence] = await Promise.all([
+      this.repository.getSourceRecordsByIds(candidate.sourceRecordIds),
+      this.repository.getEvidenceByIds(candidate.evidenceIds),
+    ]);
+    const sourceRecordIds = sortedUnique(sourceRecords.map((record) => record.id));
+    const entityId = stableHash(`approved-person:${sourceRecordIds.join(':')}`).slice(0, 32);
+
+    const approvedEntity: ApprovedEntity = {
+      id: entityId,
+      entityType: candidate.entityType,
+      status: 'approved',
+      sourceRecordIds,
+      evidenceIds: sortedUnique(evidence.map((entry) => entry.id)),
+      approvedByReviewLabelId: reviewLabelId,
+      displayName: candidate.displayName ?? pickDisplayName(sourceRecords),
+      emails: valuesFromEvidence(evidence, 'email'),
+      homepages: valuesFromEvidence(evidence, 'homepage'),
+      githubUrls: valuesFromEvidence(evidence, 'github'),
+      orcids: valuesFromEvidence(evidence, 'orcid'),
+      institutions: valuesFromEvidence(evidence, 'institution'),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    return this.repository.upsertApprovedEntity(approvedEntity);
+  }
+}

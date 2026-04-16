@@ -7,6 +7,7 @@ It is designed to host multiple services, not just `outbound`.
 Current live service scope:
 
 - `outbound`
+- `sourcing`
 
 Current Firebase projects:
 
@@ -88,6 +89,12 @@ src/
       functions/
         http/
         tasks/
+    sourcing/
+      application/
+      domain/
+      repositories/
+      functions/
+        http/
 ```
 
 ### Layer meanings
@@ -150,6 +157,29 @@ For any service named `<service-name>`:
 - `OUTBOUND_BOOKING_LEAD_HOURS`
 - `OUTBOUND_BOOKING_REMINDER_HOURS`
 
+### Current sourcing resources
+
+#### Functions
+
+- `sourcing-api`
+
+#### Firestore collections
+
+- `sourcing-source-runs`
+- `sourcing-source-records`
+- `sourcing-evidence`
+- `sourcing-dedup-candidates`
+- `sourcing-review-labels`
+- `sourcing-approved-entities`
+
+#### Hosting rewrite
+
+- `/api/sourcing/**` -> `sourcing-api`
+
+#### Cloud Tasks queues
+
+- `sourcing-materialize-approved-entity`
+
 ## Runtime Export Model
 
 `src/index.ts` is the repo-level runtime registry.
@@ -170,10 +200,19 @@ export = {
       call: outboundStartCall,
     },
   },
+  sourcing: {
+    api: sourcingApi,
+  },
 };
 ```
 
-When a second service is added, it must appear here as a second top-level key.
+Each service must appear as a top-level key.
+
+`CORE_SERVICE_EXPORT_MODE` can limit exports during isolated deploys:
+
+- `sourcing` exports only `sourcing-api`
+- `outbound` exports only outbound functions
+- unset exports all services
 
 ## Outbound Service Flow
 
@@ -210,6 +249,16 @@ When a second service is added, it must appear here as a second top-level key.
 5. The booking is updated with `retellCallId`.
 6. Retell later posts webhook events to `outbound-retell-webhook`.
 7. Webhook data is persisted into `outbound-call-artifacts`.
+
+## Sourcing Service Flow
+
+1. A local scraping worker converts source-specific JSONL into generic source records.
+2. The worker creates a `sourcing-source-runs` record through `POST /api/sourcing/source-runs`.
+3. The worker uploads batches through `POST /api/sourcing/source-records:batchUpsert`.
+4. `sourcing-api` stores `sourcing-source-records` and extracts `sourcing-fact-evidence`.
+5. Exact identity evidence such as email, ORCID, GitHub, DBLP, OpenReview, Google Scholar, or homepage creates `sourcing-dedup-candidates`.
+6. An operator reviews each candidate in the static Hosting console and submits a `sourcing-review-labels` decision.
+7. A `same_person` decision materializes a `sourcing-approved-entities` record for later outbound use.
 
 ## Data Model Principles
 
