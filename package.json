@@ -5,6 +5,7 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
+    "build:sourcing-bundle": "npm run build && node scripts/build-sourcing-functions-bundle.mjs",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
     "serve:web": "firebase emulators:start --only hosting",
     "serve:web:full": "npm run build && firebase emulators:start --only hosting,functions,firestore",

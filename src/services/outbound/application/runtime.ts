@@ -1,6 +1,14 @@
 import {
   outboundAdminApiKey,
   outboundAppBaseUrl,
+  outboundGoogleServiceAccountEmail,
+  outboundGoogleServiceAccountPrivateKey,
+  outboundMailgunApiKey,
+  outboundMailgunDomain,
+  outboundMailgunFromEmail,
+  outboundRetellApiKey,
+} from '../../../bootstrap/outboundSecrets';
+import {
   outboundAppTimezone,
   outboundBookingHorizonDays,
   outboundBookingLeadHours,
@@ -8,12 +16,6 @@ import {
   outboundBookingSlotMinutes,
   outboundBookingWorkdayEndHour,
   outboundBookingWorkdayStartHour,
-  outboundGoogleServiceAccountEmail,
-  outboundGoogleServiceAccountPrivateKey,
-  outboundMailgunApiKey,
-  outboundMailgunDomain,
-  outboundMailgunFromEmail,
-  outboundRetellApiKey,
 } from '../../../bootstrap/secrets';
 
 export interface OutboundRuntimeConfig {

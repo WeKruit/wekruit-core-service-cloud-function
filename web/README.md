@@ -58,6 +58,16 @@ npm run deploy:web:production
 Do not use `npm run deploy:web:production` until the backend sourcing API exists
 and the operator API base URL is confirmed.
 
+For staging review work, prefer a Firebase Hosting preview channel so this
+console does not overwrite another shared default site:
+
+```bash
+npx firebase-tools hosting:channel:deploy sourcing-review \
+  --config firebase.sourcing.json \
+  --project staging \
+  --expires 7d
+```
+
 ## Hosting Rewrite
 
 `firebase.json` rewrites `/api/sourcing/**` to the nested Firebase Function

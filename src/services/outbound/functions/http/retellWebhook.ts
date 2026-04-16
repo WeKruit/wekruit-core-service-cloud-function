@@ -1,6 +1,6 @@
 import { onRequest } from 'firebase-functions/v2/https';
 
-import { outboundSecrets } from '../../../../bootstrap/secrets';
+import { outboundSecrets } from '../../../../bootstrap/outboundSecrets';
 import { jsonError, verifyRetellWebhookSignature } from '../../application/http';
 import { getOutboundRuntimeConfig } from '../../application/runtime';
 import { OutboundBookingRepository } from '../../repositories/bookingRepository';

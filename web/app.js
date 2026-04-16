@@ -4,6 +4,10 @@ const elements = {
   apiBaseUrl: document.querySelector("#apiBaseUrl"),
   saveSettingsButton: document.querySelector("#saveSettingsButton"),
   connectionStatus: document.querySelector("#connectionStatus"),
+  apiBaseMetric: document.querySelector("#apiBaseMetric"),
+  runMetric: document.querySelector("#runMetric"),
+  recordMetric: document.querySelector("#recordMetric"),
+  candidateMetric: document.querySelector("#candidateMetric"),
   sourceRunSourceName: document.querySelector("#sourceRunSourceName"),
   sourceRunDomain: document.querySelector("#sourceRunDomain"),
   sourceRunPipeline: document.querySelector("#sourceRunPipeline"),
@@ -36,10 +40,26 @@ function setConnectionStatus(message, state = "idle") {
   document.body.dataset.connection = state;
 }
 
+function setMetric(target, value) {
+  target.textContent = value;
+}
+
+function updateDashboard() {
+  setMetric(elements.apiBaseMetric, getApiBaseUrl() || "Not set");
+  setMetric(elements.runMetric, elements.runId.value.trim() || "No run");
+
+  try {
+    setMetric(elements.recordMetric, String(parseJsonl(elements.jsonlInput.value).length));
+  } catch {
+    setMetric(elements.recordMetric, "Invalid");
+  }
+}
+
 function saveSettings() {
   const apiBaseUrl = getApiBaseUrl();
   localStorage.setItem(STORAGE_KEY, apiBaseUrl);
   setConnectionStatus(apiBaseUrl ? "API base saved" : "API base missing", apiBaseUrl ? "ready" : "idle");
+  updateDashboard();
 }
 
 function joinUrl(base, path) {
@@ -48,6 +68,10 @@ function joinUrl(base, path) {
 }
 
 function parseJsonl(input) {
+  if (!input.trim()) {
+    return [];
+  }
+
   return input
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -130,6 +154,7 @@ async function handleFileSelection(event) {
   if (!file) {
     return;
   }
+
   const text = await file.text();
   if (file.name.toLowerCase().endsWith(".csv") || file.type === "text/csv") {
     const records = csvToSourceRecords(text);
@@ -138,6 +163,7 @@ async function handleFileSelection(event) {
     elements.jsonlInput.value = text;
   }
   updateUploadCurlPreview();
+  updateDashboard();
 }
 
 function parseCsv(text) {
@@ -229,6 +255,8 @@ function csvToSourceRecords(text) {
         linkedin: pickFirst(raw, ["linkedin_url", "member_linkedin"]),
         devpost: pickFirst(raw, ["member_devpost", "project_url"]),
         projectUrl: pickFirst(raw, ["project_url"]),
+        orcid: pickFirst(raw, ["orcid", "orcid_id"]),
+        homepage: pickFirst(raw, ["homepage", "website", "member_website", "blog"]),
         score: pickFirst(raw, ["score", "score_total"]),
       }),
       raw,
@@ -266,6 +294,7 @@ async function uploadRecords() {
     if (!elements.runId.value.trim()) {
       throw new Error("Set source run ID first. Create it with POST /source-runs.");
     }
+
     const endpoint = elements.uploadEndpoint.value.trim();
     const body = buildUploadBody();
     updateUploadCurlPreview();
@@ -276,6 +305,8 @@ async function uploadRecords() {
     });
     setConnectionStatus("Upload API reachable", "ready");
     renderJson(elements.uploadResult, result ?? { ok: true });
+    updateDashboard();
+    await refreshCandidates();
   } catch (error) {
     setConnectionStatus("Upload failed; curl fallback ready", "error");
     renderJson(elements.uploadResult, error.message);
@@ -299,6 +330,7 @@ async function createSourceRun() {
     if (runId) {
       elements.runId.value = runId;
       updateUploadCurlPreview();
+      updateDashboard();
     }
     setConnectionStatus("Source run created", "ready");
     renderJson(elements.sourceRunResult, result ?? { ok: true });
@@ -333,9 +365,57 @@ function normalizeListPayload(payload) {
   return payload ? [payload] : [];
 }
 
-function renderCards(container, items, emptyText, onSelect) {
+function renderEvidenceList(evidence) {
+  if (!evidence.length) {
+    return `<p class="empty-copy">No extracted evidence attached.</p>`;
+  }
+
+  return `
+    <ul class="evidence-list">
+      ${evidence
+        .map(
+          (entry) => `
+            <li>
+              <span class="evidence-type">${escapeHtml(entry.evidenceType || "evidence")}</span>
+              <strong>${escapeHtml(entry.normalizedValue || entry.rawValue || "unknown")}</strong>
+              <small>${escapeHtml(entry.quality || "unknown")} quality</small>
+            </li>
+          `,
+        )
+        .join("")}
+    </ul>
+  `;
+}
+
+function renderSourceRecordList(records) {
+  if (!records.length) {
+    return `<p class="empty-copy">No source records attached.</p>`;
+  }
+
+  return `
+    <ul class="record-list">
+      ${records
+        .map((record) => {
+          const title = record.displayName || record.display?.name || record.display?.title || record.sourceNativeId || record.id;
+          const subtitle = [record.sourceName, record.institution || record.display?.institution, record.entityType]
+            .filter(Boolean)
+            .join(" · ");
+          return `
+            <li>
+              <strong>${escapeHtml(title || "Unnamed record")}</strong>
+              <small>${escapeHtml(subtitle || "No summary")}</small>
+            </li>
+          `;
+        })
+        .join("")}
+    </ul>
+  `;
+}
+
+function renderCandidateCards(container, items, emptyText) {
   container.innerHTML = "";
   container.classList.toggle("empty", items.length === 0);
+  setMetric(elements.candidateMetric, String(items.length));
 
   if (items.length === 0) {
     container.textContent = emptyText;
@@ -344,20 +424,95 @@ function renderCards(container, items, emptyText, onSelect) {
 
   for (const item of items) {
     const candidate = item.candidate || item;
-    const id = candidate.id || candidate.dedupCandidateId || candidate.approvedEntityId || candidate.sourceRecordId || "unknown-id";
-    const card = document.createElement("button");
-    card.className = "record-card";
-    card.type = "button";
+    const id = candidate.id || candidate.dedupCandidateId || "unknown-id";
+    const reasons = Array.isArray(candidate.reasonCodes) ? candidate.reasonCodes : [];
+    const evidence = Array.isArray(item.evidence) ? item.evidence : [];
+    const sourceRecords = Array.isArray(item.sourceRecords) ? item.sourceRecords : [];
+    const card = document.createElement("article");
+    card.className = "candidate-card";
     card.innerHTML = `
-      <span class="record-id">${escapeHtml(id)}</span>
-      <span class="record-meta">${escapeHtml(candidate.status || candidate.entityType || candidate.label || "record")}</span>
-      <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+      <div class="candidate-header">
+        <div>
+          <p class="candidate-title">${escapeHtml(candidate.displayName || sourceRecords[0]?.displayName || "Unnamed candidate")}</p>
+          <p class="candidate-subtitle">${escapeHtml(id)}</p>
+        </div>
+        <div class="candidate-tags">
+          <span class="pill">${escapeHtml(candidate.status || "pending_review")}</span>
+          <span class="pill pill-soft">${escapeHtml(candidate.strength || "unknown")} strength</span>
+        </div>
+      </div>
+      <div class="reason-row">
+        ${reasons.length ? reasons.map((reason) => `<span class="reason-chip">${escapeHtml(reason)}</span>`).join("") : '<span class="reason-chip">no reason codes</span>'}
+      </div>
+      <section class="candidate-section">
+        <h4>Why we think these may be the same person</h4>
+        ${renderEvidenceList(evidence)}
+      </section>
+      <section class="candidate-section">
+        <h4>Source records in this merge group</h4>
+        ${renderSourceRecordList(sourceRecords)}
+      </section>
+      <div class="candidate-actions">
+        <button type="button" data-select-candidate="${escapeHtml(id)}">Review this candidate</button>
+      </div>
+      <details class="response-box">
+        <summary>Raw payload</summary>
+        <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+      </details>
     `;
-    if (onSelect) {
-      card.addEventListener("click", () => onSelect(item, id));
-    }
+    card.querySelector("[data-select-candidate]")?.addEventListener("click", () => {
+      elements.dedupCandidateId.value = id;
+      elements.reviewNotes.focus();
+    });
     container.append(card);
   }
+}
+
+function renderApprovedCards(container, items, emptyText) {
+  container.innerHTML = "";
+  container.classList.toggle("empty", items.length === 0);
+
+  if (items.length === 0) {
+    container.textContent = emptyText;
+    return;
+  }
+
+  for (const entity of items) {
+    const card = document.createElement("article");
+    card.className = "approved-card";
+    card.innerHTML = `
+      <div class="candidate-header">
+        <div>
+          <p class="candidate-title">${escapeHtml(entity.displayName || entity.id || "Approved entity")}</p>
+          <p class="candidate-subtitle">${escapeHtml(entity.id || "unknown-id")}</p>
+        </div>
+        <div class="candidate-tags">
+          <span class="pill">${escapeHtml(entity.entityType || "entity")}</span>
+          <span class="pill pill-soft">${escapeHtml(String(entity.sourceRecordIds?.length || 0))} records</span>
+        </div>
+      </div>
+      <div class="approved-grid">
+        ${renderApprovedField("Emails", entity.emails)}
+        ${renderApprovedField("Homepages", entity.homepages)}
+        ${renderApprovedField("GitHub", entity.githubUrls)}
+        ${renderApprovedField("ORCID", entity.orcids)}
+        ${renderApprovedField("Institutions", entity.institutions)}
+      </div>
+    `;
+    container.append(card);
+  }
+}
+
+function renderApprovedField(label, values) {
+  const rendered = Array.isArray(values) && values.length
+    ? values.map((value) => `<li>${escapeHtml(value)}</li>`).join("")
+    : "<li>None</li>";
+  return `
+    <section class="approved-field">
+      <h4>${escapeHtml(label)}</h4>
+      <ul>${rendered}</ul>
+    </section>
+  `;
 }
 
 function escapeHtml(value) {
@@ -375,13 +530,12 @@ async function refreshCandidates() {
     const payload = await requestJson("/dedup-candidates?status=pending_review&include=details");
     const items = normalizeListPayload(payload);
     setConnectionStatus("Review API reachable", "ready");
-    renderCards(elements.candidateList, items, "No pending dedup candidates.", (_item, id) => {
-      elements.dedupCandidateId.value = id;
-    });
+    renderCandidateCards(elements.candidateList, items, "No pending dedup candidates.");
   } catch (error) {
     setConnectionStatus("Review queue failed", "error");
     elements.candidateList.classList.add("empty");
     elements.candidateList.textContent = error.message;
+    setMetric(elements.candidateMetric, "0");
   }
 }
 
@@ -401,6 +555,7 @@ async function submitReview(event) {
     });
     setConnectionStatus("Review label submitted", "ready");
     renderJson(elements.reviewResult, result ?? { ok: true });
+    await Promise.all([refreshCandidates(), refreshApprovedEntities()]);
   } catch (error) {
     setConnectionStatus("Review submission failed", "error");
     renderJson(elements.reviewResult, {
@@ -416,7 +571,7 @@ async function refreshApprovedEntities() {
     const payload = await requestJson("/approved-entities");
     const items = normalizeListPayload(payload);
     setConnectionStatus("Approved entities API reachable", "ready");
-    renderCards(elements.approvedList, items, "No approved entities found.");
+    renderApprovedCards(elements.approvedList, items, "No approved entities found.");
   } catch (error) {
     setConnectionStatus("Approved entities failed", "error");
     elements.approvedList.classList.add("empty");
@@ -424,21 +579,45 @@ async function refreshApprovedEntities() {
   }
 }
 
+async function checkHealth() {
+  try {
+    await requestJson("/health");
+    setConnectionStatus("API reachable", "ready");
+  } catch (error) {
+    setConnectionStatus(`API check failed: ${error.message}`, "error");
+  }
+}
+
 function boot() {
   elements.apiBaseUrl.value = localStorage.getItem(STORAGE_KEY) || "/api/sourcing";
-  setConnectionStatus(elements.apiBaseUrl.value ? "API base loaded" : "API base missing", elements.apiBaseUrl.value ? "ready" : "idle");
   updateUploadCurlPreview();
+  updateDashboard();
+  setConnectionStatus(elements.apiBaseUrl.value ? "API base loaded" : "API base missing", elements.apiBaseUrl.value ? "ready" : "idle");
 
   elements.saveSettingsButton.addEventListener("click", saveSettings);
-  elements.apiBaseUrl.addEventListener("input", updateUploadCurlPreview);
+  elements.apiBaseUrl.addEventListener("input", () => {
+    updateUploadCurlPreview();
+    updateDashboard();
+  });
+  elements.runId.addEventListener("input", () => {
+    updateUploadCurlPreview();
+    updateDashboard();
+  });
+  elements.jsonlInput.addEventListener("input", () => {
+    updateUploadCurlPreview();
+    updateDashboard();
+  });
   elements.createRunButton.addEventListener("click", createSourceRun);
   elements.uploadEndpoint.addEventListener("input", updateUploadCurlPreview);
-  elements.jsonlInput.addEventListener("input", updateUploadCurlPreview);
   elements.jsonlFile.addEventListener("change", handleFileSelection);
   elements.uploadButton.addEventListener("click", uploadRecords);
   elements.refreshCandidatesButton.addEventListener("click", refreshCandidates);
   elements.reviewForm.addEventListener("submit", submitReview);
   elements.refreshApprovedButton.addEventListener("click", refreshApprovedEntities);
+
+  checkHealth().then(() => Promise.all([refreshCandidates(), refreshApprovedEntities()])).catch(() => {
+    setMetric(elements.candidateMetric, "0");
+  });
 }
 
 boot();

@@ -161,6 +161,30 @@ export class SourcingRepository {
     return reviewed;
   }
 
+  async markDedupCandidatesReviewed(
+    candidates: DedupCandidate[],
+    status: DedupCandidate['status'],
+    now = new Date().toISOString(),
+  ): Promise<DedupCandidate[]> {
+    if (candidates.length === 0) {
+      return [];
+    }
+
+    const batch = this.db.batch();
+    const reviewed = candidates.map((candidate) => ({
+      ...candidate,
+      status,
+      updatedAt: now,
+    }));
+
+    for (const candidate of reviewed) {
+      batch.set(this.dedupCandidateCollection.doc(candidate.id), candidate);
+    }
+
+    await batch.commit();
+    return reviewed;
+  }
+
   async upsertApprovedEntity(entity: ApprovedEntity): Promise<ApprovedEntity> {
     await this.approvedEntityCollection.doc(entity.id).set(entity);
     return entity;

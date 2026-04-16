@@ -77,6 +77,16 @@ project env file:
 - unset exports every service
 
 This keeps a sourcing-only deploy from requiring outbound Secret Manager values.
+Use `firebase.sourcing.json` for sourcing-only deploys; it builds a generated
+`deploy/sourcing-functions` bundle containing only `sourcing-api` dependencies,
+so outbound Secret Manager params are not registered during Firebase analysis.
+
+For the web review console, do not assume the shared default site
+`wekruit-dev-env.web.app` is dedicated to sourcing. Use a preview channel or a
+dedicated Hosting site/target for sourcing review. Current staging preview
+pattern:
+
+- `firebase hosting:channel:deploy sourcing-review --config firebase.sourcing.json --project staging`
 
 ## Directory Contract
 

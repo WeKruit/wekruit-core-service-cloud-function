@@ -4,7 +4,7 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { DateTime } from 'luxon';
 import { z } from 'zod';
 
-import { outboundSecrets } from '../../../../bootstrap/secrets';
+import { outboundSecrets } from '../../../../bootstrap/outboundSecrets';
 import {
   adminCreateDispatchProfileSchema,
   adminInviteRequestSchema,

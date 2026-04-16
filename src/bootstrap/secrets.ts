@@ -1,15 +1,4 @@
-import { defineInt, defineSecret, defineString } from 'firebase-functions/params';
-
-export const outboundAdminApiKey = defineSecret('OUTBOUND_ADMIN_API_KEY');
-export const outboundRetellApiKey = defineSecret('OUTBOUND_RETELL_API_KEY');
-export const outboundMailgunApiKey = defineSecret('OUTBOUND_MAILGUN_API_KEY');
-export const outboundMailgunDomain = defineSecret('OUTBOUND_MAILGUN_DOMAIN');
-export const outboundMailgunFromEmail = defineSecret('OUTBOUND_MAILGUN_FROM_EMAIL');
-export const outboundGoogleServiceAccountEmail = defineSecret('OUTBOUND_GOOGLE_SERVICE_ACCOUNT_EMAIL');
-export const outboundGoogleServiceAccountPrivateKey = defineSecret(
-  'OUTBOUND_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY',
-);
-export const outboundAppBaseUrl = defineSecret('OUTBOUND_APP_BASE_URL');
+import { defineInt, defineString } from 'firebase-functions/params';
 
 export const outboundAppTimezone = defineString('OUTBOUND_APP_TIMEZONE', {
   default: 'America/Chicago',
@@ -32,14 +21,3 @@ export const outboundBookingLeadHours = defineInt('OUTBOUND_BOOKING_LEAD_HOURS',
 export const outboundBookingReminderHours = defineInt('OUTBOUND_BOOKING_REMINDER_HOURS', {
   default: 12,
 });
-
-export const outboundSecrets = [
-  outboundAdminApiKey,
-  outboundRetellApiKey,
-  outboundMailgunApiKey,
-  outboundMailgunDomain,
-  outboundMailgunFromEmail,
-  outboundGoogleServiceAccountEmail,
-  outboundGoogleServiceAccountPrivateKey,
-  outboundAppBaseUrl
-];

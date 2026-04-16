@@ -76,6 +76,68 @@ function valuesFromEvidence(evidence: EvidenceRecord[], type: EvidenceRecord['ev
   );
 }
 
+const dedupStrengthRank: Record<DedupCandidate['strength'], number> = {
+  weak: 0,
+  medium: 1,
+  strong: 2,
+};
+
+const dedupStatusRank: Record<DedupCandidate['status'], number> = {
+  suppressed: 0,
+  pending_review: 1,
+  unsure: 2,
+  not_same_person: 3,
+  same_person: 4,
+};
+
+function buildCandidateGroupId(candidate: Pick<DedupCandidate, 'entityType' | 'sourceRecordIds'>): string {
+  return stableHash(`dedup-group:${candidate.entityType}:${sortedUnique(candidate.sourceRecordIds).join(':')}`).slice(0, 32);
+}
+
+function buildCandidateGroupKey(candidate: Pick<DedupCandidate, 'entityType' | 'sourceRecordIds'>): string {
+  return `${candidate.entityType}:${sortedUnique(candidate.sourceRecordIds).join(':')}`;
+}
+
+function aggregateDedupCandidates(candidates: DedupCandidate[]): DedupCandidate[] {
+  const groups = new Map<string, DedupCandidate>();
+
+  for (const candidate of candidates) {
+    const key = buildCandidateGroupKey(candidate);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        ...candidate,
+        id: buildCandidateGroupId(candidate),
+        reasonCodes: sortedUnique(candidate.reasonCodes),
+        evidenceIds: sortedUnique(candidate.evidenceIds),
+        valueHashes: sortedUnique(candidate.valueHashes),
+      });
+      continue;
+    }
+
+    groups.set(key, {
+      ...existing,
+      id: buildCandidateGroupId(existing),
+      status:
+        dedupStatusRank[candidate.status] > dedupStatusRank[existing.status]
+          ? candidate.status
+          : existing.status,
+      strength:
+        dedupStrengthRank[candidate.strength] > dedupStrengthRank[existing.strength]
+          ? candidate.strength
+          : existing.strength,
+      reasonCodes: sortedUnique([...existing.reasonCodes, ...candidate.reasonCodes]),
+      evidenceIds: sortedUnique([...existing.evidenceIds, ...candidate.evidenceIds]),
+      valueHashes: sortedUnique([...existing.valueHashes, ...candidate.valueHashes]),
+      displayName: existing.displayName ?? candidate.displayName,
+      createdAt: existing.createdAt.localeCompare(candidate.createdAt) <= 0 ? existing.createdAt : candidate.createdAt,
+      updatedAt: existing.updatedAt.localeCompare(candidate.updatedAt) >= 0 ? existing.updatedAt : candidate.updatedAt,
+    });
+  }
+
+  return [...groups.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
 export class SourcingService {
   constructor(private readonly repository = new SourcingRepository()) {}
 
@@ -187,7 +249,8 @@ export class SourcingService {
   }
 
   async listDedupCandidates(status?: DedupCandidate['status']): Promise<DedupCandidate[]> {
-    return this.repository.listDedupCandidates(status);
+    const candidates = await this.repository.listDedupCandidates(status);
+    return aggregateDedupCandidates(candidates);
   }
 
   async listDedupCandidateDetails(status?: DedupCandidate['status']): Promise<Array<{
@@ -195,7 +258,7 @@ export class SourcingService {
     sourceRecords: SourceRecord[];
     evidence: EvidenceRecord[];
   }>> {
-    const candidates = await this.repository.listDedupCandidates(status);
+    const candidates = aggregateDedupCandidates(await this.repository.listDedupCandidates(status));
     return Promise.all(
       candidates.map(async (candidate) => ({
         candidate,
@@ -209,10 +272,11 @@ export class SourcingService {
     reviewLabel: ReviewLabelRecord;
     approvedEntity: ApprovedEntity | null;
   }> {
-    const candidate = await this.repository.getDedupCandidate(input.dedupCandidateId);
-    if (!candidate) {
+    const resolved = await this.resolveDedupCandidateGroup(input.dedupCandidateId);
+    if (!resolved) {
       throw new Error(`Dedup candidate "${input.dedupCandidateId}" was not found.`);
     }
+    const { candidate, rawCandidates } = resolved;
 
     const now = new Date().toISOString();
     const reviewLabel: ReviewLabelRecord = {
@@ -223,7 +287,7 @@ export class SourcingService {
     };
 
     await this.repository.createReviewLabel(reviewLabel);
-    await this.repository.markDedupCandidateReviewed(candidate, input.label, now);
+    await this.repository.markDedupCandidatesReviewed(rawCandidates, input.label, now);
 
     if (input.label !== 'same_person') {
       return { reviewLabel, approvedEntity: null };
@@ -261,7 +325,7 @@ export class SourcingService {
     evidence: EvidenceRecord[],
     now: string,
   ): Promise<DedupCandidate[]> {
-    const candidates = new Map<string, DedupCandidate>();
+    const generated: DedupCandidate[] = [];
 
     for (const evidenceEntry of evidence) {
       const matchingEvidence = await this.repository.listEvidenceByValueHash(evidenceEntry.valueHash);
@@ -275,7 +339,7 @@ export class SourcingService {
         now,
       });
       if (candidate) {
-        candidates.set(candidate.id, await this.repository.upsertDedupCandidate(candidate));
+        generated.push(candidate);
       }
     }
 
@@ -295,11 +359,48 @@ export class SourcingService {
         now,
       });
       if (candidate) {
-        candidates.set(candidate.id, await this.repository.upsertDedupCandidate(candidate));
+        generated.push(candidate);
       }
     }
 
-    return [...candidates.values()];
+    const groupedCandidates = aggregateDedupCandidates(generated);
+    return Promise.all(
+      groupedCandidates.map((candidate) => this.repository.upsertDedupCandidate(candidate)),
+    );
+  }
+
+  private async resolveDedupCandidateGroup(
+    candidateId: string,
+  ): Promise<{ candidate: DedupCandidate; rawCandidates: DedupCandidate[] } | null> {
+    const allCandidates = await this.repository.listDedupCandidates();
+    const direct = allCandidates.find((candidate) => candidate.id === candidateId);
+
+    if (direct) {
+      const groupKey = buildCandidateGroupKey(direct);
+      const rawCandidates = allCandidates.filter((candidate) => buildCandidateGroupKey(candidate) === groupKey);
+      return {
+        candidate: aggregateDedupCandidates(rawCandidates)[0] ?? {
+          ...direct,
+          id: buildCandidateGroupId(direct),
+        },
+        rawCandidates,
+      };
+    }
+
+    const groupedCandidate = aggregateDedupCandidates(allCandidates).find(
+      (candidate) => candidate.id === candidateId,
+    );
+    if (!groupedCandidate) {
+      return null;
+    }
+
+    const rawCandidates = allCandidates.filter(
+      (candidate) => buildCandidateGroupKey(candidate) === buildCandidateGroupKey(groupedCandidate),
+    );
+    return {
+      candidate: groupedCandidate,
+      rawCandidates,
+    };
   }
 
   private async materializeApprovedEntity(
@@ -309,7 +410,7 @@ export class SourcingService {
   ): Promise<ApprovedEntity> {
     const [sourceRecords, evidence] = await Promise.all([
       this.repository.getSourceRecordsByIds(candidate.sourceRecordIds),
-      this.repository.getEvidenceByIds(candidate.evidenceIds),
+      this.repository.listEvidenceBySourceRecordIds(candidate.sourceRecordIds),
     ]);
     const sourceRecordIds = sortedUnique(sourceRecords.map((record) => record.id));
     const entityId = stableHash(`approved-person:${sourceRecordIds.join(':')}`).slice(0, 32);

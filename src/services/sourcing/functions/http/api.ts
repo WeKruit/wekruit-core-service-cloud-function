@@ -24,13 +24,16 @@ function jsonError(
   res.status(status).json({ error: { message } });
 }
 
-app.get('/health', (_req, res) => {
+function sendHealth(_req: express.Request, res: express.Response) {
   res.status(200).json({
     ok: true,
     service: 'sourcing',
     runtime: 'firebase-functions',
   });
-});
+}
+
+app.get('/health', sendHealth);
+app.get('/api/sourcing/health', sendHealth);
 
 app.post('/api/sourcing/source-runs', async (req, res, next) => {
   try {

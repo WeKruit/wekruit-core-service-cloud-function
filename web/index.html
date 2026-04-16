@@ -9,27 +9,69 @@
   <body>
     <header class="hero">
       <div>
-        <p class="eyebrow">WeKruit Core Service</p>
-        <h1>Sourcing review console</h1>
+        <p class="eyebrow">WeKruit Sourcing Service</p>
+        <h1>Review queue for scraped people</h1>
         <p class="lede">
-          Upload source records, inspect dedup candidates, submit review labels,
-          and view approved sourcing entities.
+          Upload pipeline output, inspect why records may be the same person,
+          approve or reject the merge, then store only reviewed entities.
         </p>
       </div>
-      <div class="status-card">
+      <div class="status-card" aria-live="polite">
         <span class="status-dot" aria-hidden="true"></span>
         <span id="connectionStatus">API not checked</span>
       </div>
     </header>
 
     <main class="shell">
+      <section class="workflow" aria-label="Sourcing workflow">
+        <div class="workflow-card">
+          <span>1</span>
+          <strong>Connect API</strong>
+          <small>Hosting rewrite or local emulator</small>
+        </div>
+        <div class="workflow-card">
+          <span>2</span>
+          <strong>Create run</strong>
+          <small>Every import gets a source run</small>
+        </div>
+        <div class="workflow-card">
+          <span>3</span>
+          <strong>Upload records</strong>
+          <small>JSONL or CSV from any pipeline</small>
+        </div>
+        <div class="workflow-card">
+          <span>4</span>
+          <strong>Review merges</strong>
+          <small>Evidence first, raw JSON last</small>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="Current state">
+        <article>
+          <span>API base</span>
+          <strong id="apiBaseMetric">Not set</strong>
+        </article>
+        <article>
+          <span>Current run</span>
+          <strong id="runMetric">No run</strong>
+        </article>
+        <article>
+          <span>Prepared records</span>
+          <strong id="recordMetric">0</strong>
+        </article>
+        <article>
+          <span>Pending review</span>
+          <strong id="candidateMetric">0</strong>
+        </article>
+      </section>
+
       <section class="panel settings-panel" aria-labelledby="settingsTitle">
         <div class="section-heading">
           <div>
             <p class="eyebrow">Connection</p>
             <h2 id="settingsTitle">API target</h2>
           </div>
-          <button id="saveSettingsButton" type="button">Save</button>
+          <button id="saveSettingsButton" type="button">Save target</button>
         </div>
         <label for="apiBaseUrl">API base URL</label>
         <input
@@ -39,28 +81,29 @@
           placeholder="/api/sourcing or http://127.0.0.1:5101/<project>/us-central1/sourcing-api/api/sourcing"
         />
         <p class="hint">
-          Use <code>/api/sourcing</code> on Hosting after the rewrite is active,
-          or the full local Function URL in emulator mode.
+          Default is <code>/api/sourcing</code> on Firebase Hosting. Use the full
+          emulator Function URL only when running the static page without the
+          Hosting rewrite.
         </p>
       </section>
 
-      <section class="grid">
-        <article class="panel upload-panel" aria-labelledby="uploadTitle">
+      <section class="board">
+        <article class="panel import-panel" aria-labelledby="importTitle">
           <div class="section-heading">
             <div>
               <p class="eyebrow">Ingest</p>
-              <h2 id="uploadTitle">Upload JSONL source records</h2>
+              <h2 id="importTitle">Create run and upload records</h2>
             </div>
-            <button id="uploadButton" type="button">POST records</button>
+            <button id="uploadButton" type="button">Upload records</button>
           </div>
 
-          <div class="create-run-box">
+          <div class="run-card">
             <div class="section-heading compact-heading">
               <div>
-                <p class="eyebrow">Step 1</p>
-                <h3>Create source run</h3>
+                <p class="eyebrow">Run metadata</p>
+                <h3>Source run</h3>
               </div>
-              <button id="createRunButton" type="button">POST run</button>
+              <button id="createRunButton" type="button">Create run</button>
             </div>
             <div class="mini-grid">
               <label for="sourceRunSourceName">
@@ -76,12 +119,14 @@
                 <input id="sourceRunPipeline" value="local-jsonl-upload" />
               </label>
             </div>
-            <pre id="sourceRunResult">Create a source run before uploading records.</pre>
+            <details class="response-box">
+              <summary>Run API response</summary>
+              <pre id="sourceRunResult">Create a source run before uploading records.</pre>
+            </details>
           </div>
 
-          <p class="eyebrow step-label">Step 2</p>
           <label for="runId">Source run ID</label>
-          <input id="runId" placeholder="Create a run through POST /source-runs first" />
+          <input id="runId" placeholder="Created automatically, or paste an existing run ID" />
 
           <label for="uploadEndpoint">Batch endpoint</label>
           <input id="uploadEndpoint" value="/source-records:batchUpsert" />
@@ -89,72 +134,76 @@
           <label for="jsonlFile">JSONL or CSV file</label>
           <input id="jsonlFile" type="file" accept=".jsonl,.csv,.txt,application/jsonl,text/csv,text/plain" />
 
-          <label for="jsonlInput">JSONL payload</label>
+          <label for="jsonlInput">Prepared source records</label>
           <textarea
             id="jsonlInput"
-            rows="12"
+            rows="10"
             spellcheck="false"
             placeholder='{"sourceNativeId":"A123","entityType":"person","displayName":"Ada Lovelace","institution":"Analytical Engine Lab","rawSummary":{"email":"ada@example.edu","orcid":"0000-0000-0000-000X"},"display":{"homepage":"https://example.edu/ada"},"raw":{}}'
           ></textarea>
           <p class="hint">
-            CSV uploads are converted in-browser into generic source records.
-            Headers such as <code>email</code>, <code>github_url</code>,
-            <code>member_github</code>, <code>linkedin_url</code>,
-            <code>project_url</code>, <code>name</code>, and
-            <code>project_name</code> become searchable evidence.
+            CSV is converted in-browser into source records. Evidence keys such
+            as <code>email</code>, <code>github_url</code>, <code>orcid</code>,
+            <code>homepage</code>, <code>linkedin_url</code>, and
+            <code>project_url</code> are extracted for merge reasoning.
           </p>
 
-          <div class="result-stack">
-            <h3>Upload result</h3>
+          <details class="response-box" open>
+            <summary>Upload result</summary>
             <pre id="uploadResult">Waiting for upload.</pre>
-            <h3>Fallback curl</h3>
+          </details>
+          <details class="response-box">
+            <summary>Fallback curl</summary>
             <pre id="uploadCurl">Generated after payload is available.</pre>
-          </div>
+          </details>
         </article>
 
-        <article class="panel review-panel" aria-labelledby="reviewTitle">
+        <article class="panel queue-panel" aria-labelledby="reviewTitle">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Review</p>
+              <p class="eyebrow">Human review</p>
               <h2 id="reviewTitle">Pending dedup candidates</h2>
             </div>
-            <button id="refreshCandidatesButton" type="button">Refresh</button>
+            <button id="refreshCandidatesButton" type="button">Refresh queue</button>
           </div>
 
           <div id="candidateList" class="list empty">No candidates loaded.</div>
 
           <form id="reviewForm" class="review-form">
-            <h3>Submit review label</h3>
+            <h3>Submit decision</h3>
             <label for="dedupCandidateId">Dedup candidate ID</label>
-            <input id="dedupCandidateId" required placeholder="sourcing-dedup-candidate-id" />
+            <input id="dedupCandidateId" required placeholder="Click a candidate to select it" />
 
-            <label for="reviewLabel">Label</label>
-            <select id="reviewLabel" required>
-              <option value="same_person">same_person</option>
-              <option value="not_same_person">not_same_person</option>
-              <option value="unsure">unsure</option>
-            </select>
+            <div class="decision-grid">
+              <label for="reviewLabel">
+                Label
+                <select id="reviewLabel" required>
+                  <option value="same_person">same_person</option>
+                  <option value="not_same_person">not_same_person</option>
+                  <option value="unsure">unsure</option>
+                </select>
+              </label>
+              <button type="submit">Submit label</button>
+            </div>
 
             <label for="reviewNotes">Notes</label>
-            <textarea id="reviewNotes" rows="4" placeholder="Why this label is correct"></textarea>
-
-            <button type="submit">POST review label</button>
+            <textarea id="reviewNotes" rows="3" placeholder="Why this label is correct"></textarea>
           </form>
 
-          <div class="result-stack">
-            <h3>Review result</h3>
+          <details class="response-box">
+            <summary>Review result</summary>
             <pre id="reviewResult">Waiting for review submission.</pre>
-          </div>
+          </details>
         </article>
       </section>
 
-      <section class="panel" aria-labelledby="approvedTitle">
+      <section class="panel approved-panel" aria-labelledby="approvedTitle">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Store</p>
+            <p class="eyebrow">Reviewed store</p>
             <h2 id="approvedTitle">Approved entities</h2>
           </div>
-          <button id="refreshApprovedButton" type="button">Refresh</button>
+          <button id="refreshApprovedButton" type="button">Refresh approved</button>
         </div>
         <div id="approvedList" class="list empty">No approved entities loaded.</div>
       </section>
