@@ -7,254 +7,385 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">WeKruit Sourcing Service</p>
-        <h1>Review real sourcing runs before anything reaches outbound.</h1>
-        <p class="lede">
-          Inspect papers and people from each source run, review merge reasoning,
-          and keep only approved researcher entities.
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">WeKruit Sourcing Review</p>
+        <h1>Research review console</h1>
+        <p class="subhead">
+          Table-first review for real source runs, merge candidates, and approved researchers.
         </p>
       </div>
-      <div class="status-card" aria-live="polite">
-        <span class="status-dot" aria-hidden="true"></span>
-        <span id="connectionStatus">API not checked</span>
+      <div class="header-actions">
+        <div class="status-chip" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="connectionStatus">API not checked</span>
+        </div>
+        <button id="refreshAllButton" type="button">Refresh all</button>
       </div>
     </header>
 
-    <main class="shell">
-      <section class="workflow" aria-label="Sourcing workflow">
-        <div class="workflow-card">
-          <span>1</span>
-          <strong>Source runs</strong>
-          <small>Choose the real batch you want to inspect</small>
-        </div>
-        <div class="workflow-card">
-          <span>2</span>
-          <strong>Inspect records</strong>
-          <small>Papers and people before merge review</small>
-        </div>
-        <div class="workflow-card">
-          <span>3</span>
-          <strong>Review merges</strong>
-          <small>Evidence and reasons first, raw payload last</small>
-        </div>
-        <div class="workflow-card">
-          <span>4</span>
-          <strong>Approve entities</strong>
-          <small>Only reviewed entities are stored downstream</small>
-        </div>
-      </section>
-
-      <section class="metrics" aria-label="Current state">
-        <article>
-          <span>API base</span>
-          <strong id="apiBaseMetric">Not set</strong>
-        </article>
-        <article>
-          <span>Selected run</span>
-          <strong id="runMetric">No run</strong>
-        </article>
-        <article>
-          <span>Papers in run</span>
-          <strong id="paperMetric">0</strong>
-        </article>
-        <article>
-          <span>People in run</span>
-          <strong id="peopleMetric">0</strong>
-        </article>
-        <article>
-          <span>Pending review</span>
-          <strong id="candidateMetric">0</strong>
-        </article>
-        <article>
-          <span>Approved</span>
-          <strong id="approvedMetric">0</strong>
-        </article>
-      </section>
-
-      <section class="panel settings-panel" aria-labelledby="settingsTitle">
-        <div class="section-heading">
+    <main class="app-shell">
+      <section class="panel config-panel" aria-labelledby="configTitle">
+        <div class="panel-heading">
           <div>
             <p class="eyebrow">Connection</p>
-            <h2 id="settingsTitle">API target</h2>
+            <h2 id="configTitle">API target and state</h2>
           </div>
           <button id="saveSettingsButton" type="button">Save target</button>
         </div>
-        <label for="apiBaseUrl">API base URL</label>
-        <input
-          id="apiBaseUrl"
-          name="apiBaseUrl"
-          type="text"
-          placeholder="/api/sourcing or https://.../sourcing-api/api/sourcing"
-        />
-        <p class="hint">
-          Default is <code>/api/sourcing</code> on Firebase Hosting. Use the full
-          Function URL only when you are bypassing the Hosting rewrite.
-        </p>
+
+        <div class="config-row">
+          <label class="inline-field" for="apiBaseUrl">
+            <span>API base URL</span>
+            <input
+              id="apiBaseUrl"
+              name="apiBaseUrl"
+              type="text"
+              placeholder="/api/sourcing or https://.../sourcing-api/api/sourcing"
+            />
+          </label>
+        </div>
+
+        <div class="metric-strip" aria-label="Current metrics">
+          <article class="metric-card">
+            <span>API base</span>
+            <strong id="apiBaseMetric">Not set</strong>
+          </article>
+          <article class="metric-card">
+            <span>Selected run</span>
+            <strong id="runMetric">No run</strong>
+          </article>
+          <article class="metric-card">
+            <span>Papers in run</span>
+            <strong id="paperMetric">0</strong>
+          </article>
+          <article class="metric-card">
+            <span>People in run</span>
+            <strong id="peopleMetric">0</strong>
+          </article>
+          <article class="metric-card">
+            <span>Pending review</span>
+            <strong id="candidateMetric">0</strong>
+          </article>
+          <article class="metric-card">
+            <span>Approved</span>
+            <strong id="approvedMetric">0</strong>
+          </article>
+        </div>
       </section>
 
-      <section class="board">
-        <article class="panel explorer-panel" aria-labelledby="runsTitle">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Run explorer</p>
-              <h2 id="runsTitle">Real source runs</h2>
-            </div>
+      <section class="panel runs-panel" aria-labelledby="runsTitle">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Runs</p>
+            <h2 id="runsTitle">Real source runs</h2>
+          </div>
+          <div class="panel-actions">
+            <button id="completeRunButton" type="button" class="button-muted">Complete run</button>
             <button id="refreshRunsButton" type="button">Refresh runs</button>
           </div>
+        </div>
 
-          <div id="sourceRunList" class="list empty">No source runs loaded.</div>
+        <div id="selectedRunSummary" class="summary-banner">
+          Choose a run to inspect its papers, people, and merge queue.
+        </div>
 
-          <div class="run-inspector">
-            <div class="section-heading compact-heading">
-              <div>
-                <p class="eyebrow">Selected run</p>
-                <h3>Run details and records</h3>
+        <div class="table-shell">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Run</th>
+                <th scope="col">Source</th>
+                <th scope="col">Created</th>
+                <th scope="col">Status</th>
+                <th scope="col">Records</th>
+                <th scope="col">Evidence</th>
+                <th scope="col">Dedup</th>
+                <th scope="col">Trigger</th>
+              </tr>
+            </thead>
+            <tbody id="sourceRunTableBody">
+              <tr>
+                <td colspan="8" class="empty-row">Loading source runs...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="panel records-panel" aria-labelledby="recordsTitle">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Inspect</p>
+              <h2 id="recordsTitle">Run records</h2>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <label class="inline-field" for="recordTypeFilter">
+              <span>Type</span>
+              <select id="recordTypeFilter">
+                <option value="all">all</option>
+                <option value="research_work">research_work</option>
+                <option value="person_profile">person_profile</option>
+              </select>
+            </label>
+            <label class="inline-field" for="recordSort">
+              <span>Sort</span>
+              <select id="recordSort">
+                <option value="impact_desc">impact</option>
+                <option value="recent_desc">recent</option>
+                <option value="name_asc">name/title</option>
+              </select>
+            </label>
+            <label class="inline-field inline-field--wide" for="recordSearch">
+              <span>Search</span>
+              <input id="recordSearch" type="search" placeholder="Paper title, person, DOI, institution" />
+            </label>
+          </div>
+
+          <div class="content-split">
+            <div class="table-shell table-shell--scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Record</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Institution / venue</th>
+                    <th scope="col">Key field</th>
+                    <th scope="col">Source</th>
+                  </tr>
+                </thead>
+                <tbody id="runRecordTableBody">
+                  <tr>
+                    <td colspan="5" class="empty-row">No run selected.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <aside class="detail-panel" aria-labelledby="recordDetailTitle">
+              <div class="detail-header">
+                <p class="eyebrow">Record detail</p>
+                <h3 id="recordDetailTitle">Selected record</h3>
               </div>
-            </div>
-            <div id="selectedRunSummary" class="run-summary empty-summary">
-              Choose a run to inspect its papers and people.
-            </div>
-
-            <div class="record-toolbar">
-              <label for="recordTypeFilter">
-                Record type
-                <select id="recordTypeFilter">
-                  <option value="all">all</option>
-                  <option value="research_work">research_work</option>
-                  <option value="person_profile">person_profile</option>
-                </select>
-              </label>
-              <label for="recordSearch">
-                Search
-                <input id="recordSearch" type="search" placeholder="Paper title, person, DOI, institution" />
-              </label>
-            </div>
-
-            <div id="runRecordList" class="list empty">No run records loaded.</div>
+              <div id="recordDetail" class="detail-content">
+                Select a record to inspect paper metadata or researcher profile evidence.
+              </div>
+            </aside>
           </div>
         </article>
 
-        <article class="panel queue-panel" aria-labelledby="reviewTitle">
-          <div class="section-heading">
+        <article class="panel review-panel" aria-labelledby="reviewTitle">
+          <div class="panel-heading">
             <div>
-              <p class="eyebrow">Human review</p>
-              <h2 id="reviewTitle">Pending dedup candidates</h2>
-              <p id="queueScope" class="hint inline-hint">Select a run to scope the review queue.</p>
+              <p class="eyebrow">Review</p>
+              <h2 id="reviewTitle">Pending dedup queue</h2>
+              <p id="queueScope" class="inline-copy">Select a run to scope the queue.</p>
             </div>
-            <button id="refreshCandidatesButton" type="button">Refresh queue</button>
-          </div>
-
-          <div id="candidateList" class="list empty">No candidates loaded.</div>
-
-          <form id="reviewForm" class="review-form">
-            <h3>Submit decision</h3>
-            <label for="dedupCandidateId">Dedup candidate ID</label>
-            <input id="dedupCandidateId" required placeholder="Click a candidate to select it" />
-
-            <div class="decision-grid">
-              <label for="reviewLabel">
-                Label
-                <select id="reviewLabel" required>
-                  <option value="same_person">same_person</option>
-                  <option value="not_same_person">not_same_person</option>
-                  <option value="unsure">unsure</option>
+            <div class="panel-actions">
+              <label class="inline-field" for="candidateStatusFilter">
+                <span>Queue view</span>
+                <select id="candidateStatusFilter">
+                  <option value="pending_review">pending_review</option>
+                  <option value="reviewed">reviewed</option>
+                  <option value="all">all</option>
                 </select>
               </label>
-              <button type="submit">Submit label</button>
+              <button id="refreshCandidatesButton" type="button">Refresh queue</button>
+            </div>
+          </div>
+
+          <div class="content-split content-split--narrow">
+            <div class="table-shell table-shell--scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Candidate</th>
+                    <th scope="col">Reasons</th>
+                    <th scope="col">Evidence</th>
+                    <th scope="col">Records</th>
+                    <th scope="col">Strength</th>
+                  </tr>
+                </thead>
+                <tbody id="candidateTableBody">
+                  <tr>
+                    <td colspan="5" class="empty-row">Loading pending candidates...</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
-            <label for="reviewNotes">Notes</label>
-            <textarea id="reviewNotes" rows="3" placeholder="Why this label is correct"></textarea>
-          </form>
+            <aside class="detail-panel" aria-labelledby="candidateDetailTitle">
+              <div class="detail-header">
+                <p class="eyebrow">Merge detail</p>
+                <h3 id="candidateDetailTitle">Selected candidate</h3>
+              </div>
+              <div id="candidateDetail" class="detail-content">
+                Select a candidate to inspect evidence and source records.
+              </div>
 
-          <details class="response-box">
-            <summary>Review result</summary>
-            <pre id="reviewResult">Waiting for review submission.</pre>
-          </details>
+              <form id="reviewForm" class="review-form">
+                <label class="inline-field" for="dedupCandidateId">
+                  <span>Dedup candidate ID</span>
+                  <input id="dedupCandidateId" readonly placeholder="Select a candidate first" />
+                </label>
+
+                <div class="quick-actions">
+                  <button id="approveSamePersonButton" type="button">Same person</button>
+                  <button id="approveNotSamePersonButton" type="button" class="button-muted">Not same</button>
+                  <button id="approveUnsureButton" type="button" class="button-muted">Unsure</button>
+                </div>
+
+                <label class="inline-field" for="reviewLabel">
+                  <span>Label</span>
+                  <select id="reviewLabel" required>
+                    <option value="same_person">same_person</option>
+                    <option value="not_same_person">not_same_person</option>
+                    <option value="unsure">unsure</option>
+                  </select>
+                </label>
+
+                <label class="inline-field" for="reviewNotes">
+                  <span>Notes</span>
+                  <textarea id="reviewNotes" rows="4" placeholder="Why this review decision is correct"></textarea>
+                </label>
+
+                <button type="submit">Submit review</button>
+              </form>
+
+              <details class="response-box">
+                <summary>Review result</summary>
+                <pre id="reviewResult">Waiting for review submission.</pre>
+              </details>
+            </aside>
+          </div>
         </article>
       </section>
 
       <section class="panel approved-panel" aria-labelledby="approvedTitle">
-        <div class="section-heading">
+        <div class="panel-heading">
           <div>
-            <p class="eyebrow">Reviewed store</p>
+            <p class="eyebrow">Approved</p>
             <h2 id="approvedTitle">Approved entities</h2>
           </div>
-          <button id="refreshApprovedButton" type="button">Refresh approved</button>
+          <div class="panel-actions">
+            <label class="inline-field" for="approvedScopeFilter">
+              <span>Scope</span>
+              <select id="approvedScopeFilter">
+                <option value="selected_run">selected_run</option>
+                <option value="all">all</option>
+              </select>
+            </label>
+            <button id="refreshApprovedButton" type="button">Refresh approved</button>
+          </div>
         </div>
-        <div id="approvedList" class="list empty">No approved entities loaded.</div>
+
+        <div class="content-split">
+          <div class="table-shell table-shell--scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Entity</th>
+                  <th scope="col">Emails</th>
+                  <th scope="col">Homepages</th>
+                  <th scope="col">Institutions</th>
+                  <th scope="col">Source records</th>
+                  <th scope="col">Created</th>
+                </tr>
+              </thead>
+              <tbody id="approvedTableBody">
+                <tr>
+                  <td colspan="6" class="empty-row">Loading approved entities...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <aside class="detail-panel" aria-labelledby="approvedDetailTitle">
+            <div class="detail-header">
+              <p class="eyebrow">Approved detail</p>
+              <h3 id="approvedDetailTitle">Selected entity</h3>
+            </div>
+            <div id="approvedDetail" class="detail-content">
+              Select an approved entity to inspect surviving contact fields.
+            </div>
+          </aside>
+        </div>
       </section>
 
       <details class="panel import-panel">
         <summary>Manual ingest and replay</summary>
-        <div class="manual-shell">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Ingest</p>
-              <h2>Manual source run and upload</h2>
-            </div>
-            <button id="uploadButton" type="button">Upload records</button>
-          </div>
-
-          <div class="run-card">
-            <div class="section-heading compact-heading">
+        <div class="manual-grid">
+          <section class="panel panel-inset">
+            <div class="panel-heading">
               <div>
                 <p class="eyebrow">Run metadata</p>
                 <h3>Create source run</h3>
               </div>
               <button id="createRunButton" type="button">Create run</button>
             </div>
-            <div class="mini-grid">
-              <label for="sourceRunSourceName">
-                Source
-                <input id="sourceRunSourceName" value="openalex" />
-              </label>
-              <label for="sourceRunDomain">
-                Domain
-                <input id="sourceRunDomain" value="researcher" />
-              </label>
-              <label for="sourceRunPipeline">
-                Pipeline
-                <input id="sourceRunPipeline" value="local-jsonl-upload" />
-              </label>
-            </div>
+
+            <label class="inline-field" for="sourceRunSourceName">
+              <span>Source</span>
+              <input id="sourceRunSourceName" value="openalex" />
+            </label>
+            <label class="inline-field" for="sourceRunDomain">
+              <span>Domain</span>
+              <input id="sourceRunDomain" value="researcher" />
+            </label>
+            <label class="inline-field" for="sourceRunPipeline">
+              <span>Pipeline</span>
+              <input id="sourceRunPipeline" value="local-jsonl-upload" />
+            </label>
+
             <details class="response-box">
               <summary>Run API response</summary>
               <pre id="sourceRunResult">Create a source run before uploading records.</pre>
             </details>
-          </div>
+          </section>
 
-          <label for="runId">Source run ID</label>
-          <input id="runId" placeholder="Created automatically, or paste an existing run ID" />
+          <section class="panel panel-inset">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Replay</p>
+                <h3>Upload source records</h3>
+              </div>
+              <button id="uploadButton" type="button">Upload records</button>
+            </div>
 
-          <label for="uploadEndpoint">Batch endpoint</label>
-          <input id="uploadEndpoint" value="/source-records:batchUpsert" />
+            <label class="inline-field" for="runId">
+              <span>Source run ID</span>
+              <input id="runId" placeholder="Created automatically, or paste an existing run ID" />
+            </label>
+            <label class="inline-field" for="uploadEndpoint">
+              <span>Batch endpoint</span>
+              <input id="uploadEndpoint" value="/source-records:batchUpsert" />
+            </label>
+            <label class="inline-field" for="jsonlFile">
+              <span>JSONL or CSV file</span>
+              <input id="jsonlFile" type="file" accept=".jsonl,.csv,.txt,application/jsonl,text/csv,text/plain" />
+            </label>
+            <label class="inline-field" for="jsonlInput">
+              <span>Prepared source records</span>
+              <textarea
+                id="jsonlInput"
+                rows="8"
+                spellcheck="false"
+                placeholder='{"sourceNativeId":"A123","entityType":"person","displayName":"Ada Lovelace","institution":"Analytical Engine Lab","rawSummary":{"email":"ada@example.edu","orcid":"0000-0000-0000-000X"},"display":{"homepage":"https://example.edu/ada"},"raw":{}}'
+              ></textarea>
+            </label>
 
-          <label for="jsonlFile">JSONL or CSV file</label>
-          <input id="jsonlFile" type="file" accept=".jsonl,.csv,.txt,application/jsonl,text/csv,text/plain" />
-
-          <label for="jsonlInput">Prepared source records</label>
-          <textarea
-            id="jsonlInput"
-            rows="10"
-            spellcheck="false"
-            placeholder='{"sourceNativeId":"A123","entityType":"person","displayName":"Ada Lovelace","institution":"Analytical Engine Lab","rawSummary":{"email":"ada@example.edu","orcid":"0000-0000-0000-000X"},"display":{"homepage":"https://example.edu/ada"},"raw":{}}'
-          ></textarea>
-          <p class="hint">
-            CSV is converted in-browser into source records. This panel is for
-            manual replay; the default operator path is the run explorer above.
-          </p>
-
-          <details class="response-box" open>
-            <summary>Upload result</summary>
-            <pre id="uploadResult">Waiting for upload.</pre>
-          </details>
-          <details class="response-box">
-            <summary>Fallback curl</summary>
-            <pre id="uploadCurl">Generated after payload is available.</pre>
-          </details>
+            <details class="response-box" open>
+              <summary>Upload result</summary>
+              <pre id="uploadResult">Waiting for upload.</pre>
+            </details>
+            <details class="response-box">
+              <summary>Fallback curl</summary>
+              <pre id="uploadCurl">Generated after payload is available.</pre>
+            </details>
+          </section>
         </div>
       </details>
     </main>

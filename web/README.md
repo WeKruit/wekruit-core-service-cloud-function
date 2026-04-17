@@ -2,14 +2,23 @@
 
 Static Firebase Hosting console for the sourcing service review loop.
 
-It covers the minimum operator flow:
+It now uses a table-first operator console instead of a card-heavy dashboard. The
+default workflow is:
 
 1. Read recent `sourcing-source-runs`.
-2. Read `sourcing-source-records` for the selected run.
-3. Review pending `sourcing-dedup-candidates`.
-4. Submit `sourcing-review-labels`.
-5. Read `sourcing-approved-entities`.
-6. Use manual JSONL/CSV upload only for replay or backfill.
+2. Inspect `sourcing-source-records` for the selected run in a sortable table.
+3. Review `sourcing-dedup-candidates` in pending / reviewed / all queue views.
+4. Submit `sourcing-review-labels` inline from the selected candidate detail pane.
+5. Read `sourcing-approved-entities`, scoped either to the selected run or globally.
+6. Complete a run with `POST /source-runs/:runId/complete`.
+7. Use manual JSONL/CSV upload only for replay or backfill.
+
+The review queue supports both:
+
+- multi-record merge candidates (`name_institution`, `orcid_exact`, etc.)
+- singleton review candidates (`singleton_review`) for person records that have
+  no merge partner, so a reviewer can still approve them into the downstream
+  approved store
 
 ## Firebase Prefix Contract
 
@@ -21,9 +30,10 @@ This web client assumes the sourcing backend uses these resource names:
 - Source run endpoint: `/source-runs`
 - Source records by run endpoint: `GET /source-runs/:runId/source-records`
 - Source record batch endpoint: `/source-records:batchUpsert`
-- Review queue endpoint: `/dedup-candidates?status=pending_review&include=details`
+- Review queue endpoint: `/dedup-candidates?include=details`
 - Review label endpoint: `/review-labels`
 - Approved entity endpoint: `/approved-entities`
+- Complete run endpoint: `POST /source-runs/:runId/complete`
 
 ## Local Use
 

@@ -150,7 +150,7 @@ export const dedupCandidateSchema = z.object({
   status: z.enum(['pending_review', 'same_person', 'not_same_person', 'unsure', 'suppressed']),
   strength: sourcingDedupStrengthSchema,
   reasonCodes: z.array(z.string().trim().min(1)).min(1),
-  sourceRecordIds: z.array(z.string().trim().min(1)).min(2),
+  sourceRecordIds: z.array(z.string().trim().min(1)).min(1),
   evidenceIds: z.array(z.string().trim().min(1)),
   valueHashes: z.array(z.string().trim().min(1)),
   displayName: z.string().nullable(),

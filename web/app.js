@@ -3,14 +3,18 @@ const STORAGE_KEY = "wekruit.sourcingReview.apiBaseUrl";
 const state = {
   sourceRuns: [],
   sourceRecords: [],
-  pendingCandidates: [],
+  candidateDetails: [],
   approvedEntities: [],
   selectedRunId: "",
+  selectedRecordId: "",
+  selectedCandidateId: "",
+  selectedApprovedEntityId: "",
 };
 
 const elements = {
   apiBaseUrl: document.querySelector("#apiBaseUrl"),
   saveSettingsButton: document.querySelector("#saveSettingsButton"),
+  refreshAllButton: document.querySelector("#refreshAllButton"),
   connectionStatus: document.querySelector("#connectionStatus"),
   apiBaseMetric: document.querySelector("#apiBaseMetric"),
   runMetric: document.querySelector("#runMetric"),
@@ -19,12 +23,33 @@ const elements = {
   candidateMetric: document.querySelector("#candidateMetric"),
   approvedMetric: document.querySelector("#approvedMetric"),
   refreshRunsButton: document.querySelector("#refreshRunsButton"),
-  sourceRunList: document.querySelector("#sourceRunList"),
+  completeRunButton: document.querySelector("#completeRunButton"),
+  sourceRunTableBody: document.querySelector("#sourceRunTableBody"),
   selectedRunSummary: document.querySelector("#selectedRunSummary"),
   recordTypeFilter: document.querySelector("#recordTypeFilter"),
+  recordSort: document.querySelector("#recordSort"),
   recordSearch: document.querySelector("#recordSearch"),
-  runRecordList: document.querySelector("#runRecordList"),
+  runRecordTableBody: document.querySelector("#runRecordTableBody"),
+  recordDetail: document.querySelector("#recordDetail"),
   queueScope: document.querySelector("#queueScope"),
+  candidateStatusFilter: document.querySelector("#candidateStatusFilter"),
+  refreshCandidatesButton: document.querySelector("#refreshCandidatesButton"),
+  candidateTableBody: document.querySelector("#candidateTableBody"),
+  candidateDetail: document.querySelector("#candidateDetail"),
+  reviewForm: document.querySelector("#reviewForm"),
+  reviewSubmitButton: document.querySelector("#reviewForm button[type='submit']"),
+  dedupCandidateId: document.querySelector("#dedupCandidateId"),
+  reviewLabel: document.querySelector("#reviewLabel"),
+  reviewLabelSamePersonOption: document.querySelector("#reviewLabel option[value='same_person']"),
+  reviewNotes: document.querySelector("#reviewNotes"),
+  approveSamePersonButton: document.querySelector("#approveSamePersonButton"),
+  approveNotSamePersonButton: document.querySelector("#approveNotSamePersonButton"),
+  approveUnsureButton: document.querySelector("#approveUnsureButton"),
+  reviewResult: document.querySelector("#reviewResult"),
+  approvedScopeFilter: document.querySelector("#approvedScopeFilter"),
+  refreshApprovedButton: document.querySelector("#refreshApprovedButton"),
+  approvedTableBody: document.querySelector("#approvedTableBody"),
+  approvedDetail: document.querySelector("#approvedDetail"),
   sourceRunSourceName: document.querySelector("#sourceRunSourceName"),
   sourceRunDomain: document.querySelector("#sourceRunDomain"),
   sourceRunPipeline: document.querySelector("#sourceRunPipeline"),
@@ -37,33 +62,7 @@ const elements = {
   uploadButton: document.querySelector("#uploadButton"),
   uploadResult: document.querySelector("#uploadResult"),
   uploadCurl: document.querySelector("#uploadCurl"),
-  refreshCandidatesButton: document.querySelector("#refreshCandidatesButton"),
-  candidateList: document.querySelector("#candidateList"),
-  reviewForm: document.querySelector("#reviewForm"),
-  dedupCandidateId: document.querySelector("#dedupCandidateId"),
-  reviewLabel: document.querySelector("#reviewLabel"),
-  reviewNotes: document.querySelector("#reviewNotes"),
-  reviewResult: document.querySelector("#reviewResult"),
-  refreshApprovedButton: document.querySelector("#refreshApprovedButton"),
-  approvedList: document.querySelector("#approvedList"),
 };
-
-function getApiBaseUrl() {
-  return elements.apiBaseUrl.value.trim().replace(/\/$/, "");
-}
-
-function getSelectedRun() {
-  return state.sourceRuns.find((run) => run.id === state.selectedRunId) ?? null;
-}
-
-function setConnectionStatus(message, stateName = "idle") {
-  elements.connectionStatus.textContent = message;
-  document.body.dataset.connection = stateName;
-}
-
-function setMetric(target, value) {
-  target.textContent = value;
-}
 
 function safeJsonParse(text) {
   try {
@@ -73,11 +72,6 @@ function safeJsonParse(text) {
   }
 }
 
-function joinUrl(base, path) {
-  const cleanPath = path.startsWith("/") ? path : `/${path}`;
-  return `${base}${cleanPath}`;
-}
-
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -85,6 +79,24 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function stringValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function numberValue(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function arrayValue(value) {
+  return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
+function joinUrl(base, path) {
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${cleanPath}`;
 }
 
 function renderJson(target, value) {
@@ -111,12 +123,6 @@ function normalizeListPayload(payload) {
   if (Array.isArray(payload?.records)) {
     return payload.records;
   }
-  if (Array.isArray(payload?.dedupCandidates)) {
-    return payload.dedupCandidates;
-  }
-  if (Array.isArray(payload?.approvedEntities)) {
-    return payload.approvedEntities;
-  }
   return payload ? [payload] : [];
 }
 
@@ -128,42 +134,53 @@ function timestampValue(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function sortRunsForReview(runs) {
-  return runs
-    .slice()
-    .sort((left, right) => {
-      const candidateDelta = Number(right.dedupCandidateCount || 0) - Number(left.dedupCandidateCount || 0);
-      if (candidateDelta !== 0) {
-        return candidateDelta;
-      }
-
-      const recordDelta = Number(right.sourceRecordCount || 0) - Number(left.sourceRecordCount || 0);
-      if (recordDelta !== 0) {
-        return recordDelta;
-      }
-
-      return timestampValue(right.createdAt) - timestampValue(left.createdAt);
-    });
+function formatDateTime(value) {
+  if (!value) {
+    return "Unknown";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
-function chooseRunId(runs, preferredRunId = "") {
-  if (!runs.length) {
-    return "";
+function formatDate(value) {
+  if (!value) {
+    return "Unknown";
   }
-
-  if (preferredRunId) {
-    const preferred = runs.find((run) => run.id === preferredRunId);
-    if (preferred) {
-      return preferred.id;
-    }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
   }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
 
-  const reviewRun = runs.find((run) => Number(run.dedupCandidateCount || 0) > 0);
-  if (reviewRun) {
-    return reviewRun.id;
-  }
+function setConnectionStatus(message, stateName = "idle") {
+  elements.connectionStatus.textContent = message;
+  document.body.dataset.connection = stateName;
+}
 
-  return runs[0]?.id || "";
+function setMetric(target, value) {
+  target.textContent = value;
+}
+
+function compactObject(record) {
+  return Object.fromEntries(Object.entries(record).filter(([_key, value]) => value !== ""));
+}
+
+function getApiBaseUrl() {
+  return elements.apiBaseUrl.value.trim().replace(/\/$/, "");
 }
 
 async function requestJson(path, options = {}) {
@@ -191,24 +208,109 @@ async function requestJson(path, options = {}) {
   return payload;
 }
 
-function formatDateTime(value) {
-  if (!value) {
-    return "Unknown";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+function sortRunsForReview(runs) {
+  return runs
+    .slice()
+    .sort((left, right) => {
+      const dedupDelta = numberValue(right.dedupCandidateCount) - numberValue(left.dedupCandidateCount);
+      if (dedupDelta !== 0) {
+        return dedupDelta;
+      }
+
+      const recordDelta = numberValue(right.sourceRecordCount) - numberValue(left.sourceRecordCount);
+      if (recordDelta !== 0) {
+        return recordDelta;
+      }
+
+      return timestampValue(right.createdAt) - timestampValue(left.createdAt);
+    });
 }
 
-function compactObject(record) {
-  return Object.fromEntries(Object.entries(record).filter(([_key, value]) => value !== ""));
+function chooseRunId(runs, preferredRunId = "") {
+  if (!runs.length) {
+    return "";
+  }
+
+  if (preferredRunId) {
+    const preferred = runs.find((run) => run.id === preferredRunId);
+    if (preferred) {
+      return preferred.id;
+    }
+  }
+
+  const pendingReviewRun = runs.find((run) => numberValue(run.dedupCandidateCount) > 0);
+  if (pendingReviewRun) {
+    return pendingReviewRun.id;
+  }
+
+  return runs[0].id;
+}
+
+function getSelectedRun() {
+  return state.sourceRuns.find((run) => run.id === state.selectedRunId) ?? null;
+}
+
+function getSelectedRecord() {
+  return state.sourceRecords.find((record) => record.id === state.selectedRecordId) ?? null;
+}
+
+function candidateObject(item) {
+  return item?.candidate ?? item ?? null;
+}
+
+function filteredCandidateDetails() {
+  const queueMode = elements.candidateStatusFilter.value;
+  return state.candidateDetails
+    .filter((item) => {
+      const candidate = candidateObject(item);
+      if (!candidate) {
+        return false;
+      }
+
+      if (state.selectedRunId && candidate.createdFromSourceRunId !== state.selectedRunId) {
+        return false;
+      }
+
+      if (queueMode === "pending_review") {
+        return candidate.status === "pending_review";
+      }
+
+      if (queueMode === "reviewed") {
+        return candidate.status !== "pending_review" && candidate.status !== "suppressed";
+      }
+
+      return candidate.status !== "suppressed";
+    })
+    .sort((left, right) => {
+      const leftCandidate = candidateObject(left);
+      const rightCandidate = candidateObject(right);
+      const strengthRank = { strong: 2, medium: 1, weak: 0 };
+      const strengthDelta =
+        strengthRank[rightCandidate?.strength ?? "weak"] - strengthRank[leftCandidate?.strength ?? "weak"];
+      if (strengthDelta !== 0) {
+        return strengthDelta;
+      }
+      return timestampValue(rightCandidate?.updatedAt) - timestampValue(leftCandidate?.updatedAt);
+    });
+}
+
+function getSelectedCandidateItem() {
+  return filteredCandidateDetails().find((item) => candidateObject(item)?.id === state.selectedCandidateId) ?? null;
+}
+
+function filteredApprovedEntities() {
+  if (elements.approvedScopeFilter.value === "all" || !state.selectedRunId) {
+    return state.approvedEntities.slice();
+  }
+
+  const sourceRecordIds = new Set(state.sourceRecords.map((record) => record.id));
+  return state.approvedEntities.filter((entity) =>
+    arrayValue(entity.sourceRecordIds).some((sourceRecordId) => sourceRecordIds.has(sourceRecordId)),
+  );
+}
+
+function getSelectedApprovedEntity() {
+  return filteredApprovedEntities().find((entity) => entity.id === state.selectedApprovedEntityId) ?? null;
 }
 
 function pickFirst(record, keys) {
@@ -294,20 +396,29 @@ function csvToSourceRecords(text) {
     );
     const name = pickFirst(raw, ["name", "member_name", "username", "full_name", "project_name"]);
     const institution = pickFirst(raw, ["institution", "company", "member_company", "affiliation"]);
-    const sourceNativeId = pickFirst(raw, [
-      "sourceNativeId",
-      "source_native_id",
-      "id",
-      "username",
-      "member_username",
-      "member_devpost",
+    const sourceNativeId =
+      pickFirst(raw, [
+        "sourceNativeId",
+        "source_native_id",
+        "id",
+        "username",
+        "member_username",
+        "member_devpost",
+        "github_url",
+        "member_github",
+        "project_url",
+        "email",
+      ]) || `csv-row-${index + 1}`;
+    const entityType = pickFirst(raw, ["entityType", "entity_type", "type"]) || "person";
+    const url = pickFirst(raw, [
       "github_url",
       "member_github",
+      "html_url",
+      "blog",
+      "website",
+      "member_website",
       "project_url",
-      "email",
-    ]) || `csv-row-${index + 1}`;
-    const entityType = pickFirst(raw, ["entityType", "entity_type", "type"]) || "person";
-    const url = pickFirst(raw, ["github_url", "member_github", "html_url", "blog", "website", "member_website", "project_url"]);
+    ]);
 
     return {
       sourceNativeId,
@@ -357,50 +468,20 @@ function buildSourceRunBody() {
   };
 }
 
-function filteredRunRecords() {
-  const type = elements.recordTypeFilter.value;
-  const query = elements.recordSearch.value.trim().toLowerCase();
-
-  return state.sourceRecords.filter((record) => {
-    if (type !== "all" && record.entityType !== type) {
-      return false;
-    }
-    if (!query) {
-      return true;
-    }
-    const haystack = [
-      record.displayName,
-      record.display?.name,
-      record.display?.title,
-      record.display?.venue,
-      record.institution,
-      record.rawSummary?.doi,
-      record.rawSummary?.venue,
-      record.rawSummary?.orcid,
-      record.sourceNativeId,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    return haystack.includes(query);
-  });
-}
-
-function selectedRunCandidates() {
-  return state.pendingCandidates.filter((item) => {
-    const candidate = item.candidate || item;
-    if (!state.selectedRunId) {
-      return true;
-    }
-    return candidate.createdFromSourceRunId === state.selectedRunId;
-  });
-}
-
 function computeRecordCounts(records) {
-  return {
-    papers: records.filter((record) => record.entityType === "research_work").length,
-    people: records.filter((record) => record.entityType === "person_profile").length,
-  };
+  return records.reduce(
+    (accumulator, record) => {
+      const entityType = stringValue(record.entityType);
+      if (entityType === "research_work" || entityType === "paper") {
+        accumulator.papers += 1;
+      }
+      if (entityType === "person_profile" || entityType === "person" || entityType === "profile") {
+        accumulator.people += 1;
+      }
+      return accumulator;
+    },
+    { papers: 0, people: 0 },
+  );
 }
 
 function updateDashboard() {
@@ -410,368 +491,657 @@ function updateDashboard() {
   setMetric(elements.runMetric, selectedRun ? selectedRun.id : "No run");
   setMetric(elements.paperMetric, String(papers));
   setMetric(elements.peopleMetric, String(people));
-  setMetric(elements.candidateMetric, String(selectedRunCandidates().length));
-  setMetric(elements.approvedMetric, String(state.approvedEntities.length));
+  setMetric(elements.candidateMetric, String(filteredCandidateDetails().length));
+  setMetric(elements.approvedMetric, String(filteredApprovedEntities().length));
 }
 
-function renderSourceRunCards() {
-  const container = elements.sourceRunList;
-  container.innerHTML = "";
-  container.classList.toggle("empty", state.sourceRuns.length === 0);
+function recordTitle(record) {
+  return (
+    stringValue(record.display?.title) ||
+    stringValue(record.display?.name) ||
+    stringValue(record.displayName) ||
+    stringValue(record.sourceNativeId) ||
+    stringValue(record.id) ||
+    "Untitled record"
+  );
+}
 
-  if (state.sourceRuns.length === 0) {
-    container.textContent = "No source runs found.";
+function recordSubtitle(record) {
+  return (
+    stringValue(record.display?.venue) ||
+    stringValue(record.rawSummary?.venue) ||
+    stringValue(record.institution) ||
+    stringValue(record.display?.institution) ||
+    "No secondary field"
+  );
+}
+
+function recordIdentifier(record) {
+  return (
+    stringValue(record.rawSummary?.doi) ||
+    stringValue(record.rawSummary?.orcid) ||
+    stringValue(record.sourceNativeId) ||
+    "—"
+  );
+}
+
+function recordMetricLabel(record) {
+  if (stringValue(record.entityType) === "research_work" || stringValue(record.entityType) === "paper") {
+    return {
+      label: "Cited / date",
+      value: `${numberValue(record.rawSummary?.citedByCount)} · ${formatDate(record.rawSummary?.publicationDate)}`,
+    };
+  }
+  return {
+    label: "Contact hints",
+    value: `${numberValue(record.rawSummary?.emailCount)} email · ${numberValue(record.rawSummary?.homepageCount)} homepage`,
+  };
+}
+
+function recordSortValue(record, sortMode) {
+  if (sortMode === "recent_desc") {
+    return timestampValue(record.rawSummary?.publicationDate) || timestampValue(record.updatedAt);
+  }
+  if (sortMode === "name_asc") {
+    return 0;
+  }
+
+  if (stringValue(record.entityType) === "research_work" || stringValue(record.entityType) === "paper") {
+    return numberValue(record.rawSummary?.citedByCount);
+  }
+
+  return (
+    numberValue(record.rawSummary?.emailCount) * 10 +
+    numberValue(record.rawSummary?.homepageCount) * 5 +
+    numberValue(record.rawSummary?.paperCountInBatch)
+  );
+}
+
+function filteredRunRecords() {
+  const requestedType = elements.recordTypeFilter.value;
+  const query = elements.recordSearch.value.trim().toLowerCase();
+  const sortMode = elements.recordSort.value;
+
+  return state.sourceRecords
+    .filter((record) => {
+      if (requestedType !== "all" && stringValue(record.entityType) !== requestedType) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      const haystack = [
+        recordTitle(record),
+        recordSubtitle(record),
+        stringValue(record.rawSummary?.doi),
+        stringValue(record.rawSummary?.orcid),
+        stringValue(record.sourceNativeId),
+        stringValue(record.source),
+        stringValue(record.rawSummary?.institution),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    })
+    .sort((left, right) => {
+      if (sortMode === "name_asc") {
+        return recordTitle(left).localeCompare(recordTitle(right));
+      }
+      return recordSortValue(right, sortMode) - recordSortValue(left, sortMode);
+    });
+}
+
+function renderEmptyTableRow(colspan, message, actionHtml = "") {
+  return `
+    <tr>
+      <td colspan="${colspan}" class="empty-row">
+        ${escapeHtml(message)}
+        ${actionHtml}
+      </td>
+    </tr>
+  `;
+}
+
+function renderPill(content, variant = "neutral") {
+  return `<span class="pill pill--${escapeHtml(variant)}">${escapeHtml(content)}</span>`;
+}
+
+function renderReasonChips(reasonCodes) {
+  const items = arrayValue(reasonCodes);
+  if (!items.length) {
+    return renderPill("none", "neutral");
+  }
+  return items.map((reason) => renderPill(reason, "neutral")).join("");
+}
+
+function renderListPreview(values, limit = 2) {
+  const items = arrayValue(values);
+  if (!items.length) {
+    return "—";
+  }
+  if (items.length <= limit) {
+    return items.join(", ");
+  }
+  return `${items.slice(0, limit).join(", ")} +${items.length - limit}`;
+}
+
+function syncRecordTypeOptions() {
+  const availableTypes = [...new Set(state.sourceRecords.map((record) => stringValue(record.entityType)).filter(Boolean))].sort();
+  const currentValue = elements.recordTypeFilter.value;
+  const options = ["all", ...availableTypes];
+  elements.recordTypeFilter.innerHTML = options
+    .map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`)
+    .join("");
+  elements.recordTypeFilter.value = options.includes(currentValue) ? currentValue : "all";
+}
+
+function ensureSelectedRecord() {
+  const records = filteredRunRecords();
+  if (records.some((record) => record.id === state.selectedRecordId)) {
     return;
   }
-
-  for (const run of state.sourceRuns) {
-    const card = document.createElement("article");
-    card.className = `run-list-card${run.id === state.selectedRunId ? " selected" : ""}`;
-    card.innerHTML = `
-      <div class="run-list-header">
-        <div>
-          <p class="run-list-title">${escapeHtml(run.sourceName || "source")}</p>
-          <p class="candidate-subtitle">${escapeHtml(run.id)}</p>
-        </div>
-        <div class="run-meta">
-          <span class="pill">${escapeHtml(run.status || "unknown")}</span>
-          <span class="pill pill-soft">${escapeHtml(run.pipelineName || "default")}</span>
-        </div>
-      </div>
-      <p class="run-card-subtitle">${escapeHtml(run.sourceDomain || "unknown domain")} · ${escapeHtml(formatDateTime(run.createdAt))}</p>
-      <div class="run-stats">
-        ${renderSummaryItem("records", run.sourceRecordCount ?? 0)}
-        ${renderSummaryItem("evidence", run.evidenceCount ?? 0)}
-        ${renderSummaryItem("dedup", run.dedupCandidateCount ?? 0)}
-        ${renderSummaryItem("trigger", run.trigger || "unknown")}
-      </div>
-    `;
-    card.addEventListener("click", () => {
-      void selectRun(run.id);
-    });
-    container.append(card);
-  }
+  state.selectedRecordId = records[0]?.id ?? "";
 }
 
-function renderSummaryItem(label, value) {
-  return `
-    <div class="summary-item">
-      <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(String(value))}</strong>
-    </div>
-  `;
+function ensureSelectedCandidate() {
+  const items = filteredCandidateDetails();
+  if (items.some((item) => candidateObject(item)?.id === state.selectedCandidateId)) {
+    return;
+  }
+  state.selectedCandidateId = candidateObject(items[0])?.id ?? "";
+}
+
+function ensureSelectedApprovedEntity() {
+  const entities = filteredApprovedEntities();
+  if (entities.some((entity) => entity.id === state.selectedApprovedEntityId)) {
+    return;
+  }
+  state.selectedApprovedEntityId = entities[0]?.id ?? "";
 }
 
 function renderRunSummary() {
   const selectedRun = getSelectedRun();
-  const container = elements.selectedRunSummary;
-
   if (!selectedRun) {
-    container.className = "run-summary empty-summary";
-    container.textContent = "Choose a run to inspect its papers and people.";
+    elements.selectedRunSummary.textContent = "Choose a run to inspect its papers, people, and merge queue.";
     return;
   }
 
-  const counts = computeRecordCounts(state.sourceRecords);
-  container.className = "run-summary";
-  container.innerHTML = `
-    <div class="run-list-header">
-      <div>
-        <p class="run-list-title">${escapeHtml(selectedRun.sourceName || "source")} · ${escapeHtml(selectedRun.sourceDomain || "domain")}</p>
-        <p class="candidate-subtitle">${escapeHtml(selectedRun.id)}</p>
-      </div>
-      <div class="chip-row">
-        <span class="pill">${escapeHtml(selectedRun.status || "unknown")}</span>
-        <span class="pill pill-soft">${escapeHtml(formatDateTime(selectedRun.createdAt))}</span>
-      </div>
+  const { papers, people } = computeRecordCounts(state.sourceRecords);
+  elements.selectedRunSummary.innerHTML = `
+    <div class="badge-row">
+      ${renderPill(selectedRun.sourceName || "source", "neutral")}
+      ${renderPill(selectedRun.sourceDomain || "domain", "neutral")}
+      ${renderPill(selectedRun.status || "unknown", `status-${selectedRun.status || "running"}`)}
     </div>
-    <div class="summary-grid">
-      ${renderSummaryItem("pipeline", selectedRun.pipelineName || "default")}
-      ${renderSummaryItem("papers", counts.papers)}
-      ${renderSummaryItem("people", counts.people)}
-      ${renderSummaryItem("pending dedup", selectedRunCandidates().length)}
+    <div class="detail-grid" style="margin-top: 0.85rem;">
+      <div class="detail-card">
+        <span>Run</span>
+        <strong>${escapeHtml(selectedRun.id)}</strong>
+      </div>
+      <div class="detail-card">
+        <span>Created</span>
+        <strong>${escapeHtml(formatDateTime(selectedRun.createdAt))}</strong>
+      </div>
+      <div class="detail-card">
+        <span>Papers / people</span>
+        <strong>${escapeHtml(`${papers} / ${people}`)}</strong>
+      </div>
+      <div class="detail-card">
+        <span>Pending / approved</span>
+        <strong>${escapeHtml(`${filteredCandidateDetails().length} / ${filteredApprovedEntities().length}`)}</strong>
+      </div>
     </div>
   `;
 }
 
-function renderFieldBox(label, value) {
-  if (value === null || value === undefined || value === "") {
-    return "";
-  }
-  return `
-    <div class="field-box">
-      <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(String(value))}</strong>
-    </div>
-  `;
-}
-
-function recordSortValue(record) {
-  if (record.entityType === "research_work") {
-    return Number(record.rawSummary?.citedByCount || 0);
-  }
-  return 0;
-}
-
-function renderRunRecords() {
-  const container = elements.runRecordList;
-  const selectedRun = getSelectedRun();
-
-  if (!selectedRun) {
-    container.classList.add("empty");
-    container.textContent = "No run selected.";
+function renderSourceRunsTable() {
+  const tbody = elements.sourceRunTableBody;
+  if (!state.sourceRuns.length) {
+    tbody.innerHTML = renderEmptyTableRow(8, "No source runs found.");
     return;
   }
 
-  const records = filteredRunRecords()
-    .slice()
-    .sort((left, right) => {
-      if (left.entityType !== right.entityType) {
-        return left.entityType === "research_work" ? -1 : 1;
-      }
-      if (left.entityType === "research_work") {
-        return recordSortValue(right) - recordSortValue(left);
-      }
-      return (left.displayName || "").localeCompare(right.displayName || "");
+  tbody.innerHTML = state.sourceRuns
+    .map((run) => {
+      const selectedClass = run.id === state.selectedRunId ? "is-selected" : "";
+      return `
+        <tr class="${selectedClass}">
+          <td>
+            <button type="button" class="row-button" data-run-id="${escapeHtml(run.id)}">
+              <span class="row-primary">${escapeHtml(run.id)}</span>
+              <span class="row-secondary">${escapeHtml(run.pipelineName || "default")}</span>
+            </button>
+          </td>
+          <td>
+            <span class="row-primary">${escapeHtml(run.sourceName || "source")}</span>
+            <span class="row-secondary">${escapeHtml(run.sourceDomain || "domain")}</span>
+          </td>
+          <td>${escapeHtml(formatDateTime(run.createdAt))}</td>
+          <td>${renderPill(run.status || "unknown", `status-${run.status || "running"}`)}</td>
+          <td>${escapeHtml(String(numberValue(run.sourceRecordCount)))}</td>
+          <td>${escapeHtml(String(numberValue(run.evidenceCount)))}</td>
+          <td>${escapeHtml(String(numberValue(run.dedupCandidateCount)))}</td>
+          <td>${escapeHtml(run.trigger || "unknown")}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  tbody.querySelectorAll("[data-run-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void selectRun(button.getAttribute("data-run-id") || "");
     });
-
-  container.innerHTML = "";
-  container.classList.toggle("empty", records.length === 0);
-
-  if (records.length === 0) {
-    container.textContent = "No records match the current filter.";
-    return;
-  }
-
-  for (const record of records) {
-    const title = record.display?.title || record.display?.name || record.displayName || record.sourceNativeId || record.id;
-    const subtitle = [record.source, record.entityType, record.display?.venue || record.institution].filter(Boolean).join(" · ");
-    const recordBody =
-      record.entityType === "research_work"
-        ? `
-          <div class="record-grid">
-            ${renderFieldBox("Publication date", record.rawSummary?.publicationDate || "Unknown")}
-            ${renderFieldBox("Venue", record.rawSummary?.venue || record.display?.venue || "Unknown")}
-            ${renderFieldBox("Cited by", record.rawSummary?.citedByCount ?? 0)}
-            ${renderFieldBox("DOI", record.rawSummary?.doi || "Missing")}
-          </div>
-        `
-        : `
-          <div class="record-grid">
-            ${renderFieldBox("Institution", record.institution || record.display?.institution || "Unknown")}
-            ${renderFieldBox("ORCID", record.rawSummary?.orcid || "Missing")}
-            ${renderFieldBox("Email count", record.rawSummary?.emailCount ?? 0)}
-            ${renderFieldBox("Homepage count", record.rawSummary?.homepageCount ?? 0)}
-          </div>
-        `;
-
-    const card = document.createElement("article");
-    card.className = "record-card";
-    card.innerHTML = `
-      <div class="record-card-header">
-        <div>
-          <h4 class="record-title">${escapeHtml(title || "Untitled record")}</h4>
-          <p class="record-meta">${escapeHtml(subtitle || "No summary")}</p>
-        </div>
-        <div class="chip-row">
-          <span class="tag">${escapeHtml(record.source || "source")}</span>
-          <span class="tag">${escapeHtml(record.entityType || "record")}</span>
-        </div>
-      </div>
-      <div class="record-body">
-        ${recordBody}
-      </div>
-    `;
-    container.append(card);
-  }
+  });
 }
 
-function renderEvidenceList(evidence) {
-  if (!evidence.length) {
-    return `<p class="empty-copy">No extracted evidence attached.</p>`;
-  }
-
-  return `
-    <ul class="evidence-list">
-      ${evidence
-        .map(
-          (entry) => `
-            <li>
-              <span class="evidence-type">${escapeHtml(entry.evidenceType || "evidence")}</span>
-              <strong>${escapeHtml(entry.normalizedValue || entry.rawValue || "unknown")}</strong>
-              <small>${escapeHtml(entry.quality || "unknown")} quality · ${escapeHtml(entry.extractedFrom?.sourcePath || "unknown path")}</small>
-            </li>
-          `,
-        )
-        .join("")}
-    </ul>
-  `;
-}
-
-function renderSourceRecordList(records) {
-  if (!records.length) {
-    return `<p class="empty-copy">No source records attached.</p>`;
-  }
-
-  return `
-    <ul class="record-list">
-      ${records
-        .map((record) => {
-          const title = record.displayName || record.display?.name || record.display?.title || record.sourceNativeId || record.id;
-          const subtitle = [record.sourceName || record.source, record.institution || record.display?.institution, record.entityType]
-            .filter(Boolean)
-            .join(" · ");
-          return `
-            <li>
-              <strong>${escapeHtml(title || "Unnamed record")}</strong>
-              <small>${escapeHtml(subtitle || "No summary")}</small>
-            </li>
-          `;
-        })
-        .join("")}
-    </ul>
-  `;
-}
-
-function renderCandidateCards() {
-  const container = elements.candidateList;
-  const items = selectedRunCandidates();
+function renderRecordsTable() {
+  const tbody = elements.runRecordTableBody;
   const selectedRun = getSelectedRun();
-  elements.queueScope.textContent = selectedRun
-    ? `Showing pending candidates for ${selectedRun.id}.`
-    : "Showing pending candidates across all runs.";
-  container.innerHTML = "";
-  container.classList.toggle("empty", items.length === 0);
 
-  if (items.length === 0) {
-    container.innerHTML = "";
-
-    if (selectedRun) {
-      const fallbackRun = state.sourceRuns.find(
-        (run) => run.id !== selectedRun.id && Number(run.dedupCandidateCount || 0) > 0,
-      );
-
-      if (fallbackRun) {
-        const emptyState = document.createElement("div");
-        emptyState.className = "empty-state";
-        emptyState.innerHTML = `
-          <p>No pending dedup candidates for <strong>${escapeHtml(selectedRun.id)}</strong>.</p>
-          <p class="empty-copy">There are still ${escapeHtml(String(fallbackRun.dedupCandidateCount || 0))} candidates waiting in ${escapeHtml(fallbackRun.id)}.</p>
-          <button type="button" data-open-run="${escapeHtml(fallbackRun.id)}">Open review run</button>
-        `;
-        emptyState.querySelector("[data-open-run]")?.addEventListener("click", () => {
-          void selectRun(fallbackRun.id);
-        });
-        container.append(emptyState);
-        updateDashboard();
-        return;
-      }
-    }
-
-    container.textContent = selectedRun
-      ? "No pending dedup candidates for this run."
-      : "No pending dedup candidates.";
-    updateDashboard();
+  if (!selectedRun) {
+    tbody.innerHTML = renderEmptyTableRow(5, "No run selected.");
     return;
   }
 
-  for (const item of items) {
-    const candidate = item.candidate || item;
-    const id = candidate.id || candidate.dedupCandidateId || "unknown-id";
-    const reasons = Array.isArray(candidate.reasonCodes) ? candidate.reasonCodes : [];
-    const evidence = Array.isArray(item.evidence) ? item.evidence : [];
-    const sourceRecords = Array.isArray(item.sourceRecords) ? item.sourceRecords : [];
-    const card = document.createElement("article");
-    card.className = "candidate-card";
-    card.innerHTML = `
-      <div class="candidate-header">
-        <div>
-          <p class="candidate-title">${escapeHtml(candidate.displayName || sourceRecords[0]?.displayName || "Unnamed candidate")}</p>
-          <p class="candidate-subtitle">${escapeHtml(id)}</p>
-        </div>
-        <div class="candidate-tags">
-          <span class="pill">${escapeHtml(candidate.status || "pending_review")}</span>
-          <span class="pill pill-soft">${escapeHtml(candidate.strength || "unknown")} strength</span>
-        </div>
+  syncRecordTypeOptions();
+  const records = filteredRunRecords();
+  ensureSelectedRecord();
+
+  if (!records.length) {
+    tbody.innerHTML = renderEmptyTableRow(5, "No records match the current filter.");
+    return;
+  }
+
+  tbody.innerHTML = records
+    .map((record) => {
+      const selectedClass = record.id === state.selectedRecordId ? "is-selected" : "";
+      const metric = recordMetricLabel(record);
+      return `
+        <tr class="${selectedClass}">
+          <td>
+            <button type="button" class="row-button" data-record-id="${escapeHtml(record.id)}">
+              <span class="row-primary">${escapeHtml(recordTitle(record))}</span>
+              <span class="row-secondary">${escapeHtml(record.sourceNativeId || record.id)}</span>
+            </button>
+          </td>
+          <td>${escapeHtml(record.entityType || "unknown")}</td>
+          <td>
+            <span class="row-primary">${escapeHtml(recordSubtitle(record))}</span>
+            <span class="row-secondary">${escapeHtml(stringValue(record.source) || "unknown source")}</span>
+          </td>
+          <td>
+            <span class="row-primary">${escapeHtml(recordIdentifier(record))}</span>
+            <span class="row-secondary">${escapeHtml(`${metric.label}: ${metric.value}`)}</span>
+          </td>
+          <td>${escapeHtml(record.source || "unknown")}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  tbody.querySelectorAll("[data-record-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedRecordId = button.getAttribute("data-record-id") || "";
+      renderRecordsTable();
+      renderRecordDetail();
+    });
+  });
+}
+
+function renderRecordDetail() {
+  const record = getSelectedRecord();
+  if (!record) {
+    elements.recordDetail.innerHTML = `<p class="detail-empty">Select a record to inspect its structured metadata.</p>`;
+    return;
+  }
+
+  const metric = recordMetricLabel(record);
+  const fields = [
+    ["Entity type", record.entityType || "unknown"],
+    ["Source", record.source || "unknown"],
+    ["Source native ID", record.sourceNativeId || "—"],
+    ["Institution / venue", recordSubtitle(record)],
+    ["Primary identifier", recordIdentifier(record)],
+    [metric.label, metric.value],
+  ];
+
+  elements.recordDetail.innerHTML = `
+    <section class="detail-section">
+      <h4>${escapeHtml(recordTitle(record))}</h4>
+      <p class="summary-muted">${escapeHtml(record.sourceRunId || state.selectedRunId)}</p>
+      <div class="badge-row" style="margin-top: 0.6rem;">
+        ${renderPill(record.entityType || "unknown", "neutral")}
+        ${renderPill(record.source || "source", "neutral")}
       </div>
-      <div class="reason-row">
-        ${reasons.length ? reasons.map((reason) => `<span class="reason-chip">${escapeHtml(reason)}</span>`).join("") : '<span class="reason-chip">no reason codes</span>'}
-      </div>
-      <section class="candidate-section">
-        <h4>Why we think these may be the same person</h4>
-        ${renderEvidenceList(evidence)}
-      </section>
-      <section class="candidate-section">
-        <h4>Source records in this merge group</h4>
-        ${renderSourceRecordList(sourceRecords)}
-      </section>
-      <div class="candidate-actions">
-        <button type="button" data-select-candidate="${escapeHtml(id)}">Review this candidate</button>
-      </div>
+    </section>
+    <section class="detail-section">
+      <table class="detail-table">
+        <tbody>
+          ${fields
+            .map(
+              ([label, value]) => `
+                <tr>
+                  <th scope="row">${escapeHtml(label)}</th>
+                  <td>${escapeHtml(String(value))}</td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </section>
+    <section class="detail-section">
+      <h4>Display / raw summary</h4>
+      <details class="response-box">
+        <summary>Structured payload</summary>
+        <pre>${escapeHtml(JSON.stringify({ display: record.display, rawSummary: record.rawSummary }, null, 2))}</pre>
+      </details>
       <details class="response-box">
         <summary>Raw payload</summary>
-        <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+        <pre>${escapeHtml(JSON.stringify(record.raw ?? {}, null, 2))}</pre>
       </details>
-    `;
-    card.querySelector("[data-select-candidate]")?.addEventListener("click", () => {
-      elements.dedupCandidateId.value = id;
-      elements.reviewNotes.focus();
-    });
-    container.append(card);
-  }
-
-  updateDashboard();
-}
-
-function renderApprovedField(label, values) {
-  const rendered = Array.isArray(values) && values.length
-    ? values.map((value) => `<li>${escapeHtml(value)}</li>`).join("")
-    : "<li>None</li>";
-  return `
-    <section class="approved-field">
-      <h4>${escapeHtml(label)}</h4>
-      <ul>${rendered}</ul>
     </section>
   `;
 }
 
-function renderApprovedCards() {
-  const container = elements.approvedList;
-  container.innerHTML = "";
-  container.classList.toggle("empty", state.approvedEntities.length === 0);
+function alternateReviewRun() {
+  return state.sourceRuns.find(
+    (run) => run.id !== state.selectedRunId && numberValue(run.dedupCandidateCount) > 0,
+  ) ?? null;
+}
 
-  if (state.approvedEntities.length === 0) {
-    container.textContent = "No approved entities found.";
-    updateDashboard();
+function renderCandidatesTable() {
+  const tbody = elements.candidateTableBody;
+  const items = filteredCandidateDetails();
+  const queueMode = elements.candidateStatusFilter.value;
+  const selectedRun = getSelectedRun();
+
+  if (!selectedRun) {
+    elements.queueScope.textContent = "Select a run to scope the queue.";
+    tbody.innerHTML = renderEmptyTableRow(5, "No run selected.");
+    setReviewControls(null);
     return;
   }
 
-  for (const entity of state.approvedEntities) {
-    const card = document.createElement("article");
-    card.className = "approved-card";
-    card.innerHTML = `
-      <div class="approved-card-header">
-        <div>
-          <p class="candidate-title">${escapeHtml(entity.displayName || entity.id || "Approved entity")}</p>
-          <p class="candidate-subtitle">${escapeHtml(entity.id || "unknown-id")}</p>
-        </div>
-        <div class="candidate-tags">
-          <span class="pill">${escapeHtml(entity.entityType || "entity")}</span>
-          <span class="pill pill-soft">${escapeHtml(String(entity.sourceRecordIds?.length || 0))} records</span>
-        </div>
-      </div>
-      <div class="approved-grid">
-        ${renderApprovedField("Emails", entity.emails)}
-        ${renderApprovedField("Homepages", entity.homepages)}
-        ${renderApprovedField("GitHub", entity.githubUrls)}
-        ${renderApprovedField("ORCID", entity.orcids)}
-        ${renderApprovedField("Institutions", entity.institutions)}
-      </div>
-    `;
-    container.append(card);
+  elements.queueScope.textContent =
+    queueMode === "all"
+      ? `Showing all candidate states for ${selectedRun.id}.`
+      : queueMode === "reviewed"
+        ? `Showing reviewed candidates for ${selectedRun.id}.`
+        : `Showing pending candidates for ${selectedRun.id}.`;
+
+  ensureSelectedCandidate();
+
+  if (!items.length) {
+    const fallbackRun = queueMode === "pending_review" ? alternateReviewRun() : null;
+    const actionHtml = fallbackRun
+      ? ` <button type="button" class="button-muted" data-jump-run="${escapeHtml(fallbackRun.id)}">Open ${escapeHtml(fallbackRun.id)}</button>`
+      : "";
+    const message =
+      queueMode === "pending_review"
+        ? "No pending candidates for this run."
+        : queueMode === "reviewed"
+          ? "No reviewed candidates for this run."
+          : "No candidates found for this run.";
+    tbody.innerHTML = renderEmptyTableRow(5, message, actionHtml);
+    tbody.querySelector("[data-jump-run]")?.addEventListener("click", () => {
+      void selectRun(fallbackRun?.id || "");
+    });
+    setReviewControls(null);
+    return;
   }
 
-  updateDashboard();
+  tbody.innerHTML = items
+    .map((item) => {
+      const candidate = candidateObject(item);
+      const selectedClass = candidate?.id === state.selectedCandidateId ? "is-selected" : "";
+      return `
+        <tr class="${selectedClass}">
+          <td>
+            <button type="button" class="row-button" data-candidate-id="${escapeHtml(candidate.id)}">
+              <span class="row-primary">${escapeHtml(candidate.displayName || "Unnamed candidate")}</span>
+              <span class="row-secondary">${escapeHtml(candidate.id)}</span>
+            </button>
+          </td>
+          <td><div class="badge-row">${renderReasonChips(candidate.reasonCodes)}</div></td>
+          <td>${escapeHtml(String(arrayValue(item.evidence).length))}</td>
+          <td>${escapeHtml(String(arrayValue(item.sourceRecords).length))}</td>
+          <td>
+            ${renderPill(candidate.strength || "weak", `strength-${candidate.strength || "weak"}`)}
+            <div class="row-secondary" style="margin-top: 0.35rem;">${escapeHtml(candidate.status || "pending_review")}</div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  tbody.querySelectorAll("[data-candidate-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedCandidateId = button.getAttribute("data-candidate-id") || "";
+      renderCandidatesTable();
+      renderCandidateDetail();
+    });
+  });
+
+  setReviewControls(getSelectedCandidateItem());
+}
+
+function renderCandidateDetail() {
+  const item = getSelectedCandidateItem();
+  if (!item) {
+    elements.candidateDetail.innerHTML = `<p class="detail-empty">Select a candidate to compare source records and evidence.</p>`;
+    return;
+  }
+
+  const candidate = candidateObject(item);
+  const sourceRecords = arrayValue(item.sourceRecords);
+  const evidence = arrayValue(item.evidence);
+
+  elements.candidateDetail.innerHTML = `
+    <section class="detail-section">
+      <h4>${escapeHtml(candidate.displayName || "Unnamed candidate")}</h4>
+      <div class="badge-row" style="margin-top: 0.6rem;">
+        ${renderPill(candidate.status || "pending_review", `label-${candidate.status || "pending_review"}`)}
+        ${renderPill(candidate.strength || "weak", `strength-${candidate.strength || "weak"}`)}
+        ${renderPill(`${sourceRecords.length} records`, "neutral")}
+        ${renderPill(`${evidence.length} evidence`, "neutral")}
+      </div>
+      <div class="badge-row" style="margin-top: 0.6rem;">${renderReasonChips(candidate.reasonCodes)}</div>
+    </section>
+    <section class="detail-section">
+      <h4>Source record compare</h4>
+      <div class="table-shell">
+        <table class="mini-table">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Name / title</th>
+              <th>Institution / venue</th>
+              <th>Identifier</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sourceRecords
+              .map(
+                (record) => `
+                  <tr>
+                    <td>${escapeHtml(record.source || "unknown")}</td>
+                    <td>${escapeHtml(recordTitle(record))}</td>
+                    <td>${escapeHtml(recordSubtitle(record))}</td>
+                    <td>${escapeHtml(recordIdentifier(record))}</td>
+                  </tr>
+                `,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section class="detail-section">
+      <h4>Evidence</h4>
+      <div class="table-shell">
+        <table class="mini-table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Value</th>
+              <th>Quality</th>
+              <th>Path</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${evidence
+              .map(
+                (entry) => `
+                  <tr>
+                    <td>${escapeHtml(entry.evidenceType || "unknown")}</td>
+                    <td>${escapeHtml(entry.normalizedValue || entry.rawValue || "—")}</td>
+                    <td>${escapeHtml(entry.quality || "unknown")}</td>
+                    <td>${escapeHtml(entry.extractedFrom?.sourcePath || "unknown")}</td>
+                  </tr>
+                `,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <details class="response-box">
+      <summary>Raw candidate payload</summary>
+      <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+    </details>
+  `;
+}
+
+function setReviewControls(item) {
+  const candidate = candidateObject(item);
+  const hasCandidate = Boolean(candidate?.id);
+  elements.dedupCandidateId.value = candidate?.id || "";
+  elements.reviewSubmitButton.disabled = !hasCandidate;
+  elements.approveSamePersonButton.disabled = !hasCandidate;
+  elements.approveNotSamePersonButton.disabled = !hasCandidate;
+  elements.approveUnsureButton.disabled = !hasCandidate;
+
+  const isSingleton = hasCandidate && arrayValue(candidate.sourceRecordIds).length === 1;
+  const primaryLabel = isSingleton ? "approve_entity" : "same_person";
+  elements.approveSamePersonButton.textContent = isSingleton ? "Approve entity" : "Same person";
+  elements.reviewLabelSamePersonOption.textContent = primaryLabel;
+  if (!hasCandidate) {
+    elements.reviewLabelSamePersonOption.textContent = "same_person";
+    elements.approveSamePersonButton.textContent = "Same person";
+  }
+}
+
+function renderApprovedTable() {
+  const tbody = elements.approvedTableBody;
+  const entities = filteredApprovedEntities()
+    .slice()
+    .sort((left, right) => timestampValue(right.createdAt) - timestampValue(left.createdAt));
+
+  ensureSelectedApprovedEntity();
+
+  if (!entities.length) {
+    tbody.innerHTML = renderEmptyTableRow(
+      6,
+      elements.approvedScopeFilter.value === "all"
+        ? "No approved entities found."
+        : "No approved entities for this run yet.",
+    );
+    elements.approvedDetail.innerHTML = `<p class="detail-empty">Select an approved entity to inspect surviving contact fields.</p>`;
+    return;
+  }
+
+  tbody.innerHTML = entities
+    .map((entity) => {
+      const selectedClass = entity.id === state.selectedApprovedEntityId ? "is-selected" : "";
+      return `
+        <tr class="${selectedClass}">
+          <td>
+            <button type="button" class="row-button" data-approved-id="${escapeHtml(entity.id)}">
+              <span class="row-primary">${escapeHtml(entity.displayName || entity.id)}</span>
+              <span class="row-secondary">${escapeHtml(entity.entityType || "entity")}</span>
+            </button>
+          </td>
+          <td>${escapeHtml(renderListPreview(entity.emails, 1))}</td>
+          <td>${escapeHtml(renderListPreview(entity.homepages, 1))}</td>
+          <td>${escapeHtml(renderListPreview(entity.institutions, 2))}</td>
+          <td>${escapeHtml(String(arrayValue(entity.sourceRecordIds).length))}</td>
+          <td>${escapeHtml(formatDateTime(entity.createdAt))}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  tbody.querySelectorAll("[data-approved-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedApprovedEntityId = button.getAttribute("data-approved-id") || "";
+      renderApprovedTable();
+      renderApprovedDetail();
+    });
+  });
+}
+
+function renderApprovedDetail() {
+  const entity = getSelectedApprovedEntity();
+  if (!entity) {
+    elements.approvedDetail.innerHTML = `<p class="detail-empty">Select an approved entity to inspect surviving contact fields.</p>`;
+    return;
+  }
+
+  elements.approvedDetail.innerHTML = `
+    <section class="detail-section">
+      <h4>${escapeHtml(entity.displayName || entity.id)}</h4>
+      <div class="badge-row" style="margin-top: 0.6rem;">
+        ${renderPill("approved", "approved")}
+        ${renderPill(entity.entityType || "entity", "neutral")}
+        ${renderPill(`${arrayValue(entity.sourceRecordIds).length} source records`, "neutral")}
+      </div>
+    </section>
+    <section class="detail-section">
+      <div class="detail-grid">
+        <div class="detail-card">
+          <span>Emails</span>
+          <strong>${escapeHtml(renderListPreview(entity.emails, 3))}</strong>
+        </div>
+        <div class="detail-card">
+          <span>Homepages</span>
+          <strong>${escapeHtml(renderListPreview(entity.homepages, 2))}</strong>
+        </div>
+        <div class="detail-card">
+          <span>GitHub</span>
+          <strong>${escapeHtml(renderListPreview(entity.githubUrls, 2))}</strong>
+        </div>
+        <div class="detail-card">
+          <span>ORCID</span>
+          <strong>${escapeHtml(renderListPreview(entity.orcids, 2))}</strong>
+        </div>
+      </div>
+    </section>
+    <section class="detail-section">
+      <h4>Institutions</h4>
+      <ul class="list-inline">
+        ${arrayValue(entity.institutions)
+          .map((institution) => `<li>${escapeHtml(institution)}</li>`)
+          .join("") || "<li>None</li>"}
+      </ul>
+    </section>
+    <details class="response-box">
+      <summary>Approved payload</summary>
+      <pre>${escapeHtml(JSON.stringify(entity, null, 2))}</pre>
+    </details>
+  `;
+}
+
+function updateUploadCurlPreview() {
+  try {
+    const body = buildUploadBody();
+    const apiBaseUrl = getApiBaseUrl() || "$SOURCING_API_BASE_URL";
+    const url = joinUrl(apiBaseUrl, elements.uploadEndpoint.value.trim());
+    elements.uploadCurl.textContent = buildCurl(url, body);
+  } catch (error) {
+    elements.uploadCurl.textContent = error.message;
+  }
 }
 
 async function handleFileSelection(event) {
@@ -787,18 +1157,8 @@ async function handleFileSelection(event) {
   } else {
     elements.jsonlInput.value = text;
   }
-  updateUploadCurlPreview();
-}
 
-function updateUploadCurlPreview() {
-  try {
-    const body = buildUploadBody();
-    const apiBaseUrl = getApiBaseUrl() || "$SOURCING_API_BASE_URL";
-    const url = joinUrl(apiBaseUrl, elements.uploadEndpoint.value.trim());
-    elements.uploadCurl.textContent = buildCurl(url, body);
-  } catch (error) {
-    elements.uploadCurl.textContent = error.message;
-  }
+  updateUploadCurlPreview();
 }
 
 async function createSourceRun() {
@@ -838,200 +1198,291 @@ async function uploadRecords() {
 
     const endpoint = elements.uploadEndpoint.value.trim();
     const body = buildUploadBody();
-    updateUploadCurlPreview();
     renderJson(elements.uploadResult, "Uploading...");
+    updateUploadCurlPreview();
     const result = await requestJson(endpoint, {
       method: "POST",
       body: JSON.stringify(body),
     });
     setConnectionStatus("Upload API reachable", "ready");
     renderJson(elements.uploadResult, result ?? { ok: true });
-    await Promise.all([
-      refreshSourceRuns(elements.runId.value.trim()),
-      refreshCandidates(),
-    ]);
+    await refreshAll(elements.runId.value.trim());
   } catch (error) {
-    setConnectionStatus("Upload failed; curl fallback ready", "error");
+    setConnectionStatus("Upload failed", "error");
     renderJson(elements.uploadResult, error.message);
     updateUploadCurlPreview();
   }
 }
 
-async function selectRun(runId) {
-  state.selectedRunId = runId || "";
-  if (state.selectedRunId) {
-    elements.runId.value = state.selectedRunId;
+async function completeSelectedRun() {
+  const selectedRun = getSelectedRun();
+  if (!selectedRun) {
+    return;
   }
-  renderSourceRunCards();
-  renderRunSummary();
-  renderCandidateCards();
-  updateDashboard();
-  await refreshRunRecords();
+
+  try {
+    renderJson(elements.sourceRunResult, "Completing source run...");
+    const result = await requestJson(`/source-runs/${encodeURIComponent(selectedRun.id)}/complete`, {
+      method: "POST",
+    });
+    renderJson(elements.sourceRunResult, result ?? { ok: true });
+    setConnectionStatus("Source run completed", "ready");
+    await refreshSourceRuns(selectedRun.id);
+  } catch (error) {
+    setConnectionStatus("Run completion failed", "error");
+    renderJson(elements.sourceRunResult, { error: error.message });
+  }
+}
+
+async function checkHealth() {
+  await requestJson("/health");
 }
 
 async function refreshSourceRuns(preferredRunId = "") {
-  try {
-    elements.sourceRunList.classList.add("empty");
-    elements.sourceRunList.textContent = "Loading source runs...";
-    const payload = await requestJson("/source-runs?limit=25");
-    state.sourceRuns = sortRunsForReview(normalizeListPayload(payload));
-    const preferred = preferredRunId || state.selectedRunId || elements.runId.value.trim();
-    const nextRunId = chooseRunId(state.sourceRuns, preferred);
-    setConnectionStatus("Source runs loaded", "ready");
-    await selectRun(nextRunId);
-  } catch (error) {
-    setConnectionStatus("Source runs failed", "error");
-    elements.sourceRunList.classList.add("empty");
-    elements.sourceRunList.textContent = error.message;
+  const payload = await requestJson("/source-runs?limit=50");
+  state.sourceRuns = sortRunsForReview(normalizeListPayload(payload));
+  state.selectedRunId = chooseRunId(state.sourceRuns, preferredRunId || state.selectedRunId || elements.runId.value.trim());
+  if (state.selectedRunId) {
+    elements.runId.value = state.selectedRunId;
   }
+  renderSourceRunsTable();
+  await refreshRunRecords();
+  renderRunSummary();
 }
 
 async function refreshRunRecords() {
   const runId = state.selectedRunId;
   if (!runId) {
     state.sourceRecords = [];
-    renderRunSummary();
-    renderRunRecords();
+    state.selectedRecordId = "";
+    renderRecordsTable();
+    renderRecordDetail();
+    renderApprovedTable();
+    renderApprovedDetail();
     updateDashboard();
     return;
   }
 
-  try {
-    elements.runRecordList.classList.add("empty");
-    elements.runRecordList.textContent = "Loading run records...";
-    const payload = await requestJson(`/source-runs/${encodeURIComponent(runId)}/source-records?limit=250`);
-    state.sourceRecords = normalizeListPayload(payload);
-    renderRunSummary();
-    renderRunRecords();
-    updateDashboard();
-  } catch (error) {
-    elements.runRecordList.classList.add("empty");
-    elements.runRecordList.textContent = error.message;
-  }
+  const payload = await requestJson(`/source-runs/${encodeURIComponent(runId)}/source-records?limit=500`);
+  state.sourceRecords = normalizeListPayload(payload);
+  ensureSelectedRecord();
+  renderRecordsTable();
+  renderRecordDetail();
+  renderApprovedTable();
+  renderApprovedDetail();
+  updateDashboard();
 }
 
-async function refreshCandidates() {
-  try {
-    elements.candidateList.classList.add("empty");
-    elements.candidateList.textContent = "Loading pending candidates...";
-    const payload = await requestJson("/dedup-candidates?status=pending_review&include=details");
-    state.pendingCandidates = normalizeListPayload(payload);
-    setConnectionStatus("Review API reachable", "ready");
-    renderCandidateCards();
-  } catch (error) {
-    setConnectionStatus("Review queue failed", "error");
-    elements.candidateList.classList.add("empty");
-    elements.candidateList.textContent = error.message;
-    updateDashboard();
-  }
-}
-
-async function submitReview(event) {
-  event.preventDefault();
-  const body = {
-    dedupCandidateId: elements.dedupCandidateId.value.trim(),
-    label: elements.reviewLabel.value,
-    notes: elements.reviewNotes.value.trim(),
-  };
-
-  try {
-    renderJson(elements.reviewResult, "Submitting review...");
-    const result = await requestJson("/review-labels", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    setConnectionStatus("Review label submitted", "ready");
-    renderJson(elements.reviewResult, result ?? { ok: true });
-    await Promise.all([refreshCandidates(), refreshApprovedEntities(), refreshSourceRuns(state.selectedRunId)]);
-  } catch (error) {
-    setConnectionStatus("Review submission failed", "error");
-    renderJson(elements.reviewResult, {
-      error: error.message,
-      curl: buildCurl(joinUrl(getApiBaseUrl() || "$SOURCING_API_BASE_URL", "/review-labels"), body),
-    });
-  }
+async function refreshCandidateDetails() {
+  const payload = await requestJson("/dedup-candidates?include=details");
+  state.candidateDetails = normalizeListPayload(payload);
+  ensureSelectedCandidate();
+  renderRunSummary();
+  renderCandidatesTable();
+  renderCandidateDetail();
+  updateDashboard();
 }
 
 async function refreshApprovedEntities() {
+  const payload = await requestJson("/approved-entities");
+  state.approvedEntities = normalizeListPayload(payload);
+  ensureSelectedApprovedEntity();
+  renderRunSummary();
+  renderApprovedTable();
+  renderApprovedDetail();
+  updateDashboard();
+}
+
+async function refreshAll(preferredRunId = "") {
   try {
-    elements.approvedList.classList.add("empty");
-    elements.approvedList.textContent = "Loading approved entities...";
-    const payload = await requestJson("/approved-entities");
-    state.approvedEntities = normalizeListPayload(payload);
-    setConnectionStatus("Approved entities API reachable", "ready");
-    renderApprovedCards();
+    setConnectionStatus("Refreshing review console...", "idle");
+    await checkHealth();
+    setConnectionStatus("API reachable", "ready");
+    await refreshSourceRuns(preferredRunId);
+    await Promise.all([refreshCandidateDetails(), refreshApprovedEntities()]);
+    setConnectionStatus("Review console ready", "ready");
   } catch (error) {
-    setConnectionStatus("Approved entities failed", "error");
-    elements.approvedList.classList.add("empty");
-    elements.approvedList.textContent = error.message;
+    setConnectionStatus(`Refresh failed: ${error.message}`, "error");
     updateDashboard();
   }
 }
 
-async function checkHealth() {
-  try {
-    await requestJson("/health");
-    setConnectionStatus("API reachable", "ready");
-  } catch (error) {
-    setConnectionStatus(`API check failed: ${error.message}`, "error");
-    throw error;
+async function selectRun(runId) {
+  state.selectedRunId = runId;
+  state.selectedRecordId = "";
+  state.selectedCandidateId = "";
+  if (runId) {
+    elements.runId.value = runId;
   }
+  renderSourceRunsTable();
+  await refreshRunRecords();
+  renderRunSummary();
+  renderCandidatesTable();
+  renderCandidateDetail();
+  renderApprovedTable();
+  renderApprovedDetail();
+  updateDashboard();
 }
 
 function saveSettings() {
-  const apiBaseUrl = getApiBaseUrl();
-  localStorage.setItem(STORAGE_KEY, apiBaseUrl);
-  setConnectionStatus(apiBaseUrl ? "API base saved" : "API base missing", apiBaseUrl ? "ready" : "idle");
+  localStorage.setItem(STORAGE_KEY, getApiBaseUrl());
   updateDashboard();
+}
+
+async function submitReviewLabel(labelOverride = "") {
+  const dedupCandidateId = elements.dedupCandidateId.value.trim();
+  if (!dedupCandidateId) {
+    throw new Error("Select a candidate first.");
+  }
+
+  const body = {
+    dedupCandidateId,
+    label: labelOverride || elements.reviewLabel.value,
+    notes: elements.reviewNotes.value.trim(),
+  };
+
+  renderJson(elements.reviewResult, "Submitting review...");
+  const result = await requestJson("/review-labels", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  renderJson(elements.reviewResult, result ?? { ok: true });
+  elements.reviewNotes.value = "";
+  await Promise.all([refreshCandidateDetails(), refreshApprovedEntities(), refreshSourceRuns(state.selectedRunId)]);
+  return result;
+}
+
+function bindEvents() {
+  elements.saveSettingsButton.addEventListener("click", () => {
+    saveSettings();
+    void refreshAll(state.selectedRunId);
+  });
+
+  elements.refreshAllButton.addEventListener("click", () => {
+    void refreshAll(state.selectedRunId);
+  });
+
+  elements.refreshRunsButton.addEventListener("click", () => {
+    void refreshSourceRuns(state.selectedRunId);
+  });
+
+  elements.completeRunButton.addEventListener("click", () => {
+    void completeSelectedRun();
+  });
+
+  elements.recordTypeFilter.addEventListener("change", () => {
+    renderRecordsTable();
+    renderRecordDetail();
+    updateDashboard();
+  });
+
+  elements.recordSort.addEventListener("change", () => {
+    renderRecordsTable();
+    renderRecordDetail();
+  });
+
+  elements.recordSearch.addEventListener("input", () => {
+    renderRecordsTable();
+    renderRecordDetail();
+  });
+
+  elements.candidateStatusFilter.addEventListener("change", () => {
+    renderRunSummary();
+    renderCandidatesTable();
+    renderCandidateDetail();
+    updateDashboard();
+  });
+
+  elements.approvedScopeFilter.addEventListener("change", () => {
+    renderRunSummary();
+    renderApprovedTable();
+    renderApprovedDetail();
+    updateDashboard();
+  });
+
+  elements.refreshCandidatesButton.addEventListener("click", () => {
+    void refreshCandidateDetails();
+  });
+
+  elements.refreshApprovedButton.addEventListener("click", () => {
+    void refreshApprovedEntities();
+  });
+
+  elements.reviewForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await submitReviewLabel();
+      setConnectionStatus("Review submitted", "ready");
+    } catch (error) {
+      setConnectionStatus("Review submission failed", "error");
+      renderJson(elements.reviewResult, { error: error.message });
+    }
+  });
+
+  elements.approveSamePersonButton.addEventListener("click", async () => {
+    try {
+      await submitReviewLabel("same_person");
+      setConnectionStatus("Review submitted", "ready");
+    } catch (error) {
+      setConnectionStatus("Review submission failed", "error");
+      renderJson(elements.reviewResult, { error: error.message });
+    }
+  });
+
+  elements.approveNotSamePersonButton.addEventListener("click", async () => {
+    try {
+      await submitReviewLabel("not_same_person");
+      setConnectionStatus("Review submitted", "ready");
+    } catch (error) {
+      setConnectionStatus("Review submission failed", "error");
+      renderJson(elements.reviewResult, { error: error.message });
+    }
+  });
+
+  elements.approveUnsureButton.addEventListener("click", async () => {
+    try {
+      await submitReviewLabel("unsure");
+      setConnectionStatus("Review submitted", "ready");
+    } catch (error) {
+      setConnectionStatus("Review submission failed", "error");
+      renderJson(elements.reviewResult, { error: error.message });
+    }
+  });
+
+  elements.apiBaseUrl.addEventListener("input", () => {
+    updateUploadCurlPreview();
+    updateDashboard();
+  });
+
+  elements.runId.addEventListener("input", () => {
+    updateUploadCurlPreview();
+  });
+
+  elements.runId.addEventListener("change", () => {
+    const requestedRunId = elements.runId.value.trim();
+    if (requestedRunId) {
+      void refreshAll(requestedRunId);
+    }
+  });
+
+  elements.jsonlFile.addEventListener("change", handleFileSelection);
+  elements.jsonlInput.addEventListener("input", updateUploadCurlPreview);
+  elements.uploadEndpoint.addEventListener("input", updateUploadCurlPreview);
+  elements.createRunButton.addEventListener("click", () => {
+    void createSourceRun();
+  });
+  elements.uploadButton.addEventListener("click", () => {
+    void uploadRecords();
+  });
 }
 
 function boot() {
   elements.apiBaseUrl.value = localStorage.getItem(STORAGE_KEY) || "/api/sourcing";
   updateUploadCurlPreview();
+  bindEvents();
+  setReviewControls(null);
   updateDashboard();
-  setConnectionStatus(elements.apiBaseUrl.value ? "API base loaded" : "API base missing", elements.apiBaseUrl.value ? "ready" : "idle");
-
-  elements.saveSettingsButton.addEventListener("click", saveSettings);
-  elements.apiBaseUrl.addEventListener("input", () => {
-    updateUploadCurlPreview();
-    updateDashboard();
-  });
-  elements.runId.addEventListener("input", () => {
-    updateUploadCurlPreview();
-    updateDashboard();
-  });
-  elements.runId.addEventListener("change", () => {
-    const requestedRunId = elements.runId.value.trim();
-    if (requestedRunId && requestedRunId !== state.selectedRunId) {
-      void refreshSourceRuns(requestedRunId);
-    }
-  });
-  elements.jsonlInput.addEventListener("input", updateUploadCurlPreview);
-  elements.uploadEndpoint.addEventListener("input", updateUploadCurlPreview);
-  elements.jsonlFile.addEventListener("change", handleFileSelection);
-  elements.createRunButton.addEventListener("click", createSourceRun);
-  elements.uploadButton.addEventListener("click", uploadRecords);
-  elements.refreshRunsButton.addEventListener("click", () => {
-    void refreshSourceRuns(state.selectedRunId);
-  });
-  elements.recordTypeFilter.addEventListener("change", renderRunRecords);
-  elements.recordSearch.addEventListener("input", renderRunRecords);
-  elements.refreshCandidatesButton.addEventListener("click", () => {
-    void refreshCandidates();
-  });
-  elements.reviewForm.addEventListener("submit", submitReview);
-  elements.refreshApprovedButton.addEventListener("click", () => {
-    void refreshApprovedEntities();
-  });
-
-  checkHealth()
-    .then(async () => {
-      await refreshSourceRuns();
-      await Promise.all([refreshCandidates(), refreshApprovedEntities()]);
-    })
-    .catch(() => {
-      updateDashboard();
-    });
+  void refreshAll();
 }
 
 boot();

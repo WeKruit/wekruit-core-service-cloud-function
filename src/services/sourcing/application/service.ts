@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   buildEvidenceDedupCandidate,
   buildNameInstitutionDedupCandidate,
+  buildSingletonReviewCandidate,
 } from './dedup';
 import {
   buildNameInstitutionKey,
@@ -376,8 +377,38 @@ export class SourcingService {
     }
 
     const groupedCandidates = aggregateDedupCandidates(generated);
+    const multiRecordSourceIds = new Set(
+      groupedCandidates
+        .filter((candidate) => candidate.sourceRecordIds.length > 1)
+        .flatMap((candidate) => candidate.sourceRecordIds),
+    );
+
+    const existingCandidates = await this.repository.listDedupCandidates();
+    const staleSingletonCandidates = existingCandidates.filter(
+      (candidate) =>
+        candidate.status === 'pending_review' &&
+        candidate.reasonCodes.includes('singleton_review') &&
+        candidate.sourceRecordIds.some((sourceRecordId) => multiRecordSourceIds.has(sourceRecordId)),
+    );
+
+    if (staleSingletonCandidates.length > 0) {
+      await this.repository.markDedupCandidatesReviewed(staleSingletonCandidates, 'suppressed', now);
+    }
+
+    const singletonCandidates = sourceRecords
+      .filter((record) => !multiRecordSourceIds.has(record.id))
+      .map((record) =>
+        buildSingletonReviewCandidate({
+          sourceRecord: record,
+          evidence: evidence.filter((entry) => entry.sourceRecordId === record.id),
+          now,
+        }),
+      )
+      .filter((candidate): candidate is DedupCandidate => Boolean(candidate));
+
+    const dedupCandidatesToPersist = aggregateDedupCandidates([...groupedCandidates, ...singletonCandidates]);
     return Promise.all(
-      groupedCandidates.map((candidate) => this.repository.upsertDedupCandidate(candidate)),
+      dedupCandidatesToPersist.map((candidate) => this.repository.upsertDedupCandidate(candidate)),
     );
   }
 

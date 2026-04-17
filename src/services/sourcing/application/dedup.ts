@@ -62,6 +62,35 @@ function isPersonEntityType(entityType: SourceRecord['entityType'] | EvidenceRec
   return entityType === 'person' || entityType === 'person_profile' || entityType === 'profile';
 }
 
+export function buildSingletonReviewCandidate(input: {
+  sourceRecord: SourceRecord;
+  evidence: EvidenceRecord[];
+  now?: string;
+}): DedupCandidate | null {
+  if (!isPersonEntityType(input.sourceRecord.entityType)) {
+    return null;
+  }
+
+  const now = input.now ?? new Date().toISOString();
+  const singletonHash = stableHash(`singleton_review:${input.sourceRecord.id}`);
+  const sourceRecordIds = [input.sourceRecord.id];
+
+  return {
+    id: stableHash(`dedup:singleton_review:${input.sourceRecord.id}`).slice(0, 32),
+    entityType: input.sourceRecord.entityType,
+    status: 'pending_review',
+    strength: 'weak',
+    reasonCodes: ['singleton_review'],
+    sourceRecordIds,
+    evidenceIds: sortedUnique(input.evidence.map((entry) => entry.id)),
+    valueHashes: [singletonHash],
+    displayName: input.sourceRecord.displayName ?? null,
+    createdFromSourceRunId: input.sourceRecord.sourceRunId,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 export function buildEvidenceDedupCandidate(input: {
   seed: EvidenceRecord;
   matchingEvidence: EvidenceRecord[];
