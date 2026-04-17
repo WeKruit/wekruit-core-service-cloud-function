@@ -4,11 +4,12 @@ Static Firebase Hosting console for the sourcing service review loop.
 
 It covers the minimum operator flow:
 
-1. Create a `sourcing-source-runs` document through the sourcing API.
-2. Upload JSONL source records or CSV rows to the sourcing ingest API.
-3. Read pending `sourcing-dedup-candidates`.
+1. Read recent `sourcing-source-runs`.
+2. Read `sourcing-source-records` for the selected run.
+3. Review pending `sourcing-dedup-candidates`.
 4. Submit `sourcing-review-labels`.
 5. Read `sourcing-approved-entities`.
+6. Use manual JSONL/CSV upload only for replay or backfill.
 
 ## Firebase Prefix Contract
 
@@ -16,7 +17,9 @@ This web client assumes the sourcing backend uses these resource names:
 
 - Firestore collections: `sourcing-*`
 - API routes: `/api/sourcing/...`
+- Source runs list endpoint: `GET /source-runs`
 - Source run endpoint: `/source-runs`
+- Source records by run endpoint: `GET /source-runs/:runId/source-records`
 - Source record batch endpoint: `/source-records:batchUpsert`
 - Review queue endpoint: `/dedup-candidates?status=pending_review&include=details`
 - Review label endpoint: `/review-labels`

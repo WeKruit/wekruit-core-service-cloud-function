@@ -8,12 +8,12 @@
   </head>
   <body>
     <header class="hero">
-      <div>
+      <div class="hero-copy">
         <p class="eyebrow">WeKruit Sourcing Service</p>
-        <h1>Review queue for scraped people</h1>
+        <h1>Review real sourcing runs before anything reaches outbound.</h1>
         <p class="lede">
-          Upload pipeline output, inspect why records may be the same person,
-          approve or reject the merge, then store only reviewed entities.
+          Inspect papers and people from each source run, review merge reasoning,
+          and keep only approved researcher entities.
         </p>
       </div>
       <div class="status-card" aria-live="polite">
@@ -26,23 +26,23 @@
       <section class="workflow" aria-label="Sourcing workflow">
         <div class="workflow-card">
           <span>1</span>
-          <strong>Connect API</strong>
-          <small>Hosting rewrite or local emulator</small>
+          <strong>Source runs</strong>
+          <small>Choose the real batch you want to inspect</small>
         </div>
         <div class="workflow-card">
           <span>2</span>
-          <strong>Create run</strong>
-          <small>Every import gets a source run</small>
+          <strong>Inspect records</strong>
+          <small>Papers and people before merge review</small>
         </div>
         <div class="workflow-card">
           <span>3</span>
-          <strong>Upload records</strong>
-          <small>JSONL or CSV from any pipeline</small>
+          <strong>Review merges</strong>
+          <small>Evidence and reasons first, raw payload last</small>
         </div>
         <div class="workflow-card">
           <span>4</span>
-          <strong>Review merges</strong>
-          <small>Evidence first, raw JSON last</small>
+          <strong>Approve entities</strong>
+          <small>Only reviewed entities are stored downstream</small>
         </div>
       </section>
 
@@ -52,16 +52,24 @@
           <strong id="apiBaseMetric">Not set</strong>
         </article>
         <article>
-          <span>Current run</span>
+          <span>Selected run</span>
           <strong id="runMetric">No run</strong>
         </article>
         <article>
-          <span>Prepared records</span>
-          <strong id="recordMetric">0</strong>
+          <span>Papers in run</span>
+          <strong id="paperMetric">0</strong>
+        </article>
+        <article>
+          <span>People in run</span>
+          <strong id="peopleMetric">0</strong>
         </article>
         <article>
           <span>Pending review</span>
           <strong id="candidateMetric">0</strong>
+        </article>
+        <article>
+          <span>Approved</span>
+          <strong id="approvedMetric">0</strong>
         </article>
       </section>
 
@@ -78,84 +86,54 @@
           id="apiBaseUrl"
           name="apiBaseUrl"
           type="text"
-          placeholder="/api/sourcing or http://127.0.0.1:5101/<project>/us-central1/sourcing-api/api/sourcing"
+          placeholder="/api/sourcing or https://.../sourcing-api/api/sourcing"
         />
         <p class="hint">
           Default is <code>/api/sourcing</code> on Firebase Hosting. Use the full
-          emulator Function URL only when running the static page without the
-          Hosting rewrite.
+          Function URL only when you are bypassing the Hosting rewrite.
         </p>
       </section>
 
       <section class="board">
-        <article class="panel import-panel" aria-labelledby="importTitle">
+        <article class="panel explorer-panel" aria-labelledby="runsTitle">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Ingest</p>
-              <h2 id="importTitle">Create run and upload records</h2>
+              <p class="eyebrow">Run explorer</p>
+              <h2 id="runsTitle">Real source runs</h2>
             </div>
-            <button id="uploadButton" type="button">Upload records</button>
+            <button id="refreshRunsButton" type="button">Refresh runs</button>
           </div>
 
-          <div class="run-card">
+          <div id="sourceRunList" class="list empty">No source runs loaded.</div>
+
+          <div class="run-inspector">
             <div class="section-heading compact-heading">
               <div>
-                <p class="eyebrow">Run metadata</p>
-                <h3>Source run</h3>
+                <p class="eyebrow">Selected run</p>
+                <h3>Run details and records</h3>
               </div>
-              <button id="createRunButton" type="button">Create run</button>
             </div>
-            <div class="mini-grid">
-              <label for="sourceRunSourceName">
-                Source
-                <input id="sourceRunSourceName" value="openalex" />
+            <div id="selectedRunSummary" class="run-summary empty-summary">
+              Choose a run to inspect its papers and people.
+            </div>
+
+            <div class="record-toolbar">
+              <label for="recordTypeFilter">
+                Record type
+                <select id="recordTypeFilter">
+                  <option value="all">all</option>
+                  <option value="research_work">research_work</option>
+                  <option value="person_profile">person_profile</option>
+                </select>
               </label>
-              <label for="sourceRunDomain">
-                Domain
-                <input id="sourceRunDomain" value="researcher" />
-              </label>
-              <label for="sourceRunPipeline">
-                Pipeline
-                <input id="sourceRunPipeline" value="local-jsonl-upload" />
+              <label for="recordSearch">
+                Search
+                <input id="recordSearch" type="search" placeholder="Paper title, person, DOI, institution" />
               </label>
             </div>
-            <details class="response-box">
-              <summary>Run API response</summary>
-              <pre id="sourceRunResult">Create a source run before uploading records.</pre>
-            </details>
+
+            <div id="runRecordList" class="list empty">No run records loaded.</div>
           </div>
-
-          <label for="runId">Source run ID</label>
-          <input id="runId" placeholder="Created automatically, or paste an existing run ID" />
-
-          <label for="uploadEndpoint">Batch endpoint</label>
-          <input id="uploadEndpoint" value="/source-records:batchUpsert" />
-
-          <label for="jsonlFile">JSONL or CSV file</label>
-          <input id="jsonlFile" type="file" accept=".jsonl,.csv,.txt,application/jsonl,text/csv,text/plain" />
-
-          <label for="jsonlInput">Prepared source records</label>
-          <textarea
-            id="jsonlInput"
-            rows="10"
-            spellcheck="false"
-            placeholder='{"sourceNativeId":"A123","entityType":"person","displayName":"Ada Lovelace","institution":"Analytical Engine Lab","rawSummary":{"email":"ada@example.edu","orcid":"0000-0000-0000-000X"},"display":{"homepage":"https://example.edu/ada"},"raw":{}}'
-          ></textarea>
-          <p class="hint">
-            CSV is converted in-browser into source records. Evidence keys such
-            as <code>email</code>, <code>github_url</code>, <code>orcid</code>,
-            <code>homepage</code>, <code>linkedin_url</code>, and
-            <code>project_url</code> are extracted for merge reasoning.
-          </p>
-
-          <details class="response-box" open>
-            <summary>Upload result</summary>
-            <pre id="uploadResult">Waiting for upload.</pre>
-          </details>
-          <details class="response-box">
-            <summary>Fallback curl</summary>
-            <pre id="uploadCurl">Generated after payload is available.</pre>
-          </details>
         </article>
 
         <article class="panel queue-panel" aria-labelledby="reviewTitle">
@@ -163,6 +141,7 @@
             <div>
               <p class="eyebrow">Human review</p>
               <h2 id="reviewTitle">Pending dedup candidates</h2>
+              <p id="queueScope" class="hint inline-hint">Select a run to scope the review queue.</p>
             </div>
             <button id="refreshCandidatesButton" type="button">Refresh queue</button>
           </div>
@@ -207,6 +186,77 @@
         </div>
         <div id="approvedList" class="list empty">No approved entities loaded.</div>
       </section>
+
+      <details class="panel import-panel">
+        <summary>Manual ingest and replay</summary>
+        <div class="manual-shell">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Ingest</p>
+              <h2>Manual source run and upload</h2>
+            </div>
+            <button id="uploadButton" type="button">Upload records</button>
+          </div>
+
+          <div class="run-card">
+            <div class="section-heading compact-heading">
+              <div>
+                <p class="eyebrow">Run metadata</p>
+                <h3>Create source run</h3>
+              </div>
+              <button id="createRunButton" type="button">Create run</button>
+            </div>
+            <div class="mini-grid">
+              <label for="sourceRunSourceName">
+                Source
+                <input id="sourceRunSourceName" value="openalex" />
+              </label>
+              <label for="sourceRunDomain">
+                Domain
+                <input id="sourceRunDomain" value="researcher" />
+              </label>
+              <label for="sourceRunPipeline">
+                Pipeline
+                <input id="sourceRunPipeline" value="local-jsonl-upload" />
+              </label>
+            </div>
+            <details class="response-box">
+              <summary>Run API response</summary>
+              <pre id="sourceRunResult">Create a source run before uploading records.</pre>
+            </details>
+          </div>
+
+          <label for="runId">Source run ID</label>
+          <input id="runId" placeholder="Created automatically, or paste an existing run ID" />
+
+          <label for="uploadEndpoint">Batch endpoint</label>
+          <input id="uploadEndpoint" value="/source-records:batchUpsert" />
+
+          <label for="jsonlFile">JSONL or CSV file</label>
+          <input id="jsonlFile" type="file" accept=".jsonl,.csv,.txt,application/jsonl,text/csv,text/plain" />
+
+          <label for="jsonlInput">Prepared source records</label>
+          <textarea
+            id="jsonlInput"
+            rows="10"
+            spellcheck="false"
+            placeholder='{"sourceNativeId":"A123","entityType":"person","displayName":"Ada Lovelace","institution":"Analytical Engine Lab","rawSummary":{"email":"ada@example.edu","orcid":"0000-0000-0000-000X"},"display":{"homepage":"https://example.edu/ada"},"raw":{}}'
+          ></textarea>
+          <p class="hint">
+            CSV is converted in-browser into source records. This panel is for
+            manual replay; the default operator path is the run explorer above.
+          </p>
+
+          <details class="response-box" open>
+            <summary>Upload result</summary>
+            <pre id="uploadResult">Waiting for upload.</pre>
+          </details>
+          <details class="response-box">
+            <summary>Fallback curl</summary>
+            <pre id="uploadCurl">Generated after payload is available.</pre>
+          </details>
+        </div>
+      </details>
     </main>
 
     <script src="/app.js" defer></script>

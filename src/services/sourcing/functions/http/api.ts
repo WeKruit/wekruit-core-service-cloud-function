@@ -16,6 +16,17 @@ app.use(express.json({ limit: '2mb' }));
 
 const service = new SourcingService();
 
+function parseLimit(value: unknown, fallback: number, max: number): number {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.min(parsed, max);
+}
+
 function jsonError(
   res: { status: (code: number) => { json: (payload: unknown) => unknown } },
   status: number,
@@ -35,6 +46,15 @@ function sendHealth(_req: express.Request, res: express.Response) {
 app.get('/health', sendHealth);
 app.get('/api/sourcing/health', sendHealth);
 
+app.get('/api/sourcing/source-runs', async (req, res, next) => {
+  try {
+    const data = await service.listSourceRuns(parseLimit(req.query.limit, 25, 100));
+    res.status(200).json({ data, total: data.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/sourcing/source-runs', async (req, res, next) => {
   try {
     const parsed = createSourceRunSchema.parse(req.body);
@@ -42,6 +62,22 @@ app.post('/api/sourcing/source-runs', async (req, res, next) => {
     res.status(201).json({ data });
   } catch (error) {
     if (error instanceof z.ZodError) {
+      jsonError(res, 422, error.message);
+      return;
+    }
+    next(error);
+  }
+});
+
+app.get('/api/sourcing/source-runs/:runId/source-records', async (req, res, next) => {
+  try {
+    const data = await service.listSourceRecordsForRun(
+      req.params.runId,
+      parseLimit(req.query.limit, 250, 500),
+    );
+    res.status(200).json({ data, total: data.length });
+  } catch (error) {
+    if (error instanceof Error) {
       jsonError(res, 422, error.message);
       return;
     }

@@ -28,6 +28,13 @@ export class SourcingRepository {
     return snapshot.exists ? (snapshot.data() as SourceRunRecord) : null;
   }
 
+  async listSourceRuns(limit = 50): Promise<SourceRunRecord[]> {
+    const snapshot = await this.sourceRunCollection.limit(Math.max(1, Math.min(limit, 200))).get();
+    return snapshot.docs
+      .map((doc) => doc.data() as SourceRunRecord)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
   async updateSourceRun(run: SourceRunRecord): Promise<SourceRunRecord> {
     await this.sourceRunCollection.doc(run.id).set(run);
     return run;
@@ -49,6 +56,16 @@ export class SourcingRepository {
     return snapshots
       .filter((snapshot) => snapshot.exists)
       .map((snapshot) => snapshot.data() as SourceRecord);
+  }
+
+  async listSourceRecordsForRun(runId: string, limit = 200): Promise<SourceRecord[]> {
+    const snapshot = await this.sourceRecordCollection
+      .where('sourceRunId', '==', runId)
+      .limit(Math.max(1, Math.min(limit, 500)))
+      .get();
+    return snapshot.docs
+      .map((doc) => doc.data() as SourceRecord)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
   async countSourceRecordsForRun(runId: string): Promise<number> {

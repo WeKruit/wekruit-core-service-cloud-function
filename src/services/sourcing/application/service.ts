@@ -171,6 +171,18 @@ export class SourcingService {
     return this.repository.createSourceRun(run);
   }
 
+  async listSourceRuns(limit = 50): Promise<SourceRunRecord[]> {
+    return this.repository.listSourceRuns(limit);
+  }
+
+  async listSourceRecordsForRun(runId: string, limit = 200): Promise<SourceRecord[]> {
+    const sourceRun = await this.repository.getSourceRun(runId);
+    if (!sourceRun) {
+      throw new Error(`Source run "${runId}" was not found.`);
+    }
+    return this.repository.listSourceRecordsForRun(runId, limit);
+  }
+
   async batchUpsertSourceRecords(input: BatchUpsertSourceRecordsInput): Promise<{
     sourceRun: SourceRunRecord;
     sourceRecords: SourceRecord[];
