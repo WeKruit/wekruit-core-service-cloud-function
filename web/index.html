@@ -7,315 +7,323 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="app-header">
-      <div>
-        <p class="eyebrow">WeKruit Sourcing Review</p>
-        <h1>Research review console</h1>
-        <p class="subhead">
-          Table-first review for real source runs, merge candidates, and approved researchers.
-        </p>
-      </div>
-      <div class="header-actions">
-        <div class="status-chip" aria-live="polite">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span id="connectionStatus">API not checked</span>
-        </div>
-        <button id="refreshAllButton" type="button">Refresh all</button>
-      </div>
-    </header>
-
-    <main class="app-shell">
-      <section class="panel config-panel" aria-labelledby="configTitle">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Connection</p>
-            <h2 id="configTitle">API target and state</h2>
-          </div>
-          <button id="saveSettingsButton" type="button">Save target</button>
-        </div>
-
-        <div class="config-row">
-          <label class="inline-field" for="apiBaseUrl">
-            <span>API base URL</span>
-            <input
-              id="apiBaseUrl"
-              name="apiBaseUrl"
-              type="text"
-              placeholder="/api/sourcing or https://.../sourcing-api/api/sourcing"
-            />
-          </label>
-        </div>
-
-        <div class="metric-strip" aria-label="Current metrics">
-          <article class="metric-card">
-            <span>API base</span>
-            <strong id="apiBaseMetric">Not set</strong>
-          </article>
-          <article class="metric-card">
-            <span>Selected run</span>
-            <strong id="runMetric">No run</strong>
-          </article>
-          <article class="metric-card">
-            <span>Papers in run</span>
-            <strong id="paperMetric">0</strong>
-          </article>
-          <article class="metric-card">
-            <span>People in run</span>
-            <strong id="peopleMetric">0</strong>
-          </article>
-          <article class="metric-card">
-            <span>Pending review</span>
-            <strong id="candidateMetric">0</strong>
-          </article>
-          <article class="metric-card">
-            <span>Approved</span>
-            <strong id="approvedMetric">0</strong>
-          </article>
-        </div>
-      </section>
-
-      <section class="panel runs-panel" aria-labelledby="runsTitle">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Runs</p>
-            <h2 id="runsTitle">Real source runs</h2>
-          </div>
-          <div class="panel-actions">
-            <button id="completeRunButton" type="button" class="button-muted">Complete run</button>
-            <button id="refreshRunsButton" type="button">Refresh runs</button>
+    <div class="app-frame">
+      <header class="topbar">
+        <div class="brand-cluster">
+          <p class="eyebrow">WeKruit sourcing ops</p>
+          <div class="title-row">
+            <h1>Research review desk</h1>
+            <p class="subhead">Real source runs, merge evidence, and approved researchers on one screen.</p>
           </div>
         </div>
-
-        <div id="selectedRunSummary" class="summary-banner">
-          Choose a run to inspect its papers, people, and merge queue.
+        <div class="topbar-actions">
+          <div class="status-chip" aria-live="polite">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="connectionStatus">API not checked</span>
+          </div>
+          <button id="refreshAllButton" type="button">Refresh all</button>
         </div>
+      </header>
 
-        <div class="table-shell">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th scope="col">Run</th>
-                <th scope="col">Source</th>
-                <th scope="col">Created</th>
-                <th scope="col">Status</th>
-                <th scope="col">Records</th>
-                <th scope="col">Evidence</th>
-                <th scope="col">Dedup</th>
-                <th scope="col">Trigger</th>
-              </tr>
-            </thead>
-            <tbody id="sourceRunTableBody">
-              <tr>
-                <td colspan="8" class="empty-row">Loading source runs...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="workspace-grid">
-        <article class="panel records-panel" aria-labelledby="recordsTitle">
-          <div class="panel-heading">
+      <main class="app-shell">
+        <section class="panel control-bar" aria-labelledby="configTitle">
+          <div class="control-main">
             <div>
-              <p class="eyebrow">Inspect</p>
-              <h2 id="recordsTitle">Run records</h2>
+              <p class="eyebrow">Connection</p>
+              <h2 id="configTitle">Target and live counts</h2>
+            </div>
+            <div class="control-inputs">
+              <label class="inline-field" for="apiBaseUrl">
+                <span>API base URL</span>
+                <input
+                  id="apiBaseUrl"
+                  name="apiBaseUrl"
+                  type="text"
+                  placeholder="/api/sourcing or https://.../sourcing-api/api/sourcing"
+                />
+              </label>
+              <button id="saveSettingsButton" type="button" class="button-muted">Save target</button>
             </div>
           </div>
 
-          <div class="toolbar">
-            <label class="inline-field" for="recordTypeFilter">
-              <span>Type</span>
-              <select id="recordTypeFilter">
-                <option value="all">all</option>
-                <option value="research_work">research_work</option>
-                <option value="person_profile">person_profile</option>
-              </select>
-            </label>
-            <label class="inline-field" for="recordSort">
-              <span>Sort</span>
-              <select id="recordSort">
-                <option value="impact_desc">impact</option>
-                <option value="recent_desc">recent</option>
-                <option value="name_asc">name/title</option>
-              </select>
-            </label>
-            <label class="inline-field inline-field--wide" for="recordSearch">
-              <span>Search</span>
-              <input id="recordSearch" type="search" placeholder="Paper title, person, DOI, institution" />
-            </label>
+          <div class="metric-strip" aria-label="Current metrics">
+            <article class="metric-card">
+              <span>API base</span>
+              <strong id="apiBaseMetric">Not set</strong>
+            </article>
+            <article class="metric-card">
+              <span>Selected run</span>
+              <strong id="runMetric">No run</strong>
+            </article>
+            <article class="metric-card">
+              <span>Papers in run</span>
+              <strong id="paperMetric">0</strong>
+            </article>
+            <article class="metric-card">
+              <span>People in run</span>
+              <strong id="peopleMetric">0</strong>
+            </article>
+            <article class="metric-card">
+              <span>Pending review</span>
+              <strong id="candidateMetric">0</strong>
+            </article>
+            <article class="metric-card">
+              <span>Approved</span>
+              <strong id="approvedMetric">0</strong>
+            </article>
           </div>
+        </section>
 
-          <div class="content-split">
-            <div class="table-shell table-shell--scroll">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Record</th>
-                    <th scope="col">Type</th>
-                    <th scope="col">Institution / venue</th>
-                    <th scope="col">Key field</th>
-                    <th scope="col">Source</th>
-                  </tr>
-                </thead>
-                <tbody id="runRecordTableBody">
-                  <tr>
-                    <td colspan="5" class="empty-row">No run selected.</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <aside class="detail-panel" aria-labelledby="recordDetailTitle">
-              <div class="detail-header">
-                <p class="eyebrow">Record detail</p>
-                <h3 id="recordDetailTitle">Selected record</h3>
-              </div>
-              <div id="recordDetail" class="detail-content">
-                Select a record to inspect paper metadata or researcher profile evidence.
-              </div>
-            </aside>
-          </div>
-        </article>
-
-        <article class="panel review-panel" aria-labelledby="reviewTitle">
+        <section class="panel runs-panel" aria-labelledby="runsTitle">
           <div class="panel-heading">
             <div>
-              <p class="eyebrow">Review</p>
-              <h2 id="reviewTitle">Pending dedup queue</h2>
-              <p id="queueScope" class="inline-copy">Select a run to scope the queue.</p>
+              <p class="eyebrow">Runs</p>
+              <h2 id="runsTitle">Live source runs</h2>
             </div>
             <div class="panel-actions">
-              <label class="inline-field" for="candidateStatusFilter">
-                <span>Queue view</span>
-                <select id="candidateStatusFilter">
-                  <option value="pending_review">pending_review</option>
-                  <option value="reviewed">reviewed</option>
-                  <option value="all">all</option>
-                </select>
-              </label>
-              <button id="refreshCandidatesButton" type="button">Refresh queue</button>
+              <button id="completeRunButton" type="button" class="button-muted">Complete run</button>
+              <button id="refreshRunsButton" type="button">Refresh runs</button>
             </div>
           </div>
 
-          <div class="content-split content-split--narrow">
-            <div class="table-shell table-shell--scroll">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Candidate</th>
-                    <th scope="col">Reasons</th>
-                    <th scope="col">Evidence</th>
-                    <th scope="col">Records</th>
-                    <th scope="col">Strength</th>
-                  </tr>
-                </thead>
-                <tbody id="candidateTableBody">
-                  <tr>
-                    <td colspan="5" class="empty-row">Loading pending candidates...</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <aside class="detail-panel" aria-labelledby="candidateDetailTitle">
-              <div class="detail-header">
-                <p class="eyebrow">Merge detail</p>
-                <h3 id="candidateDetailTitle">Selected candidate</h3>
-              </div>
-              <div id="candidateDetail" class="detail-content">
-                Select a candidate to inspect evidence and source records.
-              </div>
-
-              <form id="reviewForm" class="review-form">
-                <label class="inline-field" for="dedupCandidateId">
-                  <span>Dedup candidate ID</span>
-                  <input id="dedupCandidateId" readonly placeholder="Select a candidate first" />
-                </label>
-
-                <div class="quick-actions">
-                  <button id="approveSamePersonButton" type="button">Same person</button>
-                  <button id="approveNotSamePersonButton" type="button" class="button-muted">Not same</button>
-                  <button id="approveUnsureButton" type="button" class="button-muted">Unsure</button>
-                </div>
-
-                <label class="inline-field" for="reviewLabel">
-                  <span>Label</span>
-                  <select id="reviewLabel" required>
-                    <option value="same_person">same_person</option>
-                    <option value="not_same_person">not_same_person</option>
-                    <option value="unsure">unsure</option>
-                  </select>
-                </label>
-
-                <label class="inline-field" for="reviewNotes">
-                  <span>Notes</span>
-                  <textarea id="reviewNotes" rows="4" placeholder="Why this review decision is correct"></textarea>
-                </label>
-
-                <button type="submit">Submit review</button>
-              </form>
-
-              <details class="response-box">
-                <summary>Review result</summary>
-                <pre id="reviewResult">Waiting for review submission.</pre>
-              </details>
-            </aside>
+          <div id="selectedRunSummary" class="summary-banner">
+            Choose a run to inspect its papers, people, and merge queue.
           </div>
-        </article>
-      </section>
 
-      <section class="panel approved-panel" aria-labelledby="approvedTitle">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Approved</p>
-            <h2 id="approvedTitle">Approved entities</h2>
-          </div>
-          <div class="panel-actions">
-            <label class="inline-field" for="approvedScopeFilter">
-              <span>Scope</span>
-              <select id="approvedScopeFilter">
-                <option value="selected_run">selected_run</option>
-                <option value="all">all</option>
-              </select>
-            </label>
-            <button id="refreshApprovedButton" type="button">Refresh approved</button>
-          </div>
-        </div>
-
-        <div class="content-split">
-          <div class="table-shell table-shell--scroll">
+          <div class="table-shell table-shell--scroll table-shell--runs">
             <table class="data-table">
               <thead>
                 <tr>
-                  <th scope="col">Entity</th>
-                  <th scope="col">Emails</th>
-                  <th scope="col">Homepages</th>
-                  <th scope="col">Institutions</th>
-                  <th scope="col">Source records</th>
+                  <th scope="col">Run</th>
+                  <th scope="col">Source</th>
                   <th scope="col">Created</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Records</th>
+                  <th scope="col">Evidence</th>
+                  <th scope="col">Dedup</th>
+                  <th scope="col">Trigger</th>
                 </tr>
               </thead>
-              <tbody id="approvedTableBody">
+              <tbody id="sourceRunTableBody">
                 <tr>
-                  <td colspan="6" class="empty-row">Loading approved entities...</td>
+                  <td colspan="8" class="empty-row">Loading source runs...</td>
                 </tr>
               </tbody>
             </table>
           </div>
+        </section>
 
-          <aside class="detail-panel" aria-labelledby="approvedDetailTitle">
-            <div class="detail-header">
-              <p class="eyebrow">Approved detail</p>
-              <h3 id="approvedDetailTitle">Selected entity</h3>
+        <section class="workspace-grid">
+          <article class="panel review-panel" aria-labelledby="reviewTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Review</p>
+                <h2 id="reviewTitle">Dedup queue</h2>
+                <p id="queueScope" class="inline-copy">Select a run to scope the queue.</p>
+              </div>
+              <div class="panel-actions">
+                <label class="inline-field" for="candidateStatusFilter">
+                  <span>Queue view</span>
+                  <select id="candidateStatusFilter">
+                    <option value="pending_review">pending_review</option>
+                    <option value="reviewed">reviewed</option>
+                    <option value="all">all</option>
+                  </select>
+                </label>
+                <button id="refreshCandidatesButton" type="button">Refresh queue</button>
+              </div>
             </div>
-            <div id="approvedDetail" class="detail-content">
-              Select an approved entity to inspect surviving contact fields.
+
+            <div class="review-workspace">
+              <div class="table-shell table-shell--scroll table-shell--review">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Candidate</th>
+                      <th scope="col">Reasons</th>
+                      <th scope="col">Evidence</th>
+                      <th scope="col">Records</th>
+                      <th scope="col">Strength</th>
+                    </tr>
+                  </thead>
+                  <tbody id="candidateTableBody">
+                    <tr>
+                      <td colspan="5" class="empty-row">Loading pending candidates...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <aside class="detail-panel detail-panel--review" aria-labelledby="candidateDetailTitle">
+                <div class="detail-header">
+                  <div>
+                    <p class="eyebrow">Merge detail</p>
+                    <h3 id="candidateDetailTitle">Selected candidate</h3>
+                  </div>
+                </div>
+                <div id="candidateDetail" class="detail-content">
+                  Select a candidate to inspect evidence and source records.
+                </div>
+
+                <form id="reviewForm" class="review-form">
+                  <label class="inline-field" for="dedupCandidateId">
+                    <span>Dedup candidate ID</span>
+                    <input id="dedupCandidateId" readonly placeholder="Select a candidate first" />
+                  </label>
+
+                  <div class="quick-actions">
+                    <button id="approveSamePersonButton" type="button">Same person</button>
+                    <button id="approveNotSamePersonButton" type="button" class="button-muted">Not same</button>
+                    <button id="approveUnsureButton" type="button" class="button-muted">Unsure</button>
+                  </div>
+
+                  <label class="inline-field" for="reviewLabel">
+                    <span>Label</span>
+                    <select id="reviewLabel" required>
+                      <option value="same_person">same_person</option>
+                      <option value="not_same_person">not_same_person</option>
+                      <option value="unsure">unsure</option>
+                    </select>
+                  </label>
+
+                  <label class="inline-field" for="reviewNotes">
+                    <span>Notes</span>
+                    <textarea id="reviewNotes" rows="4" placeholder="Why this review decision is correct"></textarea>
+                  </label>
+
+                  <button type="submit">Submit review</button>
+                </form>
+
+                <details class="response-box">
+                  <summary>Review result</summary>
+                  <pre id="reviewResult">Waiting for review submission.</pre>
+                </details>
+              </aside>
             </div>
+          </article>
+
+          <aside class="context-rail">
+            <article class="panel records-panel" aria-labelledby="recordsTitle">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Inspect</p>
+                  <h2 id="recordsTitle">Run records</h2>
+                </div>
+              </div>
+
+              <div class="toolbar">
+                <label class="inline-field" for="recordTypeFilter">
+                  <span>Type</span>
+                  <select id="recordTypeFilter">
+                    <option value="all">all</option>
+                    <option value="research_work">research_work</option>
+                    <option value="person_profile">person_profile</option>
+                  </select>
+                </label>
+                <label class="inline-field" for="recordSort">
+                  <span>Sort</span>
+                  <select id="recordSort">
+                    <option value="impact_desc">impact</option>
+                    <option value="recent_desc">recent</option>
+                    <option value="name_asc">name/title</option>
+                  </select>
+                </label>
+                <label class="inline-field inline-field--wide" for="recordSearch">
+                  <span>Search</span>
+                  <input id="recordSearch" type="search" placeholder="Paper title, person, DOI, institution" />
+                </label>
+              </div>
+
+              <div class="content-split content-split--stacked">
+                <div class="table-shell table-shell--scroll">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Record</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Institution / venue</th>
+                        <th scope="col">Key field</th>
+                        <th scope="col">Source</th>
+                      </tr>
+                    </thead>
+                    <tbody id="runRecordTableBody">
+                      <tr>
+                        <td colspan="5" class="empty-row">No run selected.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <aside class="detail-panel" aria-labelledby="recordDetailTitle">
+                  <div class="detail-header">
+                    <div>
+                      <p class="eyebrow">Record detail</p>
+                      <h3 id="recordDetailTitle">Selected record</h3>
+                    </div>
+                  </div>
+                  <div id="recordDetail" class="detail-content">
+                    Select a record to inspect paper metadata or researcher profile evidence.
+                  </div>
+                </aside>
+              </div>
+            </article>
+
+            <article class="panel approved-panel" aria-labelledby="approvedTitle">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Approved</p>
+                  <h2 id="approvedTitle">Approved entities</h2>
+                </div>
+                <div class="panel-actions">
+                  <label class="inline-field" for="approvedScopeFilter">
+                    <span>Scope</span>
+                    <select id="approvedScopeFilter">
+                      <option value="selected_run">selected_run</option>
+                      <option value="all">all</option>
+                    </select>
+                  </label>
+                  <button id="refreshApprovedButton" type="button">Refresh approved</button>
+                </div>
+              </div>
+
+              <div class="content-split content-split--stacked">
+                <div class="table-shell table-shell--scroll">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Entity</th>
+                        <th scope="col">Emails</th>
+                        <th scope="col">Homepages</th>
+                        <th scope="col">Institutions</th>
+                        <th scope="col">Source records</th>
+                        <th scope="col">Created</th>
+                      </tr>
+                    </thead>
+                    <tbody id="approvedTableBody">
+                      <tr>
+                        <td colspan="6" class="empty-row">Loading approved entities...</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <aside class="detail-panel" aria-labelledby="approvedDetailTitle">
+                  <div class="detail-header">
+                    <div>
+                      <p class="eyebrow">Approved detail</p>
+                      <h3 id="approvedDetailTitle">Selected entity</h3>
+                    </div>
+                  </div>
+                  <div id="approvedDetail" class="detail-content">
+                    Select an approved entity to inspect surviving contact fields.
+                  </div>
+                </aside>
+              </div>
+            </article>
           </aside>
-        </div>
-      </section>
+        </section>
 
-      <details class="panel import-panel">
+        <details class="panel import-panel">
         <summary>Manual ingest and replay</summary>
         <div class="manual-grid">
           <section class="panel panel-inset">
@@ -387,8 +395,9 @@
             </details>
           </section>
         </div>
-      </details>
-    </main>
+        </details>
+      </main>
+    </div>
 
     <script src="/app.js" defer></script>
   </body>

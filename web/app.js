@@ -669,27 +669,27 @@ function renderRunSummary() {
 
   const { papers, people } = computeRecordCounts(state.sourceRecords);
   elements.selectedRunSummary.innerHTML = `
-    <div class="badge-row">
+    <div class="summary-pills">
       ${renderPill(selectedRun.sourceName || "source", "neutral")}
       ${renderPill(selectedRun.sourceDomain || "domain", "neutral")}
       ${renderPill(selectedRun.status || "unknown", `status-${selectedRun.status || "running"}`)}
     </div>
-    <div class="detail-grid" style="margin-top: 0.85rem;">
-      <div class="detail-card">
-        <span>Run</span>
-        <strong>${escapeHtml(selectedRun.id)}</strong>
+    <div class="summary-meta">
+      <div class="summary-meta-item">
+        <span class="summary-meta-label">Run</span>
+        <strong class="summary-meta-value">${escapeHtml(selectedRun.id)}</strong>
       </div>
-      <div class="detail-card">
-        <span>Created</span>
-        <strong>${escapeHtml(formatDateTime(selectedRun.createdAt))}</strong>
+      <div class="summary-meta-item">
+        <span class="summary-meta-label">Created</span>
+        <strong class="summary-meta-value">${escapeHtml(formatDateTime(selectedRun.createdAt))}</strong>
       </div>
-      <div class="detail-card">
-        <span>Papers / people</span>
-        <strong>${escapeHtml(`${papers} / ${people}`)}</strong>
+      <div class="summary-meta-item">
+        <span class="summary-meta-label">Papers / people</span>
+        <strong class="summary-meta-value">${escapeHtml(`${papers} / ${people}`)}</strong>
       </div>
-      <div class="detail-card">
-        <span>Pending / approved</span>
-        <strong>${escapeHtml(`${filteredCandidateDetails().length} / ${filteredApprovedEntities().length}`)}</strong>
+      <div class="summary-meta-item">
+        <span class="summary-meta-label">Pending / approved</span>
+        <strong class="summary-meta-value">${escapeHtml(`${filteredCandidateDetails().length} / ${filteredApprovedEntities().length}`)}</strong>
       </div>
     </div>
   `;
@@ -810,7 +810,7 @@ function renderRecordDetail() {
     <section class="detail-section">
       <h4>${escapeHtml(recordTitle(record))}</h4>
       <p class="summary-muted">${escapeHtml(record.sourceRunId || state.selectedRunId)}</p>
-      <div class="badge-row" style="margin-top: 0.6rem;">
+      <div class="badge-row detail-tags">
         ${renderPill(record.entityType || "unknown", "neutral")}
         ${renderPill(record.source || "source", "neutral")}
       </div>
@@ -909,7 +909,7 @@ function renderCandidatesTable() {
           <td>${escapeHtml(String(arrayValue(item.sourceRecords).length))}</td>
           <td>
             ${renderPill(candidate.strength || "weak", `strength-${candidate.strength || "weak"}`)}
-            <div class="row-secondary" style="margin-top: 0.35rem;">${escapeHtml(candidate.status || "pending_review")}</div>
+            <div class="row-secondary row-secondary--tight">${escapeHtml(candidate.status || "pending_review")}</div>
           </td>
         </tr>
       `;
@@ -941,13 +941,13 @@ function renderCandidateDetail() {
   elements.candidateDetail.innerHTML = `
     <section class="detail-section">
       <h4>${escapeHtml(candidate.displayName || "Unnamed candidate")}</h4>
-      <div class="badge-row" style="margin-top: 0.6rem;">
+      <div class="badge-row detail-tags">
         ${renderPill(candidate.status || "pending_review", `label-${candidate.status || "pending_review"}`)}
         ${renderPill(candidate.strength || "weak", `strength-${candidate.strength || "weak"}`)}
         ${renderPill(`${sourceRecords.length} records`, "neutral")}
         ${renderPill(`${evidence.length} evidence`, "neutral")}
       </div>
-      <div class="badge-row" style="margin-top: 0.6rem;">${renderReasonChips(candidate.reasonCodes)}</div>
+      <div class="badge-row detail-tags">${renderReasonChips(candidate.reasonCodes)}</div>
     </section>
     <section class="detail-section">
       <h4>Source record compare</h4>
@@ -1092,7 +1092,7 @@ function renderApprovedDetail() {
   elements.approvedDetail.innerHTML = `
     <section class="detail-section">
       <h4>${escapeHtml(entity.displayName || entity.id)}</h4>
-      <div class="badge-row" style="margin-top: 0.6rem;">
+      <div class="badge-row detail-tags">
         ${renderPill("approved", "approved")}
         ${renderPill(entity.entityType || "entity", "neutral")}
         ${renderPill(`${arrayValue(entity.sourceRecordIds).length} source records`, "neutral")}
