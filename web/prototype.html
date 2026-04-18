@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WeKruit Sourcing Prototype</title>
+    <link rel="stylesheet" href="/prototype.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="topbar-copy">
+          <p class="eyebrow">WeKruit sourcing prototype</p>
+          <h1>Simple review workspace</h1>
+          <p class="subhead">Only the work that matters: jobs running, what needs review, and what is already approved.</p>
+        </div>
+        <div class="topbar-actions">
+          <label class="field field--compact" for="apiBaseUrl">
+            <span>API</span>
+            <input id="apiBaseUrl" value="/api/sourcing" />
+          </label>
+          <button id="refreshButton" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="surface">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Running</p>
+              <h2>Jobs running now</h2>
+            </div>
+            <div id="runSummary" class="section-summary">Loading runs...</div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="grid-table">
+              <thead>
+                <tr>
+                  <th scope="col">Run</th>
+                  <th scope="col">Source</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Records</th>
+                  <th scope="col">Pending</th>
+                  <th scope="col">Created</th>
+                </tr>
+              </thead>
+              <tbody id="runsTableBody">
+                <tr>
+                  <td colspan="6" class="empty-row">Loading runs...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="surface surface--main">
+          <div class="section-head section-head--stack">
+            <div>
+              <p class="eyebrow">Work queue</p>
+              <h2>Operator review</h2>
+            </div>
+
+            <div class="controls">
+              <div class="segmented" role="tablist" aria-label="Workspace view">
+                <button id="tabQueue" type="button" class="segmented__button is-active" data-view="queue" role="tab" aria-selected="true">Review queue</button>
+                <button id="tabApproved" type="button" class="segmented__button" data-view="approved" role="tab" aria-selected="false">Approved</button>
+              </div>
+
+              <label class="field field--compact" for="runFilter">
+                <span>Run</span>
+                <select id="runFilter"></select>
+              </label>
+
+              <label class="field field--search" for="searchInput">
+                <span>Search</span>
+                <input id="searchInput" type="search" placeholder="Search name, email, institution" />
+              </label>
+            </div>
+          </div>
+
+          <div class="main-grid">
+            <section class="table-panel">
+              <div id="queueMeta" class="table-meta">Loading queue...</div>
+
+              <div id="queueView" class="table-wrap table-wrap--tall">
+                <table class="grid-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Candidate</th>
+                      <th scope="col">Reasons</th>
+                      <th scope="col">Evidence</th>
+                      <th scope="col">Records</th>
+                      <th scope="col">Strength</th>
+                    </tr>
+                  </thead>
+                  <tbody id="queueTableBody">
+                    <tr>
+                      <td colspan="5" class="empty-row">Loading queue...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div id="approvedView" class="table-wrap table-wrap--tall" hidden>
+                <table class="grid-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Entity</th>
+                      <th scope="col">Emails</th>
+                      <th scope="col">Homepages</th>
+                      <th scope="col">Institutions</th>
+                      <th scope="col">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody id="approvedTableBody">
+                    <tr>
+                      <td colspan="5" class="empty-row">Loading approved entities...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="detail-panel">
+              <div class="detail-head">
+                <p class="eyebrow" id="detailEyebrow">Selection</p>
+                <h3 id="detailTitle">Nothing selected</h3>
+                <p id="detailSubtitle" class="detail-subtitle">Pick a row to inspect the relevant detail.</p>
+              </div>
+
+              <div id="detailBody" class="detail-body">
+                <p class="empty-detail">The prototype keeps detail secondary. Select a row from the table to open the supporting information here.</p>
+              </div>
+
+              <div id="detailActions" class="detail-actions" hidden>
+                <button type="button">Approve merge</button>
+                <button type="button" class="button-muted">Keep separate</button>
+                <button type="button" class="button-muted">Hold</button>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/prototype.js" defer></script>
+  </body>
+</html>
