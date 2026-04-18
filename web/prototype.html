@@ -8,20 +8,14 @@
   </head>
   <body>
     <div class="app-shell">
-      <header class="topbar">
-        <div class="topbar-copy">
-          <p class="eyebrow">WeKruit sourcing prototype</p>
-          <h1>Simple review workspace</h1>
-          <p class="subhead">Only the work that matters: jobs running, what needs review, and what is already approved.</p>
+      <div class="workspace-bar">
+        <div class="workspace-bar__copy">
+          <p class="eyebrow">Prototype</p>
+          <strong>Table-first sourcing review</strong>
+          <span>Running jobs, review queue, approved table</span>
         </div>
-        <div class="topbar-actions">
-          <label class="field field--compact" for="apiBaseUrl">
-            <span>API</span>
-            <input id="apiBaseUrl" value="/api/sourcing" />
-          </label>
-          <button id="refreshButton" type="button">Refresh</button>
-        </div>
-      </header>
+        <button id="refreshButton" type="button">Refresh</button>
+      </div>
 
       <main class="workspace">
         <section class="surface">
@@ -87,16 +81,15 @@
                 <table class="grid-table">
                   <thead>
                     <tr>
-                      <th scope="col">Candidate</th>
-                      <th scope="col">Reasons</th>
-                      <th scope="col">Evidence</th>
-                      <th scope="col">Records</th>
-                      <th scope="col">Strength</th>
+                      <th scope="col">Person</th>
+                      <th scope="col">Why this is here</th>
+                      <th scope="col">Best proof</th>
+                      <th scope="col">Sources</th>
                     </tr>
                   </thead>
                   <tbody id="queueTableBody">
                     <tr>
-                      <td colspan="5" class="empty-row">Loading queue...</td>
+                      <td colspan="4" class="empty-row">Loading queue...</td>
                     </tr>
                   </tbody>
                 </table>

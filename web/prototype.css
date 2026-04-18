@@ -92,25 +92,12 @@ select {
   gap: 1rem;
 }
 
-.topbar,
+.workspace-bar,
 .surface {
   background: var(--surface);
   border: 1px solid rgba(231, 221, 210, 0.9);
   border-radius: 18px;
   box-shadow: var(--shadow);
-}
-
-.topbar {
-  padding: 1.1rem 1.2rem;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 1rem;
-  align-items: end;
-}
-
-.topbar-copy {
-  display: grid;
-  gap: 0.3rem;
 }
 
 .eyebrow {
@@ -122,15 +109,10 @@ select {
   text-transform: uppercase;
 }
 
-.topbar h1,
 .section-head h2,
 .detail-head h3 {
   margin: 0;
   letter-spacing: -0.03em;
-}
-
-.topbar h1 {
-  font-size: 2.1rem;
 }
 
 .subhead,
@@ -142,16 +124,26 @@ select {
   color: var(--ink-faint);
 }
 
-.subhead {
-  margin: 0;
-  max-width: 48rem;
-  line-height: 1.5;
+.workspace-bar {
+  padding: 0.82rem 1rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
 }
 
-.topbar-actions {
+.workspace-bar__copy {
   display: flex;
-  gap: 0.75rem;
-  align-items: end;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+}
+
+.workspace-bar__copy strong {
+  color: var(--ink);
+  font-size: 1rem;
 }
 
 .workspace {
@@ -289,13 +281,24 @@ select {
 .detail-card,
 .detail-list,
 .detail-actions,
-.detail-kpis {
+.detail-kpis,
+.source-grid {
   display: grid;
   gap: 0.75rem;
 }
 
 .detail-kpis {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-note {
+  padding: 0.9rem 0.95rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.45;
 }
 
 .detail-kpi {
@@ -342,6 +345,53 @@ select {
 .detail-list-row strong {
   text-align: right;
   font-weight: 600;
+}
+
+.source-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.source-card {
+  padding: 0.88rem 0.92rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.source-card h4 {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.4;
+}
+
+.source-card p {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 0.82rem;
+}
+
+.source-facts {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.source-fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.84rem;
+}
+
+.source-fact span {
+  color: var(--ink-faint);
+}
+
+.source-fact strong {
+  text-align: right;
+  font-weight: 600;
+  word-break: break-word;
 }
 
 .detail-actions {
@@ -393,6 +443,14 @@ select {
   background: #faf5ee;
 }
 
+.grid-table td:nth-child(2) {
+  width: 30%;
+}
+
+.grid-table td:nth-child(3) {
+  width: 24%;
+}
+
 .row-button {
   width: 100%;
   border: 0;
@@ -421,6 +479,12 @@ select {
   color: var(--ink-faint);
   font-size: 0.82rem;
   line-height: 1.35;
+}
+
+.row-inline {
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 
 .badge-row {
@@ -460,11 +524,11 @@ select {
 }
 
 @media (max-width: 1180px) {
-  .topbar,
   .main-grid {
     grid-template-columns: 1fr;
   }
 
+  .source-grid,
   .controls {
     grid-template-columns: 1fr;
   }
@@ -480,11 +544,7 @@ select {
     padding: 0.75rem;
   }
 
-  .topbar h1 {
-    font-size: 1.7rem;
-  }
-
-  .topbar-actions {
+  .workspace-bar {
     flex-direction: column;
     align-items: stretch;
   }

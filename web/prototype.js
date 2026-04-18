@@ -12,7 +12,6 @@ const state = {
 };
 
 const elements = {
-  apiBaseUrl: document.querySelector("#apiBaseUrl"),
   refreshButton: document.querySelector("#refreshButton"),
   runsTableBody: document.querySelector("#runsTableBody"),
   runSummary: document.querySelector("#runSummary"),
@@ -113,7 +112,7 @@ function candidateObject(item) {
 }
 
 function currentApiBaseUrl() {
-  return elements.apiBaseUrl.value.trim().replace(/\/$/, "");
+  return (localStorage.getItem(STORAGE_KEY) || "/api/sourcing").trim().replace(/\/$/, "");
 }
 
 async function requestJson(path) {
@@ -217,6 +216,85 @@ function getSelectedApprovedEntity() {
   return filteredApproved().find((entity) => entity.id === state.selectedApprovedId) ?? null;
 }
 
+function uniqueList(values) {
+  return [...new Set(arrayValue(values).filter(Boolean))];
+}
+
+function candidateReasonPhrases(reasonCodes) {
+  const mapped = {
+    singleton_review: "Only one source record exists, so someone needs to manually approve it.",
+    orcid_exact: "The records share the same ORCID.",
+    email_exact: "The records share the same email.",
+    homepage_exact: "The records share the same homepage.",
+    github_exact: "The records point to the same GitHub profile.",
+    source_native_id_exact: "The records carry the same source identifier.",
+    name_institution: "The name and institution both match.",
+  };
+
+  return arrayValue(reasonCodes).map((reason) => mapped[reason] || `${displayLabel(reason)} matched.`);
+}
+
+function shortReasonSummary(item) {
+  const candidate = candidateObject(item);
+  const phrases = candidateReasonPhrases(candidate?.reasonCodes);
+  if (!phrases.length) {
+    return "Possible overlap across multiple source records.";
+  }
+  if (candidate?.reasonCodes?.includes("singleton_review")) {
+    return "Single-source profile waiting for manual approval.";
+  }
+  return phrases.slice(0, 2).join(" ");
+}
+
+function keyEvidenceLabel(entry) {
+  if (!entry) {
+    return "No strong proof extracted";
+  }
+
+  const labels = {
+    orcid: "Same ORCID",
+    email: "Same email",
+    homepage: "Same homepage",
+    github: "Same GitHub",
+    source_native_id: "Same source ID",
+    institution: "Same institution",
+    name: "Same name",
+  };
+
+  const prefix = labels[entry.evidenceType] || displayLabel(entry.evidenceType || "evidence");
+  return entry.normalizedValue || entry.rawValue ? `${prefix}: ${entry.normalizedValue || entry.rawValue}` : prefix;
+}
+
+function bestEvidence(item) {
+  const priority = ["email", "orcid", "github", "homepage", "source_native_id", "institution", "name"];
+  const evidence = arrayValue(item.evidence);
+  const best = evidence
+    .slice()
+    .sort((left, right) => priority.indexOf(left.evidenceType) - priority.indexOf(right.evidenceType))[0];
+  return keyEvidenceLabel(best);
+}
+
+function sourceSummary(item) {
+  const sources = uniqueList(arrayValue(item.sourceRecords).map((record) => displayLabel(record.source || "source")));
+  if (!sources.length) {
+    return "No source records";
+  }
+  return `${sources.join(" + ")} (${arrayValue(item.sourceRecords).length})`;
+}
+
+function recordField(record, key) {
+  const lookups = {
+    name: [record.display?.name, record.displayName],
+    institution: [record.display?.institution, record.rawSummary?.institution, record.institution],
+    orcid: [record.raw?.orcid, record.rawSummary?.orcid],
+    email: [record.rawSummary?.email, record.raw?.email],
+    homepage: [record.display?.homepage, record.rawSummary?.homepage],
+  };
+
+  const values = lookups[key] || [];
+  return values.find((value) => stringValue(value)) || "—";
+}
+
 function ensureSelectedRows() {
   const candidateItems = runCandidates();
   if (!candidateItems.some((item) => candidateObject(item)?.id === state.selectedCandidateId)) {
@@ -294,7 +372,7 @@ function renderQueueTable() {
     : `${items.length} pending candidates`;
 
   if (!items.length) {
-    elements.queueTableBody.innerHTML = `<tr><td colspan="5" class="empty-row">No pending review items for this run.</td></tr>`;
+    elements.queueTableBody.innerHTML = `<tr><td colspan="4" class="empty-row">No pending review items for this run.</td></tr>`;
     return;
   }
 
@@ -307,13 +385,15 @@ function renderQueueTable() {
           <td>
             <button type="button" class="row-button" data-candidate-id="${escapeHtml(candidate.id)}">
               <span class="row-primary">${escapeHtml(candidate.displayName || "Unnamed candidate")}</span>
-              <span class="row-secondary">${escapeHtml(candidate.id)}</span>
+              <span class="row-secondary">${escapeHtml(candidate.entityType || "person profile")}</span>
             </button>
           </td>
-          <td>${arrayValue(candidate.reasonCodes).map((reason) => renderPill(displayLabel(reason), "neutral")).join("")}</td>
-          <td>${escapeHtml(String(arrayValue(item.evidence).length))}</td>
-          <td>${escapeHtml(String(arrayValue(item.sourceRecords).length))}</td>
-          <td>${renderPill(displayLabel(candidate.strength || "weak"), statusVariant(candidate.strength || "weak"))}</td>
+          <td><span class="row-inline">${escapeHtml(shortReasonSummary(item))}</span></td>
+          <td><span class="row-inline">${escapeHtml(bestEvidence(item))}</span></td>
+          <td>
+            ${renderPill(displayLabel(candidate.strength || "weak"), statusVariant(candidate.strength || "weak"))}
+            <span class="row-secondary">${escapeHtml(sourceSummary(item))}</span>
+          </td>
         </tr>
       `;
     })
@@ -364,35 +444,56 @@ function renderQueueDetail() {
   const candidate = candidateObject(item);
   const sourceRecords = arrayValue(item.sourceRecords);
   const evidence = arrayValue(item.evidence);
-  const primaryRecord = sourceRecords[0] ?? {};
+  const whyText = shortReasonSummary(item);
+  const usefulEvidence = uniqueList(evidence.slice(0, 5).map((entry) => keyEvidenceLabel(entry)));
 
-  elements.detailEyebrow.textContent = "Review detail";
+  elements.detailEyebrow.textContent = "Needs review";
   elements.detailTitle.textContent = candidate.displayName || "Unnamed candidate";
-  elements.detailSubtitle.textContent = `${sourceRecords.length} source records · ${evidence.length} evidence items`;
+  elements.detailSubtitle.textContent = whyText;
   elements.detailActions.hidden = false;
   elements.detailBody.innerHTML = `
     <div class="badge-row">
       ${renderPill(displayLabel(candidate.status || "pending_review"), statusVariant(candidate.status || "pending_review"))}
       ${renderPill(displayLabel(candidate.strength || "weak"), statusVariant(candidate.strength || "weak"))}
     </div>
+    <div class="detail-note">${escapeHtml(whyText)}</div>
     <div class="detail-kpis">
       <div class="detail-kpi">
-        <span>Reasons</span>
-        <strong>${escapeHtml(arrayValue(candidate.reasonCodes).map(displayLabel).join(", ") || "—")}</strong>
+        <span>Source records</span>
+        <strong>${escapeHtml(String(sourceRecords.length))}</strong>
       </div>
       <div class="detail-kpi">
-        <span>Primary source</span>
-        <strong>${escapeHtml(displayLabel(primaryRecord.source || "unknown"))}</strong>
+        <span>Evidence items</span>
+        <strong>${escapeHtml(String(evidence.length))}</strong>
       </div>
     </div>
-    <div class="detail-list">
-      ${evidence
-        .slice(0, 8)
+    <div class="source-grid">
+      ${sourceRecords
         .map(
-          (entry) => `
+          (record) => `
+            <article class="source-card">
+              <div>
+                <p>${escapeHtml(displayLabel(record.source || "source"))}</p>
+                <h4>${escapeHtml(record.displayName || record.display?.name || "Unnamed record")}</h4>
+              </div>
+              <div class="source-facts">
+                <div class="source-fact"><span>Institution</span><strong>${escapeHtml(recordField(record, "institution"))}</strong></div>
+                <div class="source-fact"><span>ORCID</span><strong>${escapeHtml(recordField(record, "orcid"))}</strong></div>
+                <div class="source-fact"><span>Email</span><strong>${escapeHtml(recordField(record, "email"))}</strong></div>
+                <div class="source-fact"><span>Homepage</span><strong>${escapeHtml(recordField(record, "homepage"))}</strong></div>
+              </div>
+            </article>
+          `,
+        )
+        .join("")}
+    </div>
+    <div class="detail-list">
+      ${usefulEvidence
+        .map(
+          (label) => `
             <div class="detail-list-row">
-              <span>${escapeHtml(displayLabel(entry.evidenceType || "evidence"))}</span>
-              <strong>${escapeHtml(entry.normalizedValue || entry.rawValue || "—")}</strong>
+              <span>Best proof</span>
+              <strong>${escapeHtml(label)}</strong>
             </div>
           `,
         )
@@ -552,7 +653,6 @@ function bindEvents() {
 }
 
 function boot() {
-  elements.apiBaseUrl.value = localStorage.getItem(STORAGE_KEY) || "/api/sourcing";
   bindEvents();
   void loadData().catch((error) => {
     elements.runSummary.textContent = error.message;
