@@ -35,9 +35,7 @@ Overall: **22 / 24**
    The structure is clear now, but one more pass could sharpen the visual distinction between “active judgment” and “reference data”.
 2. Very long record titles still create weight in the lower explorer.
    The layout handles them, but the panel feels denser than the top review stage.
-3. Live data hydration still causes first-paint movement.
-   Desktop Lighthouse is back to `accessibility 100`, but CLS remains elevated because the shell shifts when live run data and queue state hydrate.
 
 ## Verdict
 
-This is now a credible internal review console. It no longer looks like a generic admin dashboard, and the primary task is finally obvious on first paint. Further work would be polish, not rescue.
+This is now a credible internal review console. It no longer looks like a generic admin dashboard, the primary task is obvious on first paint, and the live hydration shift has been brought back under control. Further work would be polish, not rescue.
