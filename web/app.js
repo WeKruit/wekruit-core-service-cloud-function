@@ -9,6 +9,7 @@ const state = {
   selectedRecordId: "",
   selectedCandidateId: "",
   selectedApprovedEntityId: "",
+  activeExplorerTab: "records",
 };
 
 const elements = {
@@ -36,6 +37,10 @@ const elements = {
   refreshCandidatesButton: document.querySelector("#refreshCandidatesButton"),
   candidateTableBody: document.querySelector("#candidateTableBody"),
   candidateDetail: document.querySelector("#candidateDetail"),
+  recordsTabButton: document.querySelector("#recordsTabButton"),
+  approvedTabButton: document.querySelector("#approvedTabButton"),
+  recordsExplorer: document.querySelector("#recordsExplorer"),
+  approvedExplorer: document.querySelector("#approvedExplorer"),
   reviewForm: document.querySelector("#reviewForm"),
   reviewSubmitButton: document.querySelector("#reviewForm button[type='submit']"),
   dedupCandidateId: document.querySelector("#dedupCandidateId"),
@@ -92,6 +97,16 @@ function numberValue(value) {
 
 function arrayValue(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
+function humanizeToken(value) {
+  const token = stringValue(value);
+  return token ? token.replace(/_/g, " ") : "";
+}
+
+function displayLabel(value) {
+  const normalized = humanizeToken(value);
+  return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : "";
 }
 
 function joinUrl(base, path) {
@@ -172,7 +187,22 @@ function setConnectionStatus(message, stateName = "idle") {
 }
 
 function setMetric(target, value) {
+  if (!target) {
+    return;
+  }
   target.textContent = value;
+}
+
+function setExplorerTab(tabName) {
+  state.activeExplorerTab = tabName === "approved" ? "approved" : "records";
+
+  const showingRecords = state.activeExplorerTab === "records";
+  elements.recordsExplorer.hidden = !showingRecords;
+  elements.approvedExplorer.hidden = showingRecords;
+  elements.recordsExplorer.classList.toggle("is-active", showingRecords);
+  elements.approvedExplorer.classList.toggle("is-active", !showingRecords);
+  elements.recordsTabButton.classList.toggle("is-active", showingRecords);
+  elements.approvedTabButton.classList.toggle("is-active", !showingRecords);
 }
 
 function compactObject(record) {
@@ -612,7 +642,7 @@ function renderReasonChips(reasonCodes) {
   if (!items.length) {
     return renderPill("none", "neutral");
   }
-  return items.map((reason) => renderPill(reason, "neutral")).join("");
+  return items.map((reason) => renderPill(displayLabel(reason), "neutral")).join("");
 }
 
 function renderListPreview(values, limit = 2) {
@@ -631,7 +661,7 @@ function syncRecordTypeOptions() {
   const currentValue = elements.recordTypeFilter.value;
   const options = ["all", ...availableTypes];
   elements.recordTypeFilter.innerHTML = options
-    .map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`)
+    .map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option === "all" ? "All" : displayLabel(option))}</option>`)
     .join("");
   elements.recordTypeFilter.value = options.includes(currentValue) ? currentValue : "all";
 }
@@ -670,9 +700,9 @@ function renderRunSummary() {
   const { papers, people } = computeRecordCounts(state.sourceRecords);
   elements.selectedRunSummary.innerHTML = `
     <div class="summary-pills">
-      ${renderPill(selectedRun.sourceName || "source", "neutral")}
-      ${renderPill(selectedRun.sourceDomain || "domain", "neutral")}
-      ${renderPill(selectedRun.status || "unknown", `status-${selectedRun.status || "running"}`)}
+      ${renderPill(displayLabel(selectedRun.sourceName || "source"), "neutral")}
+      ${renderPill(displayLabel(selectedRun.sourceDomain || "domain"), "neutral")}
+      ${renderPill(displayLabel(selectedRun.status || "unknown"), `status-${selectedRun.status || "running"}`)}
     </div>
     <div class="summary-meta">
       <div class="summary-meta-item">
@@ -696,39 +726,37 @@ function renderRunSummary() {
 }
 
 function renderSourceRunsTable() {
-  const tbody = elements.sourceRunTableBody;
+  const container = elements.sourceRunTableBody;
   if (!state.sourceRuns.length) {
-    tbody.innerHTML = renderEmptyTableRow(8, "No source runs found.");
+    container.innerHTML = `<p class="empty-state">No source runs found.</p>`;
     return;
   }
 
-  tbody.innerHTML = state.sourceRuns
+  container.innerHTML = state.sourceRuns
     .map((run) => {
       const selectedClass = run.id === state.selectedRunId ? "is-selected" : "";
       return `
-        <tr class="${selectedClass}">
-          <td>
-            <button type="button" class="row-button" data-run-id="${escapeHtml(run.id)}">
-              <span class="row-primary">${escapeHtml(run.id)}</span>
-              <span class="row-secondary">${escapeHtml(run.pipelineName || "default")}</span>
-            </button>
-          </td>
-          <td>
-            <span class="row-primary">${escapeHtml(run.sourceName || "source")}</span>
-            <span class="row-secondary">${escapeHtml(run.sourceDomain || "domain")}</span>
-          </td>
-          <td>${escapeHtml(formatDateTime(run.createdAt))}</td>
-          <td>${renderPill(run.status || "unknown", `status-${run.status || "running"}`)}</td>
-          <td>${escapeHtml(String(numberValue(run.sourceRecordCount)))}</td>
-          <td>${escapeHtml(String(numberValue(run.evidenceCount)))}</td>
-          <td>${escapeHtml(String(numberValue(run.dedupCandidateCount)))}</td>
-          <td>${escapeHtml(run.trigger || "unknown")}</td>
-        </tr>
+        <article class="run-item ${selectedClass}">
+          <button type="button" class="run-item-button" data-run-id="${escapeHtml(run.id)}">
+            <div class="run-item-top">
+              <strong class="run-item-name">${escapeHtml(run.id)}</strong>
+              ${renderPill(displayLabel(run.status || "unknown"), `status-${run.status || "running"}`)}
+            </div>
+            <div class="run-item-meta">
+              <span>${escapeHtml(run.sourceName || "source")} · ${escapeHtml(run.sourceDomain || "domain")}</span>
+              <span>${escapeHtml(`${numberValue(run.sourceRecordCount)} records · ${numberValue(run.dedupCandidateCount)} queue`)}</span>
+            </div>
+            <div class="run-item-meta">
+              <span>${escapeHtml(formatDateTime(run.createdAt))}</span>
+              <span>${escapeHtml(run.pipelineName || "default")}</span>
+            </div>
+          </button>
+        </article>
       `;
     })
     .join("");
 
-  tbody.querySelectorAll("[data-run-id]").forEach((button) => {
+  container.querySelectorAll("[data-run-id]").forEach((button) => {
     button.addEventListener("click", () => {
       void selectRun(button.getAttribute("data-run-id") || "");
     });
@@ -765,10 +793,10 @@ function renderRecordsTable() {
               <span class="row-secondary">${escapeHtml(record.sourceNativeId || record.id)}</span>
             </button>
           </td>
-          <td>${escapeHtml(record.entityType || "unknown")}</td>
+          <td>${escapeHtml(displayLabel(record.entityType || "unknown"))}</td>
           <td>
             <span class="row-primary">${escapeHtml(recordSubtitle(record))}</span>
-            <span class="row-secondary">${escapeHtml(stringValue(record.source) || "unknown source")}</span>
+            <span class="row-secondary">${escapeHtml(displayLabel(stringValue(record.source) || "unknown source"))}</span>
           </td>
           <td>
             <span class="row-primary">${escapeHtml(recordIdentifier(record))}</span>
@@ -811,8 +839,8 @@ function renderRecordDetail() {
       <h4>${escapeHtml(recordTitle(record))}</h4>
       <p class="summary-muted">${escapeHtml(record.sourceRunId || state.selectedRunId)}</p>
       <div class="badge-row detail-tags">
-        ${renderPill(record.entityType || "unknown", "neutral")}
-        ${renderPill(record.source || "source", "neutral")}
+        ${renderPill(displayLabel(record.entityType || "unknown"), "neutral")}
+        ${renderPill(displayLabel(record.source || "source"), "neutral")}
       </div>
     </section>
     <section class="detail-section">
@@ -908,8 +936,8 @@ function renderCandidatesTable() {
           <td>${escapeHtml(String(arrayValue(item.evidence).length))}</td>
           <td>${escapeHtml(String(arrayValue(item.sourceRecords).length))}</td>
           <td>
-            ${renderPill(candidate.strength || "weak", `strength-${candidate.strength || "weak"}`)}
-            <div class="row-secondary row-secondary--tight">${escapeHtml(candidate.status || "pending_review")}</div>
+            ${renderPill(displayLabel(candidate.strength || "weak"), `strength-${candidate.strength || "weak"}`)}
+            <div class="row-secondary row-secondary--tight">${escapeHtml(displayLabel(candidate.status || "pending_review"))}</div>
           </td>
         </tr>
       `;
@@ -937,74 +965,77 @@ function renderCandidateDetail() {
   const candidate = candidateObject(item);
   const sourceRecords = arrayValue(item.sourceRecords);
   const evidence = arrayValue(item.evidence);
+  const evidencePreview = evidence.slice(0, 10);
+  const reasonSummary = arrayValue(candidate.reasonCodes).map(displayLabel).join(", ") || "Source overlap";
 
   elements.candidateDetail.innerHTML = `
     <section class="detail-section">
-      <h4>${escapeHtml(candidate.displayName || "Unnamed candidate")}</h4>
-      <div class="badge-row detail-tags">
-        ${renderPill(candidate.status || "pending_review", `label-${candidate.status || "pending_review"}`)}
-        ${renderPill(candidate.strength || "weak", `strength-${candidate.strength || "weak"}`)}
-        ${renderPill(`${sourceRecords.length} records`, "neutral")}
-        ${renderPill(`${evidence.length} evidence`, "neutral")}
+      <div class="candidate-hero">
+        <div>
+          <h4>${escapeHtml(candidate.displayName || "Unnamed candidate")}</h4>
+          <p class="summary-muted">This match was generated because the source records overlap on ${escapeHtml(reasonSummary)}.</p>
+        </div>
+        <div class="badge-row detail-tags">
+          ${renderPill(displayLabel(candidate.status || "pending_review"), `label-${candidate.status || "pending_review"}`)}
+          ${renderPill(displayLabel(candidate.strength || "weak"), `strength-${candidate.strength || "weak"}`)}
+        </div>
+      </div>
+      <div class="detail-grid candidate-stats">
+        <div class="detail-card">
+          <span>Source records</span>
+          <strong>${escapeHtml(String(sourceRecords.length))}</strong>
+        </div>
+        <div class="detail-card">
+          <span>Evidence items</span>
+          <strong>${escapeHtml(String(evidence.length))}</strong>
+        </div>
       </div>
       <div class="badge-row detail-tags">${renderReasonChips(candidate.reasonCodes)}</div>
     </section>
     <section class="detail-section">
-      <h4>Source record compare</h4>
-      <div class="table-shell">
-        <table class="mini-table">
-          <thead>
-            <tr>
-              <th>Source</th>
-              <th>Name / title</th>
-              <th>Institution / venue</th>
-              <th>Identifier</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${sourceRecords
-              .map(
-                (record) => `
-                  <tr>
-                    <td>${escapeHtml(record.source || "unknown")}</td>
-                    <td>${escapeHtml(recordTitle(record))}</td>
-                    <td>${escapeHtml(recordSubtitle(record))}</td>
-                    <td>${escapeHtml(recordIdentifier(record))}</td>
-                  </tr>
-                `,
-              )
-              .join("")}
-          </tbody>
-        </table>
+      <h4>Source comparison</h4>
+      <div class="compare-grid">
+        ${sourceRecords
+          .map(
+            (record) => `
+              <article class="compare-card">
+                <p class="compare-source">${escapeHtml(displayLabel(record.source || "unknown source"))}</p>
+                <h5>${escapeHtml(recordTitle(record))}</h5>
+                <dl class="compare-meta">
+                  <div>
+                    <dt>Institution / venue</dt>
+                    <dd>${escapeHtml(recordSubtitle(record))}</dd>
+                  </div>
+                  <div>
+                    <dt>Identifier</dt>
+                    <dd>${escapeHtml(recordIdentifier(record))}</dd>
+                  </div>
+                </dl>
+              </article>
+            `,
+          )
+          .join("")}
       </div>
     </section>
     <section class="detail-section">
-      <h4>Evidence</h4>
-      <div class="table-shell">
-        <table class="mini-table">
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Value</th>
-              <th>Quality</th>
-              <th>Path</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${evidence
-              .map(
-                (entry) => `
-                  <tr>
-                    <td>${escapeHtml(entry.evidenceType || "unknown")}</td>
-                    <td>${escapeHtml(entry.normalizedValue || entry.rawValue || "—")}</td>
-                    <td>${escapeHtml(entry.quality || "unknown")}</td>
-                    <td>${escapeHtml(entry.extractedFrom?.sourcePath || "unknown")}</td>
-                  </tr>
-                `,
-              )
-              .join("")}
-          </tbody>
-        </table>
+      <h4>Evidence ledger</h4>
+      <div class="evidence-list">
+        ${evidencePreview
+          .map(
+            (entry) => `
+              <article class="evidence-item">
+                <div class="evidence-main">
+                  <span class="evidence-type">${escapeHtml(displayLabel(entry.evidenceType || "unknown"))}</span>
+                  <strong>${escapeHtml(entry.normalizedValue || entry.rawValue || "—")}</strong>
+                </div>
+                <div class="evidence-sub">
+                  <span>${escapeHtml(displayLabel(entry.quality || "unknown quality"))}</span>
+                  <span>${escapeHtml(entry.extractedFrom?.sourcePath || "unknown path")}</span>
+                </div>
+              </article>
+            `,
+          )
+          .join("")}
       </div>
     </section>
     <details class="response-box">
@@ -1024,12 +1055,12 @@ function setReviewControls(item) {
   elements.approveUnsureButton.disabled = !hasCandidate;
 
   const isSingleton = hasCandidate && arrayValue(candidate.sourceRecordIds).length === 1;
-  const primaryLabel = isSingleton ? "approve_entity" : "same_person";
-  elements.approveSamePersonButton.textContent = isSingleton ? "Approve entity" : "Same person";
+  const primaryLabel = isSingleton ? "Approve entity" : "Approve merge";
+  elements.approveSamePersonButton.textContent = isSingleton ? "Approve entity" : "Approve merge";
   elements.reviewLabelSamePersonOption.textContent = primaryLabel;
   if (!hasCandidate) {
-    elements.reviewLabelSamePersonOption.textContent = "same_person";
-    elements.approveSamePersonButton.textContent = "Same person";
+    elements.reviewLabelSamePersonOption.textContent = "Approve merge";
+    elements.approveSamePersonButton.textContent = "Approve merge";
   }
 }
 
@@ -1094,7 +1125,7 @@ function renderApprovedDetail() {
       <h4>${escapeHtml(entity.displayName || entity.id)}</h4>
       <div class="badge-row detail-tags">
         ${renderPill("approved", "approved")}
-        ${renderPill(entity.entityType || "entity", "neutral")}
+        ${renderPill(displayLabel(entity.entityType || "entity"), "neutral")}
         ${renderPill(`${arrayValue(entity.sourceRecordIds).length} source records`, "neutral")}
       </div>
     </section>
@@ -1353,6 +1384,14 @@ async function submitReviewLabel(labelOverride = "") {
 }
 
 function bindEvents() {
+  elements.recordsTabButton.addEventListener("click", () => {
+    setExplorerTab("records");
+  });
+
+  elements.approvedTabButton.addEventListener("click", () => {
+    setExplorerTab("approved");
+  });
+
   elements.saveSettingsButton.addEventListener("click", () => {
     saveSettings();
     void refreshAll(state.selectedRunId);
@@ -1480,6 +1519,7 @@ function boot() {
   elements.apiBaseUrl.value = localStorage.getItem(STORAGE_KEY) || "/api/sourcing";
   updateUploadCurlPreview();
   bindEvents();
+  setExplorerTab(state.activeExplorerTab);
   setReviewControls(null);
   updateDashboard();
   void refreshAll();
