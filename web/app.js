@@ -1,135 +1,104 @@
-const STORAGE_KEY = "wekruit.sourcingReview.apiBaseUrl";
+const API_BASE_URL = "/api/sourcing";
+const PAGE_IDS = new Set(["jobs", "review", "approved"]);
 
-const ROUTES = {
-  overview: {
-    eyebrow: "Overview",
-    title: "Operational overview",
-    subtitle: "See run load, pending merge work, and recently approved researchers before diving into the review loop.",
+const REASON_CONFIG = {
+  singleton_review: {
+    fields: ["Manual review"],
+    detail: "Only one source record exists, so a human needs to approve whether this should survive as a real person profile.",
   },
-  runs: {
-    eyebrow: "Runs",
-    title: "Source run explorer",
-    subtitle: "Pick a run, inspect the records inside it, and understand what the pipeline actually collected.",
+  name_institution: {
+    fields: ["Name", "Institution"],
+    detail: "The candidate was linked because both the name and the institution matched.",
   },
-  queue: {
-    eyebrow: "Queue",
-    title: "Merge review workbench",
-    subtitle: "Compare conflicting source records, inspect evidence, and make the merge decision without losing provenance.",
+  orcid_exact: {
+    fields: ["ORCID"],
+    detail: "Both source records expose the same ORCID.",
   },
-  approved: {
-    eyebrow: "Approved",
-    title: "Approved researcher entities",
-    subtitle: "Audit the survivors that are ready to move downstream into outbound and enrichment workflows.",
+  email_exact: {
+    fields: ["Email"],
+    detail: "Both source records expose the same email address.",
   },
-  utilities: {
-    eyebrow: "Utilities",
-    title: "Manual controls and transport",
-    subtitle: "Keep API targeting, source-run creation, and batch upload off the review pages but available when needed.",
+  homepage_exact: {
+    fields: ["Homepage"],
+    detail: "Both source records expose the same homepage.",
+  },
+  github_exact: {
+    fields: ["GitHub"],
+    detail: "Both source records point to the same GitHub profile.",
+  },
+  source_native_id_exact: {
+    fields: ["Source ID"],
+    detail: "The upstream source-native identifier matches across records.",
   },
 };
 
+const FIELD_PRIORITY = ["email", "orcid", "github", "homepage", "source_native_id", "institution", "name"];
+const FIELD_DEFINITIONS = [
+  ["name", "Name"],
+  ["email", "Email"],
+  ["homepage", "Homepage"],
+  ["institution", "Institution"],
+  ["orcid", "ORCID"],
+  ["github", "GitHub"],
+  ["source_native_id", "Source ID"],
+];
+
 const state = {
-  route: "overview",
-  sourceRuns: [],
-  sourceRecords: [],
-  candidateDetails: [],
-  approvedEntities: [],
-  selectedRunId: "",
-  selectedRecordId: "",
+  page: normalizePage(window.location.hash.replace(/^#/, "") || "review"),
+  runs: [],
+  candidates: [],
+  approved: [],
+  selectedJobRunId: "",
+  reviewRunId: "",
   selectedCandidateId: "",
-  selectedApprovedEntityId: "",
-  filters: {
-    recordType: "all",
-    recordSort: "impact_desc",
-    recordSearch: "",
-    queueStatus: "pending_review",
-    approvedScope: "selected_run",
-    approvedSearch: "",
-  },
+  selectedApprovedId: "",
+  reviewSearch: "",
+  approvedSearch: "",
+  reviewSubmitting: false,
+  reviewMessage: "",
+  reviewMessageStatus: "",
 };
 
 const elements = {
-  navLinks: Array.from(document.querySelectorAll(".nav-link")),
-  pages: Array.from(document.querySelectorAll(".page")),
-  pageEyebrow: document.querySelector("#pageEyebrow"),
-  pageTitle: document.querySelector("#pageTitle"),
-  pageSubtitle: document.querySelector("#pageSubtitle"),
-  apiBaseChip: document.querySelector("#apiBaseChip"),
+  refreshButton: document.querySelector("#refreshButton"),
   connectionStatus: document.querySelector("#connectionStatus"),
-  refreshAllButton: document.querySelector("#refreshAllButton"),
-  navOverviewCount: document.querySelector("#navOverviewCount"),
-  navRunsCount: document.querySelector("#navRunsCount"),
-  navQueueCount: document.querySelector("#navQueueCount"),
+  navJobs: document.querySelector("#navJobs"),
+  navReview: document.querySelector("#navReview"),
+  navApproved: document.querySelector("#navApproved"),
+  navJobsCount: document.querySelector("#navJobsCount"),
+  navReviewCount: document.querySelector("#navReviewCount"),
   navApprovedCount: document.querySelector("#navApprovedCount"),
-  navUtilitiesCount: document.querySelector("#navUtilitiesCount"),
-  focusedRunCard: document.querySelector("#focusedRunCard"),
-  sidebarHealth: document.querySelector("#sidebarHealth"),
-  overviewMetrics: document.querySelector("#overviewMetrics"),
-  overviewRunsAttention: document.querySelector("#overviewRunsAttention"),
-  overviewQueuePreview: document.querySelector("#overviewQueuePreview"),
-  overviewApprovedPreview: document.querySelector("#overviewApprovedPreview"),
-  overviewActions: document.querySelector("#overviewActions"),
-  refreshRunsButton: document.querySelector("#refreshRunsButton"),
-  completeRunButton: document.querySelector("#completeRunButton"),
-  runsRunList: document.querySelector("#runsRunList"),
-  runsRunSummary: document.querySelector("#runsRunSummary"),
-  recordTypeFilter: document.querySelector("#recordTypeFilter"),
-  recordSort: document.querySelector("#recordSort"),
-  recordSearch: document.querySelector("#recordSearch"),
-  runRecordTableBody: document.querySelector("#runRecordTableBody"),
-  recordDetail: document.querySelector("#recordDetail"),
-  queueScope: document.querySelector("#queueScope"),
-  queueStatusFilter: document.querySelector("#queueStatusFilter"),
-  refreshCandidatesButton: document.querySelector("#refreshCandidatesButton"),
-  queueSummary: document.querySelector("#queueSummary"),
-  candidateTableBody: document.querySelector("#candidateTableBody"),
-  candidateDetail: document.querySelector("#candidateDetail"),
-  reviewForm: document.querySelector("#reviewForm"),
-  reviewSubmitButton: document.querySelector("#reviewForm button[type='submit']"),
-  dedupCandidateId: document.querySelector("#dedupCandidateId"),
-  reviewLabel: document.querySelector("#reviewLabel"),
-  reviewLabelSamePersonOption: document.querySelector("#reviewLabel option[value='same_person']"),
-  reviewNotes: document.querySelector("#reviewNotes"),
-  approveSamePersonButton: document.querySelector("#approveSamePersonButton"),
-  approveNotSamePersonButton: document.querySelector("#approveNotSamePersonButton"),
-  approveUnsureButton: document.querySelector("#approveUnsureButton"),
+  pageJobs: document.querySelector("#pageJobs"),
+  pageReview: document.querySelector("#pageReview"),
+  pageApproved: document.querySelector("#pageApproved"),
+  jobsMeta: document.querySelector("#jobsMeta"),
+  jobsTableBody: document.querySelector("#jobsTableBody"),
+  jobsDetailTitle: document.querySelector("#jobsDetailTitle"),
+  jobsDetailSubtitle: document.querySelector("#jobsDetailSubtitle"),
+  jobsDetailBody: document.querySelector("#jobsDetailBody"),
+  openRunReviewButton: document.querySelector("#openRunReviewButton"),
+  reviewMeta: document.querySelector("#reviewMeta"),
+  reviewRunFilter: document.querySelector("#reviewRunFilter"),
+  reviewSearchInput: document.querySelector("#reviewSearchInput"),
+  reviewTableBody: document.querySelector("#reviewTableBody"),
+  reviewDetailTitle: document.querySelector("#reviewDetailTitle"),
+  reviewDetailSubtitle: document.querySelector("#reviewDetailSubtitle"),
+  reviewDetailBody: document.querySelector("#reviewDetailBody"),
+  reviewNote: document.querySelector("#reviewNote"),
+  reviewApproveButton: document.querySelector("#reviewApproveButton"),
+  reviewSeparateButton: document.querySelector("#reviewSeparateButton"),
+  reviewHoldButton: document.querySelector("#reviewHoldButton"),
   reviewResult: document.querySelector("#reviewResult"),
-  approvedScopeFilter: document.querySelector("#approvedScopeFilter"),
-  refreshApprovedButton: document.querySelector("#refreshApprovedButton"),
-  approvedSearch: document.querySelector("#approvedSearch"),
+  approvedMeta: document.querySelector("#approvedMeta"),
+  approvedSearchInput: document.querySelector("#approvedSearchInput"),
   approvedTableBody: document.querySelector("#approvedTableBody"),
-  approvedDetail: document.querySelector("#approvedDetail"),
-  saveSettingsButton: document.querySelector("#saveSettingsButton"),
-  apiBaseUrl: document.querySelector("#apiBaseUrl"),
-  sourceRunSourceName: document.querySelector("#sourceRunSourceName"),
-  sourceRunDomain: document.querySelector("#sourceRunDomain"),
-  sourceRunPipeline: document.querySelector("#sourceRunPipeline"),
-  createRunButton: document.querySelector("#createRunButton"),
-  sourceRunResult: document.querySelector("#sourceRunResult"),
-  jsonlFile: document.querySelector("#jsonlFile"),
-  jsonlInput: document.querySelector("#jsonlInput"),
-  runId: document.querySelector("#runId"),
-  uploadEndpoint: document.querySelector("#uploadEndpoint"),
-  uploadButton: document.querySelector("#uploadButton"),
-  uploadResult: document.querySelector("#uploadResult"),
-  uploadCurl: document.querySelector("#uploadCurl"),
+  approvedDetailTitle: document.querySelector("#approvedDetailTitle"),
+  approvedDetailSubtitle: document.querySelector("#approvedDetailSubtitle"),
+  approvedDetailBody: document.querySelector("#approvedDetailBody"),
 };
 
-function safeJsonParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+function normalizePage(value) {
+  return PAGE_IDS.has(value) ? value : "review";
 }
 
 function stringValue(value) {
@@ -145,6 +114,41 @@ function arrayValue(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function safeJsonParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function joinUrl(base, path) {
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+}
+
+function normalizeListPayload(payload) {
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+  if (Array.isArray(payload?.items)) {
+    return payload.items;
+  }
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  return payload ? [payload] : [];
+}
+
 function humanizeToken(value) {
   const token = stringValue(value);
   return token ? token.replace(/_/g, " ") : "";
@@ -153,47 +157,6 @@ function humanizeToken(value) {
 function displayLabel(value) {
   const normalized = humanizeToken(value);
   return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : "";
-}
-
-function joinUrl(base, path) {
-  const cleanBase = stringValue(base).replace(/\/$/, "");
-  const cleanPath = path.startsWith("/") ? path : `/${path}`;
-  return `${cleanBase}${cleanPath}`;
-}
-
-function renderJson(target, value) {
-  target.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-}
-
-function buildCurl(url, body) {
-  const escapedBody = JSON.stringify(body, null, 2).replace(/'/g, "'\\''");
-  return `curl -X POST '${url}' \\
-  -H 'Content-Type: application/json' \\
-  --data '${escapedBody}'`;
-}
-
-function normalizeListPayload(payload) {
-  if (Array.isArray(payload?.data)) {
-    return payload.data;
-  }
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-  if (Array.isArray(payload?.items)) {
-    return payload.items;
-  }
-  if (Array.isArray(payload?.records)) {
-    return payload.records;
-  }
-  return payload ? [payload] : [];
-}
-
-function timestampValue(value) {
-  if (!value) {
-    return 0;
-  }
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function formatDateTime(value) {
@@ -213,41 +176,36 @@ function formatDateTime(value) {
   }).format(date);
 }
 
-function formatDate(value) {
-  if (!value) {
-    return "Unknown";
+function uniqueList(values) {
+  return [...new Set(arrayValue(values).filter(Boolean))];
+}
+
+function flattenStrings(value) {
+  if (typeof value === "string") {
+    return stringValue(value) ? [value.trim()] : [];
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return String(value);
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => flattenStrings(entry));
   }
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
+  return [];
 }
 
-function compactObject(record) {
-  return Object.fromEntries(Object.entries(record).filter(([_key, value]) => value !== ""));
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const flattened = flattenStrings(value);
+    if (flattened.length) {
+      return flattened[0];
+    }
+  }
+  return "";
 }
 
-function setConnectionStatus(message, stateName = "idle") {
-  elements.connectionStatus.textContent = message;
-  document.body.dataset.connection = stateName;
-}
-
-function getApiBaseUrl() {
-  return elements.apiBaseUrl.value.trim().replace(/\/$/, "");
+function collectNonEmpty(...values) {
+  return uniqueList(values.flatMap((value) => flattenStrings(value)));
 }
 
 async function requestJson(path, options = {}) {
-  const apiBaseUrl = getApiBaseUrl();
-  if (!apiBaseUrl) {
-    throw new Error("Set API base URL first.");
-  }
-
-  const response = await fetch(joinUrl(apiBaseUrl, path), {
+  const response = await fetch(joinUrl(API_BASE_URL, path), {
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {}),
@@ -259,1228 +217,849 @@ async function requestJson(path, options = {}) {
   const payload = text ? safeJsonParse(text) : null;
 
   if (!response.ok) {
-    const details = payload ? JSON.stringify(payload, null, 2) : text;
-    throw new Error(`HTTP ${response.status} ${response.statusText}\n${details}`);
+    const errorText = typeof payload === "string" ? payload : JSON.stringify(payload);
+    throw new Error(`HTTP ${response.status}: ${errorText}`);
   }
 
   return payload;
 }
 
-function sortRunsForReview(runs) {
-  return runs
-    .slice()
-    .sort((left, right) => {
-      const dedupDelta = numberValue(right.dedupCandidateCount) - numberValue(left.dedupCandidateCount);
-      if (dedupDelta !== 0) {
-        return dedupDelta;
-      }
-
-      const recordDelta = numberValue(right.sourceRecordCount) - numberValue(left.sourceRecordCount);
-      if (recordDelta !== 0) {
-        return recordDelta;
-      }
-
-      return timestampValue(right.createdAt) - timestampValue(left.createdAt);
-    });
+function statusVariant(status) {
+  if (status === "completed" || status === "approved" || status === "same_person") {
+    return "success";
+  }
+  if (status === "pending_review" || status === "medium") {
+    return "warning";
+  }
+  if (status === "failed" || status === "not_same_person") {
+    return "danger";
+  }
+  return "neutral";
 }
 
-function chooseRunId(runs, preferredRunId = "") {
-  if (!runs.length) {
-    return "";
-  }
-
-  if (preferredRunId) {
-    const preferred = runs.find((run) => run.id === preferredRunId);
-    if (preferred) {
-      return preferred.id;
-    }
-  }
-
-  const pendingReviewRun = runs.find((run) => numberValue(run.dedupCandidateCount) > 0);
-  if (pendingReviewRun) {
-    return pendingReviewRun.id;
-  }
-
-  return runs[0].id;
+function renderPill(text, variant = "neutral") {
+  return `<span class="pill pill--${escapeHtml(variant)}">${escapeHtml(text)}</span>`;
 }
 
-function getSelectedRun() {
-  return state.sourceRuns.find((run) => run.id === state.selectedRunId) ?? null;
-}
-
-function getSelectedRecord() {
-  return state.sourceRecords.find((record) => record.id === state.selectedRecordId) ?? null;
+function setConnectionStatus(text, status) {
+  elements.connectionStatus.textContent = text;
+  elements.connectionStatus.dataset.status = status;
 }
 
 function candidateObject(item) {
   return item?.candidate ?? item ?? null;
 }
 
-function getSelectedCandidateItem() {
-  return filteredCandidateDetails().find((item) => candidateObject(item)?.id === state.selectedCandidateId) ?? null;
+function pendingCandidatesAll() {
+  return state.candidates.filter((item) => candidateObject(item)?.status === "pending_review");
 }
 
-function getSelectedApprovedEntity() {
-  return filteredApprovedEntities().find((entity) => entity.id === state.selectedApprovedEntityId) ?? null;
-}
-
-function computeRecordCounts(records) {
-  return records.reduce(
-    (accumulator, record) => {
-      const entityType = stringValue(record.entityType);
-      if (entityType === "research_work" || entityType === "paper") {
-        accumulator.papers += 1;
-      }
-      if (entityType === "person_profile" || entityType === "person" || entityType === "profile") {
-        accumulator.people += 1;
-      }
-      return accumulator;
-    },
-    { papers: 0, people: 0 },
-  );
-}
-
-function pickFirst(record, keys) {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  return "";
-}
-
-function parseJsonl(input) {
-  if (!input.trim()) {
-    return [];
+function runIdForCandidate(item) {
+  const candidate = candidateObject(item);
+  const directRunId = stringValue(candidate?.createdFromSourceRunId) || stringValue(candidate?.sourceRunId);
+  if (directRunId) {
+    return directRunId;
   }
 
-  return input
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      try {
-        return JSON.parse(line);
-      } catch (error) {
-        throw new Error(`Invalid JSONL on line ${index + 1}: ${error.message}`);
-      }
-    });
+  const sourceRunId = arrayValue(item?.sourceRecords)
+    .map((record) => stringValue(record?.sourceRunId) || stringValue(record?.runId))
+    .find(Boolean);
+
+  return sourceRunId || "";
 }
 
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let quoted = false;
+function reviewStatsByRun() {
+  const stats = new Map();
 
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
-
-    if (quoted) {
-      if (char === "\"" && next === "\"") {
-        field += "\"";
-        index += 1;
-      } else if (char === "\"") {
-        quoted = false;
-      } else {
-        field += char;
-      }
+  for (const item of state.candidates) {
+    const candidate = candidateObject(item);
+    const runId = runIdForCandidate(item);
+    if (!candidate || !runId) {
       continue;
     }
 
-    if (char === "\"") {
-      quoted = true;
-    } else if (char === ",") {
-      row.push(field);
-      field = "";
-    } else if (char === "\n") {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-    } else if (char !== "\r") {
-      field += char;
+    const entry = stats.get(runId) || { total: 0, pending: 0, reviewed: 0 };
+    entry.total += 1;
+
+    if (candidate.status === "pending_review") {
+      entry.pending += 1;
+    } else {
+      entry.reviewed += 1;
     }
+
+    stats.set(runId, entry);
   }
 
-  row.push(field);
-  rows.push(row);
-  return rows.filter((entry) => entry.some((value) => value.trim()));
+  return stats;
 }
 
-function csvToSourceRecords(text) {
-  const rows = parseCsv(text);
-  if (rows.length < 2) {
-    throw new Error("CSV must include a header row and at least one data row.");
-  }
-
-  const headers = rows[0].map((header) => header.trim());
-  return rows.slice(1).map((values, index) => {
-    const raw = Object.fromEntries(headers.map((header, headerIndex) => [header, values[headerIndex]?.trim() ?? ""]));
-    const name = pickFirst(raw, ["name", "member_name", "username", "full_name", "project_name"]);
-    const institution = pickFirst(raw, ["institution", "company", "member_company", "affiliation"]);
-    const sourceNativeId =
-      pickFirst(raw, [
-        "sourceNativeId",
-        "source_native_id",
-        "id",
-        "username",
-        "member_username",
-        "member_devpost",
-        "github_url",
-        "member_github",
-        "project_url",
-        "email",
-      ]) || `csv-row-${index + 1}`;
-    const entityType = pickFirst(raw, ["entityType", "entity_type", "type"]) || "person";
-    const url = pickFirst(raw, [
-      "github_url",
-      "member_github",
-      "html_url",
-      "blog",
-      "website",
-      "member_website",
-      "project_url",
-    ]);
-
-    return {
-      sourceNativeId,
-      entityType,
-      displayName: name,
-      institution,
-      sourceUrl: url,
-      display: compactObject({
-        name,
-        title: pickFirst(raw, ["title", "project_name"]),
-        institution,
-        homepage: pickFirst(raw, ["homepage", "website", "member_website", "blog"]),
-        github: pickFirst(raw, ["github_url", "member_github", "html_url"]),
-        linkedin: pickFirst(raw, ["linkedin_url", "member_linkedin"]),
-      }),
-      rawSummary: compactObject({
-        email: pickFirst(raw, ["email", "emails", "member_email"]),
-        github: pickFirst(raw, ["github_url", "member_github", "html_url"]),
-        linkedin: pickFirst(raw, ["linkedin_url", "member_linkedin"]),
-        devpost: pickFirst(raw, ["member_devpost", "project_url"]),
-        projectUrl: pickFirst(raw, ["project_url"]),
-        orcid: pickFirst(raw, ["orcid", "orcid_id"]),
-        homepage: pickFirst(raw, ["homepage", "website", "member_website", "blog"]),
-        score: pickFirst(raw, ["score", "score_total"]),
-      }),
-      raw,
-    };
-  });
+function runReviewStats(runId) {
+  return reviewStatsByRun().get(runId) || { total: 0, pending: 0, reviewed: 0 };
 }
 
-function buildUploadBody() {
-  return {
-    runId: elements.runId.value.trim(),
-    records: parseJsonl(elements.jsonlInput.value),
+function sortRuns(runs) {
+  const statusRank = {
+    running: 0,
+    in_progress: 0,
+    queued: 1,
+    pending: 1,
+    completed: 2,
+    failed: 3,
   };
-}
 
-function buildSourceRunBody() {
-  return {
-    sourceName: elements.sourceRunSourceName.value.trim(),
-    sourceDomain: elements.sourceRunDomain.value.trim(),
-    pipelineName: elements.sourceRunPipeline.value.trim(),
-    trigger: "manual",
-    metadata: {
-      submittedFrom: "sourcing-review-web",
-    },
-  };
-}
-
-function normalizeRoute(value) {
-  const candidate = stringValue(value).replace(/^#\/?/, "").trim();
-  return ROUTES[candidate] ? candidate : "overview";
-}
-
-function recordTitle(record) {
-  return (
-    stringValue(record.display?.title) ||
-    stringValue(record.display?.name) ||
-    stringValue(record.displayName) ||
-    stringValue(record.sourceNativeId) ||
-    stringValue(record.id) ||
-    "Untitled record"
-  );
-}
-
-function recordSubtitle(record) {
-  return (
-    stringValue(record.display?.venue) ||
-    stringValue(record.rawSummary?.venue) ||
-    stringValue(record.institution) ||
-    stringValue(record.display?.institution) ||
-    "No secondary field"
-  );
-}
-
-function recordIdentifier(record) {
-  return (
-    stringValue(record.rawSummary?.doi) ||
-    stringValue(record.rawSummary?.orcid) ||
-    stringValue(record.sourceNativeId) ||
-    "—"
-  );
-}
-
-function recordMetricLabel(record) {
-  if (stringValue(record.entityType) === "research_work" || stringValue(record.entityType) === "paper") {
-    return {
-      label: "Cited / date",
-      value: `${numberValue(record.rawSummary?.citedByCount)} · ${formatDate(record.rawSummary?.publicationDate)}`,
-    };
-  }
-  return {
-    label: "Contact hints",
-    value: `${numberValue(record.rawSummary?.emailCount)} email · ${numberValue(record.rawSummary?.homepageCount)} homepage`,
-  };
-}
-
-function recordSortValue(record, sortMode) {
-  if (sortMode === "recent_desc") {
-    return timestampValue(record.rawSummary?.publicationDate) || timestampValue(record.updatedAt);
-  }
-  if (sortMode === "name_asc") {
-    return 0;
-  }
-
-  if (stringValue(record.entityType) === "research_work" || stringValue(record.entityType) === "paper") {
-    return numberValue(record.rawSummary?.citedByCount);
-  }
-
-  return (
-    numberValue(record.rawSummary?.emailCount) * 10 +
-    numberValue(record.rawSummary?.homepageCount) * 5 +
-    numberValue(record.rawSummary?.paperCountInBatch)
-  );
-}
-
-function filteredRunRecords() {
-  const requestedType = state.filters.recordType;
-  const query = state.filters.recordSearch.trim().toLowerCase();
-  const sortMode = state.filters.recordSort;
-
-  return state.sourceRecords
-    .filter((record) => {
-      if (requestedType !== "all" && stringValue(record.entityType) !== requestedType) {
-        return false;
-      }
-      if (!query) {
-        return true;
-      }
-      const haystack = [
-        recordTitle(record),
-        recordSubtitle(record),
-        stringValue(record.rawSummary?.doi),
-        stringValue(record.rawSummary?.orcid),
-        stringValue(record.sourceNativeId),
-        stringValue(record.source),
-        stringValue(record.rawSummary?.institution),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(query);
-    })
+  return runs
+    .slice()
     .sort((left, right) => {
-      if (sortMode === "name_asc") {
-        return recordTitle(left).localeCompare(recordTitle(right));
+      const leftRank = statusRank[stringValue(left.status)] ?? 9;
+      const rightRank = statusRank[stringValue(right.status)] ?? 9;
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
       }
-      return recordSortValue(right, sortMode) - recordSortValue(left, sortMode);
+      return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
     });
 }
 
-function filteredCandidateDetails() {
-  return state.candidateDetails
+function chooseDefaultRunId() {
+  if (!state.runs.length) {
+    return "";
+  }
+
+  const withPending = state.runs.find((run) => runReviewStats(run.id).pending > 0);
+  return withPending?.id || state.runs[0].id;
+}
+
+function getSelectedJobRun() {
+  return state.runs.find((run) => run.id === state.selectedJobRunId) ?? null;
+}
+
+function filteredReviewCandidates() {
+  return pendingCandidatesAll()
     .filter((item) => {
       const candidate = candidateObject(item);
       if (!candidate) {
         return false;
       }
-
-      if (state.selectedRunId && candidate.createdFromSourceRunId !== state.selectedRunId) {
+      if (state.reviewRunId && candidate.createdFromSourceRunId !== state.reviewRunId) {
         return false;
       }
-
-      if (state.filters.queueStatus === "pending_review") {
-        return candidate.status === "pending_review";
+      if (!state.reviewSearch) {
+        return true;
       }
-
-      if (state.filters.queueStatus === "reviewed") {
-        return candidate.status !== "pending_review" && candidate.status !== "suppressed";
-      }
-
-      return candidate.status !== "suppressed";
+      const haystack = [
+        stringValue(candidate.displayName),
+        ...matchedFieldsForCandidate(candidate),
+        ...arrayValue(item.sourceRecords).flatMap((record) => {
+          const recordInfo = recordData(record);
+          return [
+            recordInfo.name,
+            recordInfo.institution,
+            recordInfo.orcid,
+            ...recordInfo.emails,
+            ...recordInfo.homepages,
+            ...recordInfo.githubs,
+          ];
+        }),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(state.reviewSearch);
     })
     .sort((left, right) => {
       const leftCandidate = candidateObject(left);
       const rightCandidate = candidateObject(right);
-      const strengthRank = { strong: 2, medium: 1, weak: 0 };
-      const strengthDelta =
-        strengthRank[rightCandidate?.strength ?? "weak"] - strengthRank[leftCandidate?.strength ?? "weak"];
-      if (strengthDelta !== 0) {
-        return strengthDelta;
+      const evidenceDelta = arrayValue(right.evidence).length - arrayValue(left.evidence).length;
+      if (evidenceDelta !== 0) {
+        return evidenceDelta;
       }
-      return timestampValue(rightCandidate?.updatedAt) - timestampValue(leftCandidate?.updatedAt);
+      return new Date(rightCandidate?.updatedAt || 0).getTime() - new Date(leftCandidate?.updatedAt || 0).getTime();
     });
 }
 
 function filteredApprovedEntities() {
-  const query = state.filters.approvedSearch.trim().toLowerCase();
-  const selectedScope = state.filters.approvedScope;
-
-  return state.approvedEntities
-    .filter((entity) => {
-      if (selectedScope === "selected_run" && state.selectedRunId) {
-        const sourceRecordIds = new Set(state.sourceRecords.map((record) => record.id));
-        const matchesRun = arrayValue(entity.sourceRecordIds).some((sourceRecordId) => sourceRecordIds.has(sourceRecordId));
-        if (!matchesRun) {
-          return false;
-        }
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      const haystack = [
-        stringValue(entity.displayName),
-        ...arrayValue(entity.emails),
-        ...arrayValue(entity.homepages),
-        ...arrayValue(entity.institutions),
-        ...arrayValue(entity.githubUrls),
-        ...arrayValue(entity.orcids),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(query);
-    })
-    .slice()
-    .sort((left, right) => timestampValue(right.createdAt) - timestampValue(left.createdAt));
+  return state.approved.filter((entity) => {
+    if (!state.approvedSearch) {
+      return true;
+    }
+    const haystack = [
+      stringValue(entity.displayName),
+      ...arrayValue(entity.emails),
+      ...arrayValue(entity.homepages),
+      ...arrayValue(entity.institutions),
+      ...arrayValue(entity.orcids),
+      ...arrayValue(entity.githubUrls),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(state.approvedSearch);
+  });
 }
 
-function allPendingCandidates() {
-  return state.candidateDetails.filter((item) => candidateObject(item)?.status === "pending_review");
+function getSelectedCandidateItem() {
+  return filteredReviewCandidates().find((item) => candidateObject(item)?.id === state.selectedCandidateId) ?? null;
 }
 
-function pendingCountForRun(runId) {
-  return state.candidateDetails.filter((item) => {
-    const candidate = candidateObject(item);
-    return candidate?.status === "pending_review" && candidate.createdFromSourceRunId === runId;
-  }).length;
+function getSelectedApprovedEntity() {
+  return filteredApprovedEntities().find((entity) => entity.id === state.selectedApprovedId) ?? null;
 }
 
-function reviewedCountForRun(runId) {
-  return state.candidateDetails.filter((item) => {
-    const candidate = candidateObject(item);
-    return candidate?.status && candidate.status !== "pending_review" && candidate.createdFromSourceRunId === runId;
-  }).length;
+function ensureSelections() {
+  const defaultRunId = chooseDefaultRunId();
+
+  if (!state.runs.some((run) => run.id === state.selectedJobRunId)) {
+    state.selectedJobRunId = defaultRunId;
+  }
+
+  if (state.reviewRunId && !state.runs.some((run) => run.id === state.reviewRunId)) {
+    state.reviewRunId = "";
+  }
+
+  const currentReviewPending = state.reviewRunId ? runReviewStats(state.reviewRunId).pending : 0;
+  const fallbackPending = defaultRunId ? runReviewStats(defaultRunId).pending : 0;
+
+  if ((!state.reviewRunId || (currentReviewPending === 0 && fallbackPending > 0)) && defaultRunId) {
+    state.reviewRunId = defaultRunId;
+  }
+
+  const reviewItems = filteredReviewCandidates();
+  if (!reviewItems.some((item) => candidateObject(item)?.id === state.selectedCandidateId)) {
+    state.selectedCandidateId = candidateObject(reviewItems[0])?.id || "";
+  }
+
+  const approvedItems = filteredApprovedEntities();
+  if (!approvedItems.some((entity) => entity.id === state.selectedApprovedId)) {
+    state.selectedApprovedId = approvedItems[0]?.id || "";
+  }
 }
 
-function approvedCountForSelectedRun() {
-  if (!state.selectedRunId) {
+function matchedFieldsForCandidate(candidate) {
+  const fields = [];
+  for (const reason of arrayValue(candidate?.reasonCodes)) {
+    const config = REASON_CONFIG[reason];
+    if (config) {
+      fields.push(...config.fields);
+    } else {
+      fields.push(displayLabel(reason));
+    }
+  }
+  return uniqueList(fields);
+}
+
+function reasonDetailsForCandidate(candidate) {
+  return arrayValue(candidate?.reasonCodes).map((reason) => REASON_CONFIG[reason]?.detail || `${displayLabel(reason)} triggered this review candidate.`);
+}
+
+function evidenceTypeLabel(type) {
+  const labels = {
+    name: "Name",
+    email: "Email",
+    homepage: "Homepage",
+    github: "GitHub",
+    institution: "Institution",
+    orcid: "ORCID",
+    source_native_id: "Source ID",
+  };
+  return labels[type] || displayLabel(type || "evidence");
+}
+
+function evidencePriority(entry) {
+  const index = FIELD_PRIORITY.indexOf(entry?.evidenceType);
+  return index === -1 ? FIELD_PRIORITY.length : index;
+}
+
+function evidenceQualityPriority(entry) {
+  const quality = stringValue(entry?.quality);
+  if (quality === "high") {
     return 0;
   }
-  const sourceRecordIds = new Set(state.sourceRecords.map((record) => record.id));
-  return state.approvedEntities.filter((entity) =>
-    arrayValue(entity.sourceRecordIds).some((sourceRecordId) => sourceRecordIds.has(sourceRecordId)),
-  ).length;
-}
-
-function renderPill(content, variant = "neutral") {
-  return `<span class="pill pill--${escapeHtml(variant)}">${escapeHtml(content)}</span>`;
-}
-
-function renderReasonChips(reasonCodes) {
-  const items = arrayValue(reasonCodes);
-  if (!items.length) {
-    return renderPill("None", "neutral");
+  if (quality === "medium") {
+    return 1;
   }
-  return items.map((reason) => renderPill(displayLabel(reason), "neutral")).join("");
+  return 2;
 }
 
-function renderListPreview(values, limit = 2) {
-  const items = arrayValue(values);
-  if (!items.length) {
+function bestEvidence(item) {
+  return arrayValue(item?.evidence)
+    .slice()
+    .sort((left, right) => {
+      const fieldDelta = evidencePriority(left) - evidencePriority(right);
+      if (fieldDelta !== 0) {
+        return fieldDelta;
+      }
+      return evidenceQualityPriority(left) - evidenceQualityPriority(right);
+    })[0] ?? null;
+}
+
+function sharedValueSummary(item) {
+  const candidate = candidateObject(item);
+  if (arrayValue(candidate?.reasonCodes).includes("singleton_review")) {
+    return "Single source record";
+  }
+  const evidence = bestEvidence(item);
+  if (!evidence) {
+    return "Review manually";
+  }
+  const value = stringValue(evidence.normalizedValue) || stringValue(evidence.rawValue);
+  return value ? `${evidenceTypeLabel(evidence.evidenceType)}: ${value}` : evidenceTypeLabel(evidence.evidenceType);
+}
+
+function sourceSummary(item) {
+  const sources = uniqueList(arrayValue(item?.sourceRecords).map((record) => displayLabel(record.source || "source")));
+  if (!sources.length) {
+    return "No source records";
+  }
+  if (sources.length === 1) {
+    return `${sources[0]} · 1 record`;
+  }
+  return `${sources.join(" + ")} · ${arrayValue(item.sourceRecords).length} records`;
+}
+
+function tableSourceMeta(candidate) {
+  if (arrayValue(candidate?.reasonCodes).includes("singleton_review")) {
+    return "Single-source review";
+  }
+  return `${displayLabel(candidate?.strength || "weak")} match`;
+}
+
+function recordData(record) {
+  const raw = record?.raw || {};
+  const rawSummary = record?.rawSummary || {};
+  const display = record?.display || {};
+
+  return {
+    name: firstNonEmpty(display.name, record.displayName, raw.name),
+    emails: collectNonEmpty(rawSummary.email, raw.email, raw.emails, raw.contactEmails, display.email),
+    homepages: collectNonEmpty(display.homepage, rawSummary.homepage, raw.homepage, raw.homepages, raw.urls, raw.researcherUrls, raw.researcher_urls),
+    institution: firstNonEmpty(display.institution, rawSummary.institution, record.institution, raw.institution),
+    institutionCountry: firstNonEmpty(rawSummary.institutionCountry),
+    orcid: firstNonEmpty(raw.orcid, rawSummary.orcid, display.orcid),
+    githubs: collectNonEmpty(raw.github, raw.githubUrl, raw.github_url, raw.githubUrls, raw.github_urls, display.github, display.githubUrl, rawSummary.github),
+    sourceId: firstNonEmpty(record.sourceNativeId, record.id),
+    source: displayLabel(record.source || record.sourceName || "source"),
+    runId: firstNonEmpty(record.sourceRunId, record.runId),
+    domain: firstNonEmpty(record.domain, record.sourceDomain),
+    storagePath: firstNonEmpty(record.rawStoragePath, record.storagePath),
+    observedAt: firstNonEmpty(record.observedAt, record.updatedAt, record.createdAt),
+    paperCount: firstNonEmpty(rawSummary.paperCountInBatch),
+  };
+}
+
+function renderMaybeLinks(values) {
+  const entries = arrayValue(values);
+  if (!entries.length) {
     return "—";
   }
-  if (items.length <= limit) {
-    return items.join(", ");
-  }
-  return `${items.slice(0, limit).join(", ")} +${items.length - limit}`;
+  return entries
+    .map((value) => {
+      const text = escapeHtml(value);
+      if (/^https?:\/\//.test(value)) {
+        return `<a class="inline-link" href="${text}" target="_blank" rel="noreferrer">${text}</a>`;
+      }
+      return text;
+    })
+    .join("<br />");
 }
 
-function renderEmptyTableRow(colspan, message, actionHtml = "") {
+function compareFieldValue(recordInfo, field) {
+  if (!recordInfo) {
+    return [];
+  }
+
+  const fieldValues = {
+    name: recordInfo.name ? [recordInfo.name] : [],
+    email: recordInfo.emails,
+    homepage: recordInfo.homepages,
+    institution: recordInfo.institution ? [recordInfo.institution] : [],
+    orcid: recordInfo.orcid ? [recordInfo.orcid] : [],
+    github: recordInfo.githubs,
+    source_native_id: recordInfo.sourceId ? [recordInfo.sourceId] : [],
+  };
+
+  return uniqueList(fieldValues[field] || []);
+}
+
+function comparisonRows(item) {
+  const records = arrayValue(item?.sourceRecords);
+  const left = recordData(records[0] || {});
+  const right = recordData(records[1] || {});
+  const matchedFields = new Set(arrayValue(item?.evidence).map((entry) => entry.evidenceType));
+  const rows = FIELD_DEFINITIONS.map(([key, label]) => ({
+    key,
+    label,
+    left: compareFieldValue(left, key),
+    right: compareFieldValue(right, key),
+    matched: matchedFields.has(key),
+  }));
+
+  const visibleRows = rows.filter((row) => row.matched || row.left.length || row.right.length);
+  return visibleRows.length ? visibleRows : rows.filter((row) => row.key === "name" || row.key === "source_native_id");
+}
+
+function renderComparisonValue(values, isMeta = false) {
+  if (!values.length) {
+    return `<div class="compare-value"><span class="compare-value__main">—</span></div>`;
+  }
+
   return `
-    <tr>
-      <td colspan="${colspan}" class="empty-row">
-        ${escapeHtml(message)}
-        ${actionHtml}
-      </td>
-    </tr>
-  `;
-}
-
-function ensureSelectedRecord() {
-  const records = filteredRunRecords();
-  if (records.some((record) => record.id === state.selectedRecordId)) {
-    return;
-  }
-  state.selectedRecordId = records[0]?.id ?? "";
-}
-
-function ensureSelectedCandidate() {
-  const items = filteredCandidateDetails();
-  if (items.some((item) => candidateObject(item)?.id === state.selectedCandidateId)) {
-    return;
-  }
-  state.selectedCandidateId = candidateObject(items[0])?.id ?? "";
-}
-
-function ensureSelectedApprovedEntity() {
-  const entities = filteredApprovedEntities();
-  if (entities.some((entity) => entity.id === state.selectedApprovedEntityId)) {
-    return;
-  }
-  state.selectedApprovedEntityId = entities[0]?.id ?? "";
-}
-
-function getStatusVariant(status) {
-  const normalized = stringValue(status) || "pending";
-  return `status-${normalized}`;
-}
-
-function getLabelVariant(label) {
-  const normalized = stringValue(label) || "pending_review";
-  return `label-${normalized}`;
-}
-
-function getStrengthVariant(value) {
-  return `strength-${stringValue(value) || "weak"}`;
-}
-
-function syncRouteChrome() {
-  const route = ROUTES[state.route];
-  const selectedRun = getSelectedRun();
-  const routeSubtitle = selectedRun && state.route !== "overview" && state.route !== "utilities"
-    ? `${route.subtitle} Focused run: ${selectedRun.id}.`
-    : route.subtitle;
-
-  elements.pageEyebrow.textContent = route.eyebrow;
-  elements.pageTitle.textContent = route.title;
-  elements.pageSubtitle.textContent = routeSubtitle;
-  elements.apiBaseChip.textContent = getApiBaseUrl() || "API target not set";
-
-  elements.navLinks.forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.route === state.route);
-  });
-
-  elements.pages.forEach((page) => {
-    page.hidden = page.id !== `page${state.route.charAt(0).toUpperCase()}${state.route.slice(1)}`;
-  });
-
-  elements.navOverviewCount.textContent = String(state.sourceRuns.length);
-  elements.navRunsCount.textContent = state.selectedRunId ? String(state.sourceRecords.length) : String(state.sourceRuns.length);
-  elements.navQueueCount.textContent = String(allPendingCandidates().length);
-  elements.navApprovedCount.textContent = String(state.approvedEntities.length);
-  elements.navUtilitiesCount.textContent = "Ops";
-}
-
-function renderFocusedRunCard() {
-  const selectedRun = getSelectedRun();
-  if (!selectedRun) {
-    elements.focusedRunCard.innerHTML = `<p class="empty-state empty-state--inverse">Select a source run to scope records, queue, and approved entities.</p>`;
-    return;
-  }
-
-  const { papers, people } = computeRecordCounts(state.sourceRecords);
-  elements.focusedRunCard.innerHTML = `
-    <div>
-      <p class="eyebrow">Focused run</p>
-      <h3>${escapeHtml(selectedRun.id)}</h3>
-      <p>${escapeHtml(selectedRun.sourceName || "source")} · ${escapeHtml(selectedRun.sourceDomain || "domain")} · ${escapeHtml(selectedRun.pipelineName || "pipeline")}</p>
-    </div>
-    <div class="badge-row">
-      ${renderPill(displayLabel(selectedRun.status || "unknown"), getStatusVariant(selectedRun.status || "pending"))}
-      ${renderPill(`${numberValue(selectedRun.sourceRecordCount) || state.sourceRecords.length} records`, "neutral")}
-    </div>
-    <div class="sidebar-health-grid">
-      <div class="sidebar-health-row"><span>Created</span><strong>${escapeHtml(formatDateTime(selectedRun.createdAt))}</strong></div>
-      <div class="sidebar-health-row"><span>Papers / people</span><strong>${escapeHtml(`${papers} / ${people}`)}</strong></div>
-      <div class="sidebar-health-row"><span>Pending queue</span><strong>${escapeHtml(String(pendingCountForRun(selectedRun.id)))}</strong></div>
-      <div class="sidebar-health-row"><span>Approved</span><strong>${escapeHtml(String(approvedCountForSelectedRun()))}</strong></div>
+    <div class="compare-value">
+      <span class="compare-value__main ${isMeta ? "mono" : ""}">${escapeHtml(values[0])}</span>
+      ${
+        values.length > 1
+          ? values
+              .slice(1)
+              .map((value) => `<span class="compare-value__sub ${isMeta ? "mono" : ""}">${escapeHtml(value)}</span>`)
+              .join("")
+          : ""
+      }
     </div>
   `;
 }
 
-function renderSidebarHealth() {
-  const selectedRun = getSelectedRun();
-  const reviewedCandidates = state.candidateDetails.filter((item) => {
-    const status = candidateObject(item)?.status;
-    return status && status !== "pending_review" && status !== "suppressed";
-  }).length;
+function renderComparisonTable(item) {
+  const records = arrayValue(item?.sourceRecords);
+  const left = recordData(records[0] || {});
+  const right = recordData(records[1] || {});
+  const rows = comparisonRows(item);
+  const leftLabel = left.source || "Source A";
+  const rightLabel = right.source || (records.length > 1 ? "Source B" : "No second source");
 
-  elements.sidebarHealth.innerHTML = `
-    <div class="sidebar-health-grid">
-      <div class="sidebar-health-row"><span>Pending now</span><strong>${escapeHtml(String(allPendingCandidates().length))}</strong></div>
-      <div class="sidebar-health-row"><span>Reviewed</span><strong>${escapeHtml(String(reviewedCandidates))}</strong></div>
-      <div class="sidebar-health-row"><span>Approved entities</span><strong>${escapeHtml(String(state.approvedEntities.length))}</strong></div>
-      <div class="sidebar-health-row"><span>Focused scope</span><strong>${escapeHtml(selectedRun ? selectedRun.id : "No run")}</strong></div>
-    </div>
-  `;
-}
-
-function renderOverviewMetrics() {
-  const selectedRun = getSelectedRun();
-  const { papers, people } = computeRecordCounts(state.sourceRecords);
-  const metrics = [
-    {
-      label: "Source runs",
-      value: String(state.sourceRuns.length),
-      detail: "Real runs available for inspection.",
-    },
-    {
-      label: "Focused run",
-      value: selectedRun ? selectedRun.id : "No run",
-      detail: selectedRun ? `${selectedRun.sourceName || "source"} · ${displayLabel(selectedRun.status || "unknown")}` : "Pick a run from Runs.",
-    },
-    {
-      label: "Records in run",
-      value: String(state.sourceRecords.length),
-      detail: "All records currently loaded into the explorer.",
-    },
-    {
-      label: "Papers",
-      value: String(papers),
-      detail: "Research works inside the focused run.",
-    },
-    {
-      label: "Researchers",
-      value: String(people),
-      detail: "Person or profile records inside the focused run.",
-    },
-    {
-      label: "Pending review",
-      value: String(selectedRun ? pendingCountForRun(selectedRun.id) : allPendingCandidates().length),
-      detail: selectedRun ? "Pending merge candidates in the focused run." : "Pending candidates across all runs.",
-    },
-  ];
-
-  elements.overviewMetrics.innerHTML = metrics
-    .map(
-      (metric) => `
-        <article class="metric-card">
-          <span>${escapeHtml(metric.label)}</span>
-          <strong>${escapeHtml(metric.value)}</strong>
-          <small>${escapeHtml(metric.detail)}</small>
-        </article>
-      `,
-    )
-    .join("");
-}
-
-function renderOverviewRunsAttention() {
-  if (!state.sourceRuns.length) {
-    elements.overviewRunsAttention.innerHTML = `<p class="empty-state">No source runs found.</p>`;
-    return;
-  }
-
-  const previewRuns = sortRunsForReview(state.sourceRuns).slice(0, 6);
-  elements.overviewRunsAttention.innerHTML = previewRuns
-    .map(
-      (run) => `
-        <article class="preview-item">
-          <button type="button" class="preview-item-button" data-open-run="${escapeHtml(run.id)}">
-            <div class="preview-item-head">
-              <h4 class="preview-item-title">${escapeHtml(run.id)}</h4>
-              ${renderPill(displayLabel(run.status || "unknown"), getStatusVariant(run.status || "pending"))}
-            </div>
-            <p class="preview-item-meta">${escapeHtml(run.sourceName || "source")} · ${escapeHtml(run.sourceDomain || "domain")} · ${escapeHtml(run.pipelineName || "pipeline")}</p>
-            <div class="summary-line">
-              <span class="preview-item-meta">${escapeHtml(formatDateTime(run.createdAt))}</span>
-              <span class="preview-item-meta">${escapeHtml(`${numberValue(run.sourceRecordCount)} records · ${pendingCountForRun(run.id)} pending`)}</span>
-            </div>
-          </button>
-        </article>
-      `,
-    )
-    .join("");
-}
-
-function renderOverviewQueuePreview() {
-  const previewItems = allPendingCandidates()
-    .slice()
-    .sort((left, right) => timestampValue(candidateObject(right)?.updatedAt) - timestampValue(candidateObject(left)?.updatedAt))
-    .slice(0, 6);
-
-  if (!previewItems.length) {
-    elements.overviewQueuePreview.innerHTML = `<p class="empty-state">No pending merge candidates right now.</p>`;
-    return;
-  }
-
-  elements.overviewQueuePreview.innerHTML = previewItems
-    .map((item) => {
-      const candidate = candidateObject(item);
-      const reasons = arrayValue(candidate.reasonCodes).map(displayLabel).join(", ") || "Source overlap";
-      return `
-        <article class="preview-item">
-          <button
-            type="button"
-            class="preview-item-button"
-            data-open-candidate="${escapeHtml(candidate.id)}"
-            data-open-run="${escapeHtml(candidate.createdFromSourceRunId || "")}"
-          >
-            <div class="preview-item-head">
-              <h4 class="preview-item-title">${escapeHtml(candidate.displayName || "Unnamed candidate")}</h4>
-              ${renderPill(displayLabel(candidate.strength || "weak"), getStrengthVariant(candidate.strength || "weak"))}
-            </div>
-            <p class="preview-item-meta">${escapeHtml(reasons)}</p>
-            <div class="summary-line">
-              <span class="preview-item-meta">${escapeHtml(candidate.createdFromSourceRunId || "No run")}</span>
-              <span class="preview-item-meta">${escapeHtml(`${arrayValue(item.evidence).length} evidence · ${arrayValue(item.sourceRecords).length} records`)}</span>
-            </div>
-          </button>
-        </article>
-      `;
-    })
-    .join("");
-}
-
-function renderOverviewApprovedPreview() {
-  const previewEntities = state.approvedEntities
-    .slice()
-    .sort((left, right) => timestampValue(right.createdAt) - timestampValue(left.createdAt))
-    .slice(0, 5);
-
-  if (!previewEntities.length) {
-    elements.overviewApprovedPreview.innerHTML = `<p class="empty-state">No approved researchers yet.</p>`;
-    return;
-  }
-
-  elements.overviewApprovedPreview.innerHTML = previewEntities
-    .map(
-      (entity) => `
-        <article class="preview-item">
-          <button type="button" class="preview-item-button" data-open-approved="${escapeHtml(entity.id)}">
-            <div class="preview-item-head">
-              <h4 class="preview-item-title">${escapeHtml(entity.displayName || entity.id)}</h4>
-              ${renderPill("Approved", "approved")}
-            </div>
-            <p class="preview-item-meta">${escapeHtml(renderListPreview(entity.institutions, 2))}</p>
-            <div class="summary-line">
-              <span class="preview-item-meta">${escapeHtml(renderListPreview(entity.emails, 1))}</span>
-              <span class="preview-item-meta">${escapeHtml(formatDateTime(entity.createdAt))}</span>
-            </div>
-          </button>
-        </article>
-      `,
-    )
-    .join("");
-}
-
-function renderOverviewActions() {
-  const selectedRun = getSelectedRun();
-  const actions = [
-    {
-      route: "queue",
-      title: "Review merge queue",
-      count: `${selectedRun ? pendingCountForRun(selectedRun.id) : allPendingCandidates().length} pending`,
-      copy: "Move straight into the candidates that still need operator judgment.",
-    },
-    {
-      route: "runs",
-      title: "Inspect focused run",
-      count: `${state.sourceRecords.length} records`,
-      copy: "Review paper and researcher records before making merge decisions.",
-    },
-    {
-      route: "approved",
-      title: "Audit approved entities",
-      count: `${approvedCountForSelectedRun()} in scope`,
-      copy: "Inspect the clean survivors that will feed outbound and enrichment.",
-    },
-    {
-      route: "utilities",
-      title: "Create or upload run",
-      count: "Manual ops",
-      copy: "Use the operational tools only when you need to create a run or replay source data.",
-    },
-  ];
-
-  elements.overviewActions.innerHTML = actions
-    .map(
-      (action) => `
-        <article class="action-card">
-          <div class="action-card-head">
-            <h4>${escapeHtml(action.title)}</h4>
-            ${renderPill(action.count, "neutral")}
-          </div>
-          <p>${escapeHtml(action.copy)}</p>
-          <button type="button" class="action-card-button" data-route="${escapeHtml(action.route)}">
-            <span class="row-primary">Open ${escapeHtml(displayLabel(action.route))}</span>
-            <span class="row-secondary">Go to ${escapeHtml(action.route)} page</span>
-          </button>
-        </article>
-      `,
-    )
-    .join("");
-}
-
-function renderOverviewPage() {
-  renderOverviewMetrics();
-  renderOverviewRunsAttention();
-  renderOverviewQueuePreview();
-  renderOverviewApprovedPreview();
-  renderOverviewActions();
-}
-
-function renderRunsList() {
-  if (!state.sourceRuns.length) {
-    elements.runsRunList.innerHTML = `<p class="empty-state">No source runs found.</p>`;
-    return;
-  }
-
-  elements.runsRunList.innerHTML = state.sourceRuns
-    .map((run) => {
-      const selectedClass = run.id === state.selectedRunId ? "is-selected" : "";
-      return `
-        <article class="run-item ${selectedClass}">
-          <button type="button" class="run-item-button" data-run-id="${escapeHtml(run.id)}">
-            <div class="run-item-top">
-              <strong class="run-item-name">${escapeHtml(run.id)}</strong>
-              ${renderPill(displayLabel(run.status || "unknown"), getStatusVariant(run.status || "pending"))}
-            </div>
-            <div class="run-item-meta">
-              <span>${escapeHtml(run.sourceName || "source")} · ${escapeHtml(run.sourceDomain || "domain")}</span>
-              <span>${escapeHtml(formatDateTime(run.createdAt))}</span>
-            </div>
-            <div class="run-item-meta">
-              <span>${escapeHtml(`${numberValue(run.sourceRecordCount)} records`)}</span>
-              <span>${escapeHtml(`${pendingCountForRun(run.id)} pending`)}</span>
-            </div>
-          </button>
-        </article>
-      `;
-    })
-    .join("");
-}
-
-function renderRunSummary() {
-  const selectedRun = getSelectedRun();
-  elements.completeRunButton.disabled = !selectedRun;
-
-  if (!selectedRun) {
-    elements.runsRunSummary.textContent = "Select a source run to inspect papers, people, and merge state.";
-    return;
-  }
-
-  const { papers, people } = computeRecordCounts(state.sourceRecords);
-  elements.runsRunSummary.innerHTML = `
-    <div class="summary-pills">
-      ${renderPill(displayLabel(selectedRun.sourceName || "source"), "neutral")}
-      ${renderPill(displayLabel(selectedRun.sourceDomain || "domain"), "neutral")}
-      ${renderPill(displayLabel(selectedRun.status || "unknown"), getStatusVariant(selectedRun.status || "pending"))}
-    </div>
-    <div class="summary-meta">
-      <div class="summary-meta-item">
-        <span class="summary-meta-label">Run</span>
-        <strong class="summary-meta-value">${escapeHtml(selectedRun.id)}</strong>
-      </div>
-      <div class="summary-meta-item">
-        <span class="summary-meta-label">Created</span>
-        <strong class="summary-meta-value">${escapeHtml(formatDateTime(selectedRun.createdAt))}</strong>
-      </div>
-      <div class="summary-meta-item">
-        <span class="summary-meta-label">Papers / people</span>
-        <strong class="summary-meta-value">${escapeHtml(`${papers} / ${people}`)}</strong>
-      </div>
-      <div class="summary-meta-item">
-        <span class="summary-meta-label">Pending / reviewed</span>
-        <strong class="summary-meta-value">${escapeHtml(`${pendingCountForRun(selectedRun.id)} / ${reviewedCountForRun(selectedRun.id)}`)}</strong>
-      </div>
-    </div>
-  `;
-}
-
-function syncRecordTypeOptions() {
-  const availableTypes = [...new Set(state.sourceRecords.map((record) => stringValue(record.entityType)).filter(Boolean))].sort();
-  const options = ["all", ...availableTypes];
-  elements.recordTypeFilter.innerHTML = options
-    .map(
-      (option) =>
-        `<option value="${escapeHtml(option)}">${escapeHtml(option === "all" ? "All" : displayLabel(option))}</option>`,
-    )
-    .join("");
-  if (!options.includes(state.filters.recordType)) {
-    state.filters.recordType = "all";
-  }
-  elements.recordTypeFilter.value = state.filters.recordType;
-}
-
-function renderRecordsTable() {
-  const tbody = elements.runRecordTableBody;
-  const selectedRun = getSelectedRun();
-
-  elements.recordSort.value = state.filters.recordSort;
-  elements.recordSearch.value = state.filters.recordSearch;
-  syncRecordTypeOptions();
-
-  if (!selectedRun) {
-    tbody.innerHTML = renderEmptyTableRow(5, "No run selected.");
-    return;
-  }
-
-  const records = filteredRunRecords();
-  ensureSelectedRecord();
-
-  if (!records.length) {
-    tbody.innerHTML = renderEmptyTableRow(5, "No records match the current filter.");
-    return;
-  }
-
-  tbody.innerHTML = records
-    .map((record) => {
-      const selectedClass = record.id === state.selectedRecordId ? "is-selected" : "";
-      const metric = recordMetricLabel(record);
-      return `
-        <tr class="${selectedClass}">
-          <td>
-            <button type="button" class="row-button" data-record-id="${escapeHtml(record.id)}">
-              <span class="row-primary">${escapeHtml(recordTitle(record))}</span>
-              <span class="row-secondary">${escapeHtml(record.sourceNativeId || record.id)}</span>
-            </button>
-          </td>
-          <td>${escapeHtml(displayLabel(record.entityType || "unknown"))}</td>
-          <td>
-            <span class="row-primary">${escapeHtml(recordSubtitle(record))}</span>
-            <span class="row-secondary">${escapeHtml(displayLabel(stringValue(record.source) || "unknown source"))}</span>
-          </td>
-          <td>
-            <span class="row-primary">${escapeHtml(recordIdentifier(record))}</span>
-            <span class="row-secondary">${escapeHtml(`${metric.label}: ${metric.value}`)}</span>
-          </td>
-          <td>${escapeHtml(record.source || "unknown")}</td>
-        </tr>
-      `;
-    })
-    .join("");
-}
-
-function renderRecordDetail() {
-  const record = getSelectedRecord();
-  if (!record) {
-    elements.recordDetail.innerHTML = `<p class="detail-empty">Select a record to inspect paper metadata or researcher profile evidence.</p>`;
-    return;
-  }
-
-  const metric = recordMetricLabel(record);
-  const fields = [
-    ["Entity type", record.entityType || "unknown"],
-    ["Source", record.source || "unknown"],
-    ["Source native ID", record.sourceNativeId || "—"],
-    ["Institution / venue", recordSubtitle(record)],
-    ["Primary identifier", recordIdentifier(record)],
-    [metric.label, metric.value],
-  ];
-
-  elements.recordDetail.innerHTML = `
-    <section class="detail-section">
-      <h4>${escapeHtml(recordTitle(record))}</h4>
-      <p class="summary-muted">${escapeHtml(record.sourceRunId || state.selectedRunId)}</p>
-      <div class="badge-row">
-        ${renderPill(displayLabel(record.entityType || "unknown"), "neutral")}
-        ${renderPill(displayLabel(record.source || "source"), "neutral")}
-      </div>
-    </section>
-    <section class="detail-section">
-      <table class="detail-table">
+  return `
+    <div class="compare-table-wrap">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th scope="col">Field</th>
+            <th scope="col">${escapeHtml(leftLabel)}</th>
+            <th scope="col">${escapeHtml(rightLabel)}</th>
+          </tr>
+        </thead>
         <tbody>
-          ${fields
+          ${rows
             .map(
-              ([label, value]) => `
+              (row) => `
                 <tr>
-                  <th scope="row">${escapeHtml(label)}</th>
-                  <td>${escapeHtml(String(value))}</td>
+                  <td>${escapeHtml(row.label)}</td>
+                  <td class="${row.matched ? "is-match" : ""}">${renderComparisonValue(row.left, row.key === "orcid" || row.key === "source_native_id")}</td>
+                  <td class="${row.matched ? "is-match" : ""}">${renderComparisonValue(row.right, row.key === "orcid" || row.key === "source_native_id")}</td>
                 </tr>
               `,
             )
             .join("")}
         </tbody>
       </table>
-    </section>
-    <section class="detail-section">
-      <div class="detail-grid">
-        <div class="detail-card">
-          <span>Display fields</span>
-          <strong>${escapeHtml(renderListPreview(Object.values(record.display ?? {}).filter(Boolean), 3))}</strong>
-        </div>
-        <div class="detail-card">
-          <span>Structured summary</span>
-          <strong>${escapeHtml(renderListPreview(Object.values(record.rawSummary ?? {}).filter(Boolean), 3))}</strong>
-        </div>
-      </div>
-    </section>
-    <details class="response-box">
-      <summary>Structured payload</summary>
-      <pre>${escapeHtml(JSON.stringify({ display: record.display, rawSummary: record.rawSummary }, null, 2))}</pre>
-    </details>
-    <details class="response-box">
-      <summary>Raw payload</summary>
-      <pre>${escapeHtml(JSON.stringify(record.raw ?? {}, null, 2))}</pre>
-    </details>
-  `;
-}
-
-function renderRunsPage() {
-  renderRunsList();
-  renderRunSummary();
-  renderRecordsTable();
-  renderRecordDetail();
-}
-
-function setReviewControls(item) {
-  const candidate = candidateObject(item);
-  const hasCandidate = Boolean(candidate?.id);
-  const isSingleton = hasCandidate && arrayValue(candidate.sourceRecordIds).length === 1;
-  const primaryLabel = isSingleton ? "Approve entity" : "Approve merge";
-
-  elements.dedupCandidateId.value = candidate?.id || "";
-  elements.reviewSubmitButton.disabled = !hasCandidate;
-  elements.approveSamePersonButton.disabled = !hasCandidate;
-  elements.approveNotSamePersonButton.disabled = !hasCandidate;
-  elements.approveUnsureButton.disabled = !hasCandidate;
-  elements.reviewLabelSamePersonOption.textContent = primaryLabel;
-  elements.approveSamePersonButton.textContent = primaryLabel;
-}
-
-function renderQueueSummary() {
-  const selectedRun = getSelectedRun();
-
-  elements.queueStatusFilter.value = state.filters.queueStatus;
-  if (!selectedRun) {
-    elements.queueScope.textContent = "Select a focused run from Runs or Overview to scope the queue.";
-    elements.queueSummary.textContent = "Choose a source run to review merge candidates.";
-    return;
-  }
-
-  const pending = pendingCountForRun(selectedRun.id);
-  const reviewed = reviewedCountForRun(selectedRun.id);
-  elements.queueScope.textContent = `Focused run: ${selectedRun.id}`;
-  elements.queueSummary.innerHTML = `
-    <div class="summary-meta">
-      <div class="summary-meta-item">
-        <span class="summary-meta-label">Pending</span>
-        <strong class="summary-meta-value">${escapeHtml(String(pending))}</strong>
-      </div>
-      <div class="summary-meta-item">
-        <span class="summary-meta-label">Reviewed</span>
-        <strong class="summary-meta-value">${escapeHtml(String(reviewed))}</strong>
-      </div>
-      <div class="summary-meta-item">
-        <span class="summary-meta-label">Mode</span>
-        <strong class="summary-meta-value">${escapeHtml(displayLabel(state.filters.queueStatus))}</strong>
-      </div>
-      <div class="summary-meta-item">
-        <span class="summary-meta-label">Approved</span>
-        <strong class="summary-meta-value">${escapeHtml(String(approvedCountForSelectedRun()))}</strong>
-      </div>
     </div>
   `;
 }
 
-function renderCandidatesTable() {
-  const tbody = elements.candidateTableBody;
-  const selectedRun = getSelectedRun();
+function bestEvidenceByType(item) {
+  const signalMap = new Map();
+  const evidenceRows = arrayValue(item?.evidence)
+    .slice()
+    .sort((left, right) => {
+      const fieldDelta = evidencePriority(left) - evidencePriority(right);
+      if (fieldDelta !== 0) {
+        return fieldDelta;
+      }
+      return evidenceQualityPriority(left) - evidenceQualityPriority(right);
+    });
 
-  if (!selectedRun) {
-    tbody.innerHTML = renderEmptyTableRow(5, "No run selected.");
-    setReviewControls(null);
+  for (const entry of evidenceRows) {
+    if (!signalMap.has(entry.evidenceType)) {
+      signalMap.set(entry.evidenceType, entry);
+    }
+  }
+
+  return Array.from(signalMap.values());
+}
+
+function signalSummary(entry) {
+  const type = stringValue(entry?.evidenceType);
+  if (type === "email" || type === "homepage" || type === "github" || type === "orcid" || type === "source_native_id") {
+    return "Exact match";
+  }
+  if (type === "institution") {
+    return "Same institution";
+  }
+  if (type === "name") {
+    return "Same name";
+  }
+  return displayLabel(entry?.quality || "Matched");
+}
+
+function renderSignalList(item, candidate) {
+  const signals = bestEvidenceByType(item);
+  if (!signals.length) {
+    if (arrayValue(candidate?.reasonCodes).includes("singleton_review")) {
+      return `<div class="subtle-callout">Only one source record exists. A reviewer needs to decide whether this profile should survive as a real person.</div>`;
+    }
+    return `<div class="subtle-callout">No extracted signal was attached to this candidate.</div>`;
+  }
+
+  return `
+    <div class="signal-list">
+      ${signals
+        .map((entry) => {
+          const valueLabel = stringValue(entry.normalizedValue) || stringValue(entry.rawValue) || "—";
+          return `
+            <div class="signal-row">
+              <div class="signal-label">${escapeHtml(evidenceTypeLabel(entry.evidenceType))}</div>
+              <div class="signal-value ${entry.evidenceType === "orcid" || entry.evidenceType === "source_native_id" ? "mono" : ""}">${escapeHtml(valueLabel)}</div>
+              <div class="signal-note">${escapeHtml(signalSummary(entry))}</div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderSourceFieldValues(values, isMeta = false) {
+  if (!values.length) {
+    return `<span class="source-field__value">—</span>`;
+  }
+
+  return values
+    .map(
+      (value, index) =>
+        `<span class="source-field__value ${index > 0 ? "source-field__value--sub" : ""} ${isMeta ? "mono" : ""}">${escapeHtml(value)}</span>`,
+    )
+    .join("");
+}
+
+function renderSourceCard(title, recordInfo, rows, side) {
+  if (!recordInfo) {
+    return `
+      <article class="source-card">
+        <div class="source-card__head">
+          <div class="source-card__title">${escapeHtml(title)}</div>
+          <div class="source-card__meta">No source record available</div>
+        </div>
+      </article>
+    `;
+  }
+
+  const metaParts = [recordInfo.runId, recordInfo.domain].filter(Boolean);
+  return `
+    <article class="source-card">
+      <div class="source-card__head">
+        <div class="source-card__title">${escapeHtml(title)}</div>
+        <div class="source-card__meta">${escapeHtml(metaParts.join(" · ") || "Source record")}</div>
+      </div>
+      <div class="source-card__body">
+        ${rows
+          .map((row) => {
+            const values = side === "left" ? row.left : row.right;
+            const isMeta = row.key === "orcid" || row.key === "source_native_id";
+            return `
+              <div class="source-field">
+                <div class="source-field__label">${escapeHtml(row.label)}</div>
+                <div class="source-field__values">${renderSourceFieldValues(values, isMeta)}</div>
+                ${row.matched ? `<span class="source-field__match">Match</span>` : `<span></span>`}
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderSourceCards(item) {
+  const records = arrayValue(item?.sourceRecords);
+  const left = records[0] ? recordData(records[0]) : null;
+  const right = records[1] ? recordData(records[1]) : null;
+  const rows = comparisonRows(item);
+  const leftLabel = left?.source || "Source A";
+  const rightLabel = right?.source || (records.length > 1 ? "Source B" : "No second source");
+
+  return `
+    <div class="source-grid">
+      ${renderSourceCard(leftLabel, left, rows, "left")}
+      ${renderSourceCard(rightLabel, right, rows, "right")}
+    </div>
+  `;
+}
+
+function renderEvidenceList(item) {
+  const evidenceRows = arrayValue(item?.evidence)
+    .slice()
+    .sort((left, right) => {
+      const fieldDelta = evidencePriority(left) - evidencePriority(right);
+      if (fieldDelta !== 0) {
+        return fieldDelta;
+      }
+      return evidenceQualityPriority(left) - evidenceQualityPriority(right);
+    });
+
+  if (!evidenceRows.length) {
+    return `<p class="empty-detail">No extracted evidence was attached to this candidate.</p>`;
+  }
+
+  return `
+    <div class="evidence-list">
+      ${evidenceRows
+        .map((entry) => {
+          const record = arrayValue(item.sourceRecords).find((sourceRecord) => sourceRecord.id === entry.sourceRecordId || sourceRecord.sourceRecordId === entry.sourceRecordId);
+          const normalized = stringValue(entry.normalizedValue);
+          const raw = stringValue(entry.rawValue);
+          const valueLabel = normalized || raw || "—";
+          const sourceLabel = recordData(record || {}).source || displayLabel(entry.sourceName || "source");
+          return `
+            <div class="evidence-row">
+              <div class="evidence-field">${escapeHtml(evidenceTypeLabel(entry.evidenceType))}</div>
+              <div class="row-stack">
+                <span class="row-primary">${escapeHtml(valueLabel)}</span>
+                <span class="cell-subtle">${escapeHtml(sourceLabel)} · ${escapeHtml(entry.extractedFrom?.sourcePath || "—")}</span>
+              </div>
+              <div class="cell-subtle">${escapeHtml(displayLabel(entry.quality || "low"))}</div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderJobsTable() {
+  const pendingCount = pendingCandidatesAll().length;
+  elements.navJobsCount.textContent = String(state.runs.length);
+  elements.jobsMeta.textContent = state.runs.length ? `${state.runs.length} runs loaded · ${pendingCount} pending review` : "No source runs found";
+
+  if (!state.runs.length) {
+    elements.jobsTableBody.innerHTML = `<tr><td colspan="7" class="empty-row">No source runs found.</td></tr>`;
     return;
   }
 
-  const items = filteredCandidateDetails();
-  ensureSelectedCandidate();
+  elements.jobsTableBody.innerHTML = state.runs
+    .map((run) => {
+      const selectedClass = run.id === state.selectedJobRunId ? "is-selected" : "";
+      const stats = runReviewStats(run.id);
+      return `
+        <tr class="${selectedClass}">
+          <td>
+            <button type="button" class="row-button" data-run-id="${escapeHtml(run.id)}">
+              <span class="row-primary">${escapeHtml(run.id)}</span>
+              <span class="row-secondary">${escapeHtml(run.pipelineName || "pipeline")}</span>
+            </button>
+          </td>
+          <td>${escapeHtml(`${run.sourceName || "source"} · ${run.sourceDomain || "domain"}`)}</td>
+          <td>${renderPill(displayLabel(run.status || "unknown"), statusVariant(run.status || "unknown"))}</td>
+          <td>${escapeHtml(String(numberValue(run.sourceRecordCount)))}</td>
+          <td>${escapeHtml(String(stats.pending))}</td>
+          <td>${escapeHtml(String(numberValue(run.evidenceCount)))}</td>
+          <td>${escapeHtml(formatDateTime(run.createdAt))}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderJobsDetail() {
+  const run = getSelectedJobRun();
+  elements.openRunReviewButton.disabled = !run;
+
+  if (!run) {
+    elements.jobsDetailTitle.textContent = "No run selected";
+    elements.jobsDetailSubtitle.textContent = "Pick a run to inspect status and jump into review.";
+    elements.jobsDetailBody.innerHTML = `<p class="empty-detail">Select a run from the jobs table.</p>`;
+    return;
+  }
+
+  const stats = runReviewStats(run.id);
+  elements.jobsDetailTitle.textContent = run.id;
+  elements.jobsDetailSubtitle.textContent = `${numberValue(run.sourceRecordCount)} records · ${stats.pending} pending review`;
+  elements.jobsDetailBody.innerHTML = `
+    <div class="subtle-callout">
+      ${renderPill(displayLabel(run.status || "unknown"), statusVariant(run.status || "unknown"))}
+      <div class="row-stack" style="margin-top:0.55rem;">
+        <span class="row-primary">${escapeHtml(`${run.sourceName || "source"} · ${run.sourceDomain || "domain"}`)}</span>
+        <span class="row-secondary">${escapeHtml(run.pipelineName || "pipeline")}</span>
+      </div>
+    </div>
+
+    <section class="detail-section">
+      <h4>Run detail</h4>
+      <div class="fact-grid">
+        <div class="fact-row"><span class="fact-label">Trigger</span><div class="fact-value">${escapeHtml(run.trigger || "—")}</div></div>
+        <div class="fact-row"><span class="fact-label">Records</span><div class="fact-value">${escapeHtml(String(numberValue(run.sourceRecordCount)))}</div></div>
+        <div class="fact-row"><span class="fact-label">Pending review</span><div class="fact-value">${escapeHtml(String(stats.pending))}</div></div>
+        <div class="fact-row"><span class="fact-label">Reviewed</span><div class="fact-value">${escapeHtml(String(stats.reviewed))}</div></div>
+        <div class="fact-row"><span class="fact-label">Evidence</span><div class="fact-value">${escapeHtml(String(numberValue(run.evidenceCount)))}</div></div>
+        <div class="fact-row"><span class="fact-label">Started</span><div class="fact-value">${escapeHtml(formatDateTime(run.startedAt))}</div></div>
+        <div class="fact-row"><span class="fact-label">Completed</span><div class="fact-value">${escapeHtml(formatDateTime(run.completedAt))}</div></div>
+      </div>
+    </section>
+
+    ${
+      run.metadata
+        ? `
+          <details class="payload">
+            <summary>Run metadata</summary>
+            <pre>${escapeHtml(JSON.stringify(run.metadata, null, 2))}</pre>
+          </details>
+        `
+        : ""
+    }
+  `;
+}
+
+function renderReviewRunFilter() {
+  const options = [
+    `<option value="">All runs</option>`,
+    ...state.runs.map((run) => {
+      const stats = runReviewStats(run.id);
+      const suffix = stats.pending ? ` · ${stats.pending} pending` : stats.reviewed ? ` · ${stats.reviewed} reviewed` : "";
+      return `<option value="${escapeHtml(run.id)}">${escapeHtml(`${run.id}${suffix}`)}</option>`;
+    }),
+  ];
+  elements.reviewRunFilter.innerHTML = options.join("");
+  elements.reviewRunFilter.value = state.reviewRunId;
+}
+
+function renderReviewTable() {
+  const items = filteredReviewCandidates();
+  elements.navReviewCount.textContent = String(pendingCandidatesAll().length);
+  elements.reviewMeta.textContent = state.reviewRunId
+    ? `${items.length} candidates in ${state.reviewRunId}`
+    : `${items.length} candidates across all runs`;
 
   if (!items.length) {
-    const fallbackRun = state.sourceRuns.find(
-      (run) => run.id !== state.selectedRunId && pendingCountForRun(run.id) > 0,
-    );
-    const actionHtml = fallbackRun
-      ? ` <button type="button" class="button-muted" data-jump-run="${escapeHtml(fallbackRun.id)}">Open ${escapeHtml(fallbackRun.id)}</button>`
-      : "";
-    const message =
-      state.filters.queueStatus === "pending_review"
-        ? "No pending candidates for this run."
-        : state.filters.queueStatus === "reviewed"
-          ? "No reviewed candidates for this run."
-          : "No candidates found for this run.";
-    tbody.innerHTML = renderEmptyTableRow(5, message, actionHtml);
-    setReviewControls(null);
+    elements.reviewTableBody.innerHTML = `<tr><td colspan="4" class="empty-row">No review candidates for the current filter.</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = items
+  elements.reviewTableBody.innerHTML = items
     .map((item) => {
       const candidate = candidateObject(item);
       const selectedClass = candidate.id === state.selectedCandidateId ? "is-selected" : "";
+      const matchedFields = matchedFieldsForCandidate(candidate).join(", ") || "Manual review";
+      const proof = sharedValueSummary(item);
+
       return `
         <tr class="${selectedClass}">
           <td>
             <button type="button" class="row-button" data-candidate-id="${escapeHtml(candidate.id)}">
               <span class="row-primary">${escapeHtml(candidate.displayName || "Unnamed candidate")}</span>
-              <span class="row-secondary">${escapeHtml(candidate.id)}</span>
+              <span class="row-secondary">${escapeHtml(candidate.entityType || "person profile")}</span>
             </button>
           </td>
-          <td><div class="badge-row">${renderReasonChips(candidate.reasonCodes)}</div></td>
-          <td>${escapeHtml(String(arrayValue(item.evidence).length))}</td>
-          <td>${escapeHtml(String(arrayValue(item.sourceRecords).length))}</td>
           <td>
-            ${renderPill(displayLabel(candidate.strength || "weak"), getStrengthVariant(candidate.strength || "weak"))}
-            <div class="row-secondary row-secondary--tight">${escapeHtml(displayLabel(candidate.status || "pending_review"))}</div>
+            <div class="row-stack">
+              <span class="row-primary">${escapeHtml(proof)}</span>
+              <span class="cell-subtle">${escapeHtml(matchedFields)}</span>
+            </div>
           </td>
+          <td>
+            <div class="row-stack">
+              <span class="row-primary">${escapeHtml(sourceSummary(item))}</span>
+              <span class="cell-subtle">${escapeHtml(tableSourceMeta(candidate))}</span>
+            </div>
+          </td>
+          <td>${escapeHtml(formatDateTime(candidate.updatedAt || candidate.createdAt))}</td>
         </tr>
       `;
     })
     .join("");
-
-  setReviewControls(getSelectedCandidateItem());
 }
 
-function renderCandidateDetail() {
+function renderReviewDetail() {
   const item = getSelectedCandidateItem();
+  const disableActions = !item || state.reviewSubmitting;
+
+  elements.reviewApproveButton.disabled = disableActions;
+  elements.reviewSeparateButton.disabled = disableActions;
+  elements.reviewHoldButton.disabled = disableActions;
+  elements.reviewResult.textContent = state.reviewMessage;
+  elements.reviewResult.dataset.status = state.reviewMessageStatus;
+
   if (!item) {
-    elements.candidateDetail.innerHTML = `<p class="detail-empty">Select a candidate to compare source records and evidence.</p>`;
+    elements.reviewDetailTitle.textContent = "Nothing selected";
+    elements.reviewDetailSubtitle.textContent = "Select a queue row to compare the raw source values.";
+    elements.reviewDetailBody.innerHTML = `<p class="empty-detail">Select a queue row to see why it was flagged, which fields matched, and the source A / source B values.</p>`;
     return;
   }
 
   const candidate = candidateObject(item);
   const sourceRecords = arrayValue(item.sourceRecords);
-  const evidence = arrayValue(item.evidence);
-  const evidencePreview = evidence.slice(0, 12);
-  const reasonSummary = arrayValue(candidate.reasonCodes).map(displayLabel).join(", ") || "Source overlap";
+  const primaryEvidence = bestEvidence(item);
+  const leftRecord = recordData(sourceRecords[0] || {});
+  const rightRecord = recordData(sourceRecords[1] || {});
+  const matchedFieldsText = matchedFieldsForCandidate(candidate).join(", ") || "Manual review";
+  const systemFlags = arrayValue(candidate.reasonCodes).join(" · ");
+  const sharedValue = stringValue(primaryEvidence?.normalizedValue) || stringValue(primaryEvidence?.rawValue) || "Manual review";
+  const sourcePairText = `${leftRecord.source || "Source A"} / ${rightRecord.source || (sourceRecords.length > 1 ? "Source B" : "No second source")}`;
+  const explanation = arrayValue(candidate.reasonCodes).includes("singleton_review")
+    ? "Only one source record exists, so a reviewer needs to decide whether this profile should be approved."
+    : `These records were grouped because they match on ${matchedFieldsText}. The strongest signal is ${evidenceTypeLabel(primaryEvidence?.evidenceType || "manual review").toLowerCase()} ${sharedValue}.`;
 
-  elements.candidateDetail.innerHTML = `
+  elements.reviewDetailTitle.textContent = candidate.displayName || "Unnamed candidate";
+  elements.reviewDetailSubtitle.textContent = `${sourceRecords.length} source records · ${displayLabel(candidate.status || "pending_review")}`;
+  elements.reviewDetailBody.innerHTML = `
     <section class="detail-section">
-      <div class="summary-line">
-        <div>
-          <h4>${escapeHtml(candidate.displayName || "Unnamed candidate")}</h4>
-          <p class="summary-muted">Generated because these source records overlap on ${escapeHtml(reasonSummary)}.</p>
-        </div>
-        <div class="badge-row">
-          ${renderPill(displayLabel(candidate.status || "pending_review"), getLabelVariant(candidate.status || "pending_review"))}
-          ${renderPill(displayLabel(candidate.strength || "weak"), getStrengthVariant(candidate.strength || "weak"))}
-        </div>
+      <p class="detail-kicker">Why this is in review</p>
+      <p class="detail-lead">${escapeHtml(explanation)}</p>
+      <div class="pill-row">
+        ${renderPill(displayLabel(candidate.status || "pending_review"), statusVariant(candidate.status || "pending_review"))}
+        ${renderPill(displayLabel(candidate.strength || "weak"), statusVariant(candidate.strength || "weak"))}
       </div>
-      <div class="detail-grid candidate-stats">
-        <div class="detail-card">
-          <span>Source records</span>
-          <strong>${escapeHtml(String(sourceRecords.length))}</strong>
-        </div>
-        <div class="detail-card">
-          <span>Evidence items</span>
-          <strong>${escapeHtml(String(evidence.length))}</strong>
-        </div>
-      </div>
-      <div class="badge-row">${renderReasonChips(candidate.reasonCodes)}</div>
-    </section>
-    <section class="detail-section">
-      <h4>Source comparison</h4>
-      <div class="compare-grid">
-        ${sourceRecords
-          .map(
-            (record) => `
-              <article class="compare-card">
-                <p class="compare-source">${escapeHtml(displayLabel(record.source || "unknown source"))}</p>
-                <h5>${escapeHtml(recordTitle(record))}</h5>
-                <dl class="compare-meta">
-                  <div>
-                    <dt>Institution / venue</dt>
-                    <dd>${escapeHtml(recordSubtitle(record))}</dd>
-                  </div>
-                  <div>
-                    <dt>Identifier</dt>
-                    <dd>${escapeHtml(recordIdentifier(record))}</dd>
-                  </div>
-                </dl>
-              </article>
-            `,
-          )
-          .join("")}
+      <div class="meta-strip">
+        <span><strong>Matched on</strong> ${escapeHtml(matchedFieldsText)}</span>
+        <span><strong>Sources</strong> ${escapeHtml(sourcePairText)}</span>
+        <span><strong>Shared value</strong> ${escapeHtml(sharedValue)}</span>
       </div>
     </section>
+
     <section class="detail-section">
-      <h4>Evidence ledger</h4>
-      <div class="evidence-list">
-        ${evidencePreview
-          .map(
-            (entry) => `
-              <article class="evidence-item">
-                <div class="evidence-main">
-                  <span class="evidence-type">${escapeHtml(displayLabel(entry.evidenceType || "unknown"))}</span>
-                  <strong>${escapeHtml(entry.normalizedValue || entry.rawValue || "—")}</strong>
-                </div>
-                <div class="evidence-sub">
-                  <span>${escapeHtml(displayLabel(entry.quality || "unknown quality"))}</span>
-                  <span>${escapeHtml(entry.extractedFrom?.sourcePath || "unknown path")}</span>
-                </div>
-              </article>
-            `,
-          )
-          .join("")}
-      </div>
+      <h4>Matched signals</h4>
+      ${renderSignalList(item, candidate)}
     </section>
-    <details class="response-box">
-      <summary>Raw candidate payload</summary>
-      <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
-    </details>
+
+    <section class="detail-section">
+      <h4>Source records</h4>
+      ${renderSourceCards(item)}
+    </section>
+
+    <section class="detail-section">
+      <details class="payload">
+        <summary>Raw evidence and system flags</summary>
+        <div style="padding:0 0.8rem 0.8rem; display:grid; gap:0.8rem;">
+          <div class="row-stack">
+            <span class="row-primary">System flags</span>
+            <span class="mono cell-subtle">${escapeHtml(systemFlags || "manual review")}</span>
+          </div>
+          <div class="row-stack">
+            <span class="row-primary">Evidence ledger</span>
+            ${renderEvidenceList(item)}
+          </div>
+        </div>
+      </details>
+    </section>
   `;
 }
 
-function renderQueuePage() {
-  renderQueueSummary();
-  renderCandidatesTable();
-  renderCandidateDetail();
-}
-
 function renderApprovedTable() {
-  const tbody = elements.approvedTableBody;
   const entities = filteredApprovedEntities();
-
-  elements.approvedScopeFilter.value = state.filters.approvedScope;
-  elements.approvedSearch.value = state.filters.approvedSearch;
-  ensureSelectedApprovedEntity();
+  elements.navApprovedCount.textContent = String(state.approved.length);
+  elements.approvedMeta.textContent = entities.length ? `${entities.length} approved entities` : "No approved entities found";
 
   if (!entities.length) {
-    tbody.innerHTML = renderEmptyTableRow(
-      6,
-      state.filters.approvedScope === "all"
-        ? "No approved entities found."
-        : "No approved entities for the focused run yet.",
-    );
+    elements.approvedTableBody.innerHTML = `<tr><td colspan="6" class="empty-row">No approved entities found.</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = entities
+  elements.approvedTableBody.innerHTML = entities
     .map((entity) => {
-      const selectedClass = entity.id === state.selectedApprovedEntityId ? "is-selected" : "";
+      const selectedClass = entity.id === state.selectedApprovedId ? "is-selected" : "";
       return `
         <tr class="${selectedClass}">
           <td>
             <button type="button" class="row-button" data-approved-id="${escapeHtml(entity.id)}">
               <span class="row-primary">${escapeHtml(entity.displayName || entity.id)}</span>
-              <span class="row-secondary">${escapeHtml(entity.entityType || "entity")}</span>
+              <span class="row-secondary mono">${escapeHtml(entity.id)}</span>
             </button>
           </td>
-          <td>${escapeHtml(renderListPreview(entity.emails, 1))}</td>
-          <td>${escapeHtml(renderListPreview(entity.homepages, 1))}</td>
-          <td>${escapeHtml(renderListPreview(entity.institutions, 2))}</td>
+          <td>${escapeHtml(arrayValue(entity.emails).slice(0, 2).join(", ") || "—")}</td>
+          <td class="mono">${escapeHtml(arrayValue(entity.orcids).slice(0, 1).join(", ") || "—")}</td>
+          <td>${escapeHtml(arrayValue(entity.institutions).slice(0, 2).join(", ") || "—")}</td>
           <td>${escapeHtml(String(arrayValue(entity.sourceRecordIds).length))}</td>
           <td>${escapeHtml(formatDateTime(entity.createdAt))}</td>
         </tr>
@@ -1491,497 +1070,232 @@ function renderApprovedTable() {
 
 function renderApprovedDetail() {
   const entity = getSelectedApprovedEntity();
+
   if (!entity) {
-    elements.approvedDetail.innerHTML = `<p class="detail-empty">Select an approved entity to inspect surviving contact fields.</p>`;
+    elements.approvedDetailTitle.textContent = "Nothing selected";
+    elements.approvedDetailSubtitle.textContent = "Select an approved entity to inspect the surviving fields.";
+    elements.approvedDetailBody.innerHTML = `<p class="empty-detail">Select an approved row to inspect the final person profile.</p>`;
     return;
   }
 
-  elements.approvedDetail.innerHTML = `
+  elements.approvedDetailTitle.textContent = entity.displayName || entity.id;
+  elements.approvedDetailSubtitle.textContent = `${arrayValue(entity.sourceRecordIds).length} source records survived`;
+  elements.approvedDetailBody.innerHTML = `
     <section class="detail-section">
-      <h4>${escapeHtml(entity.displayName || entity.id)}</h4>
-      <div class="badge-row">
-        ${renderPill("Approved", "approved")}
+      <h4>Surviving fields</h4>
+      <div class="pill-row">
+        ${renderPill("Approved", "success")}
         ${renderPill(displayLabel(entity.entityType || "entity"), "neutral")}
-        ${renderPill(`${arrayValue(entity.sourceRecordIds).length} source records`, "neutral")}
+      </div>
+      <div class="fact-grid">
+        <div class="fact-row"><span class="fact-label">Emails</span><div class="fact-value">${renderMaybeLinks(arrayValue(entity.emails))}</div></div>
+        <div class="fact-row"><span class="fact-label">Homepages</span><div class="fact-value">${renderMaybeLinks(arrayValue(entity.homepages))}</div></div>
+        <div class="fact-row"><span class="fact-label">GitHub</span><div class="fact-value">${renderMaybeLinks(arrayValue(entity.githubUrls))}</div></div>
+        <div class="fact-row"><span class="fact-label">ORCID</span><div class="fact-value mono">${escapeHtml(arrayValue(entity.orcids).join(", ") || "—")}</div></div>
+        <div class="fact-row"><span class="fact-label">Institutions</span><div class="fact-value">${escapeHtml(arrayValue(entity.institutions).join(", ") || "—")}</div></div>
+        <div class="fact-row"><span class="fact-label">Created</span><div class="fact-value">${escapeHtml(formatDateTime(entity.createdAt))}</div></div>
       </div>
     </section>
+
     <section class="detail-section">
-      <div class="detail-grid">
-        <div class="detail-card">
-          <span>Emails</span>
-          <strong>${escapeHtml(renderListPreview(entity.emails, 3))}</strong>
-        </div>
-        <div class="detail-card">
-          <span>Homepages</span>
-          <strong>${escapeHtml(renderListPreview(entity.homepages, 2))}</strong>
-        </div>
-        <div class="detail-card">
-          <span>GitHub</span>
-          <strong>${escapeHtml(renderListPreview(entity.githubUrls, 2))}</strong>
-        </div>
-        <div class="detail-card">
-          <span>ORCID</span>
-          <strong>${escapeHtml(renderListPreview(entity.orcids, 2))}</strong>
-        </div>
+      <h4>Source records</h4>
+      <div class="inline-list">
+        ${arrayValue(entity.sourceRecordIds).map((id) => renderPill(id, "neutral")).join("") || renderPill("No source record IDs", "warning")}
       </div>
     </section>
-    <section class="detail-section">
-      <h4>Institutions</h4>
-      <ul class="list-inline">
-        ${arrayValue(entity.institutions).map((institution) => `<li>${escapeHtml(institution)}</li>`).join("") || "<li>None</li>"}
-      </ul>
-    </section>
-    <details class="response-box">
+
+    <details class="payload">
       <summary>Approved payload</summary>
       <pre>${escapeHtml(JSON.stringify(entity, null, 2))}</pre>
     </details>
   `;
 }
 
-function renderApprovedPage() {
+function renderNav() {
+  const navConfig = [
+    [elements.navJobs, "jobs"],
+    [elements.navReview, "review"],
+    [elements.navApproved, "approved"],
+  ];
+
+  navConfig.forEach(([element, page]) => {
+    element.classList.toggle("is-active", state.page === page);
+  });
+
+  elements.pageJobs.hidden = state.page !== "jobs";
+  elements.pageReview.hidden = state.page !== "review";
+  elements.pageApproved.hidden = state.page !== "approved";
+}
+
+function render() {
+  renderNav();
+  renderJobsTable();
+  renderJobsDetail();
+  renderReviewRunFilter();
+  renderReviewTable();
+  renderReviewDetail();
   renderApprovedTable();
   renderApprovedDetail();
 }
 
-function updateUploadCurlPreview() {
+async function loadData() {
+  setConnectionStatus("Refreshing", "idle");
+
+  const previousJobRunId = state.selectedJobRunId;
+  const previousReviewRunId = state.reviewRunId;
+  const previousCandidateId = state.selectedCandidateId;
+  const previousApprovedId = state.selectedApprovedId;
+
   try {
-    const body = buildUploadBody();
-    const apiBaseUrl = getApiBaseUrl() || "$SOURCING_API_BASE_URL";
-    const url = joinUrl(apiBaseUrl, elements.uploadEndpoint.value.trim());
-    elements.uploadCurl.textContent = buildCurl(url, body);
+    await requestJson("/health");
+    const [runsPayload, candidatesPayload, approvedPayload] = await Promise.all([
+      requestJson("/source-runs?limit=50"),
+      requestJson("/dedup-candidates?include=details"),
+      requestJson("/approved-entities"),
+    ]);
+
+    state.runs = sortRuns(normalizeListPayload(runsPayload));
+    state.candidates = normalizeListPayload(candidatesPayload);
+    state.approved = normalizeListPayload(approvedPayload);
+    state.selectedJobRunId = previousJobRunId;
+    state.reviewRunId = previousReviewRunId;
+    state.selectedCandidateId = previousCandidateId;
+    state.selectedApprovedId = previousApprovedId;
+    ensureSelections();
+    setConnectionStatus("Ready", "ready");
+    render();
   } catch (error) {
-    elements.uploadCurl.textContent = error.message;
+    setConnectionStatus("Refresh failed", "error");
+    elements.reviewResult.textContent = error.message;
+    elements.reviewResult.dataset.status = "error";
   }
 }
 
-function renderApp() {
-  ensureSelectedRecord();
-  ensureSelectedCandidate();
-  ensureSelectedApprovedEntity();
-  syncRouteChrome();
-  renderFocusedRunCard();
-  renderSidebarHealth();
-  renderOverviewPage();
-  renderRunsPage();
-  renderQueuePage();
-  renderApprovedPage();
-  updateUploadCurlPreview();
-}
-
-async function handleFileSelection(event) {
-  const file = event.target.files?.[0];
-  if (!file) {
+async function submitReview(label) {
+  const item = getSelectedCandidateItem();
+  if (!item) {
     return;
   }
 
-  const text = await file.text();
-  if (file.name.toLowerCase().endsWith(".csv") || file.type === "text/csv") {
-    const records = csvToSourceRecords(text);
-    elements.jsonlInput.value = records.map((record) => JSON.stringify(record)).join("\n");
-  } else {
-    elements.jsonlInput.value = text;
-  }
-
-  updateUploadCurlPreview();
-}
-
-async function createSourceRun() {
-  const body = buildSourceRunBody();
+  state.reviewSubmitting = true;
+  state.reviewMessage = `Saving ${displayLabel(label)}...`;
+  state.reviewMessageStatus = "";
+  renderReviewDetail();
 
   try {
-    if (!body.sourceName || !body.sourceDomain || !body.pipelineName) {
-      throw new Error("Source, domain, and pipeline are required.");
-    }
-    renderJson(elements.sourceRunResult, "Creating source run...");
-    const result = await requestJson("/source-runs", {
+    await requestJson("/review-labels", {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        dedupCandidateId: candidateObject(item)?.id,
+        label,
+        notes: elements.reviewNote.value.trim(),
+      }),
     });
-    const runId = result?.data?.id || result?.id || result?.runId;
-    if (runId) {
-      elements.runId.value = runId;
-      await refreshAll(runId);
-      setRoute("runs");
-    }
-    setConnectionStatus("Source run created", "ready");
-    renderJson(elements.sourceRunResult, result ?? { ok: true });
+    elements.reviewNote.value = "";
+    state.reviewMessage = `${displayLabel(label)} saved`;
+    state.reviewMessageStatus = "success";
+    await loadData();
   } catch (error) {
-    setConnectionStatus("Source run failed", "error");
-    renderJson(elements.sourceRunResult, {
-      error: error.message,
-      curl: buildCurl(joinUrl(getApiBaseUrl() || "$SOURCING_API_BASE_URL", "/source-runs"), body),
-    });
-  }
-}
-
-async function uploadRecords() {
-  try {
-    if (!elements.runId.value.trim()) {
-      throw new Error("Set source run ID first. Create it before uploading records.");
-    }
-
-    const endpoint = elements.uploadEndpoint.value.trim();
-    const body = buildUploadBody();
-    renderJson(elements.uploadResult, "Uploading...");
-    updateUploadCurlPreview();
-    const result = await requestJson(endpoint, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    setConnectionStatus("Upload API reachable", "ready");
-    renderJson(elements.uploadResult, result ?? { ok: true });
-    await refreshAll(elements.runId.value.trim());
-    setRoute("runs");
-  } catch (error) {
-    setConnectionStatus("Upload failed", "error");
-    renderJson(elements.uploadResult, error.message);
-    updateUploadCurlPreview();
-  }
-}
-
-async function completeSelectedRun() {
-  const selectedRun = getSelectedRun();
-  if (!selectedRun) {
-    return;
-  }
-
-  try {
-    renderJson(elements.sourceRunResult, "Completing source run...");
-    const result = await requestJson(`/source-runs/${encodeURIComponent(selectedRun.id)}/complete`, {
-      method: "POST",
-    });
-    renderJson(elements.sourceRunResult, result ?? { ok: true });
-    setConnectionStatus("Source run completed", "ready");
-    await refreshAll(selectedRun.id);
-  } catch (error) {
-    setConnectionStatus("Run completion failed", "error");
-    renderJson(elements.sourceRunResult, { error: error.message });
-  }
-}
-
-async function checkHealth() {
-  await requestJson("/health");
-}
-
-async function refreshSourceRuns(preferredRunId = "") {
-  const payload = await requestJson("/source-runs?limit=50");
-  state.sourceRuns = sortRunsForReview(normalizeListPayload(payload));
-  state.selectedRunId = chooseRunId(state.sourceRuns, preferredRunId || state.selectedRunId || elements.runId.value.trim());
-  elements.runId.value = state.selectedRunId || elements.runId.value;
-}
-
-async function refreshRunRecords() {
-  const runId = state.selectedRunId;
-  if (!runId) {
-    state.sourceRecords = [];
-    state.selectedRecordId = "";
-    renderApp();
-    return;
-  }
-
-  const payload = await requestJson(`/source-runs/${encodeURIComponent(runId)}/source-records?limit=500`);
-  state.sourceRecords = normalizeListPayload(payload);
-  renderApp();
-}
-
-async function refreshCandidateDetails() {
-  const payload = await requestJson("/dedup-candidates?include=details");
-  state.candidateDetails = normalizeListPayload(payload);
-  renderApp();
-}
-
-async function refreshApprovedEntities() {
-  const payload = await requestJson("/approved-entities");
-  state.approvedEntities = normalizeListPayload(payload);
-  renderApp();
-}
-
-async function refreshAll(preferredRunId = "") {
-  try {
-    setConnectionStatus("Refreshing sourcing console...", "idle");
-    await checkHealth();
-    await refreshSourceRuns(preferredRunId);
-    await refreshRunRecords();
-    await Promise.all([refreshCandidateDetails(), refreshApprovedEntities()]);
-    setConnectionStatus("Sourcing console ready", "ready");
-  } catch (error) {
-    setConnectionStatus(`Refresh failed: ${error.message}`, "error");
+    state.reviewMessage = error.message;
+    state.reviewMessageStatus = "error";
   } finally {
-    renderApp();
+    state.reviewSubmitting = false;
+    renderReviewDetail();
   }
 }
 
-async function selectRun(runId) {
-  state.selectedRunId = runId;
-  state.selectedRecordId = "";
-  state.selectedCandidateId = "";
-  if (runId) {
-    elements.runId.value = runId;
-  }
-  await refreshRunRecords();
-  renderApp();
-}
-
-function saveSettings() {
-  localStorage.setItem(STORAGE_KEY, getApiBaseUrl());
-  renderApp();
-}
-
-async function submitReviewLabel(labelOverride = "") {
-  const dedupCandidateId = elements.dedupCandidateId.value.trim();
-  if (!dedupCandidateId) {
-    throw new Error("Select a candidate first.");
-  }
-
-  const body = {
-    dedupCandidateId,
-    label: labelOverride || elements.reviewLabel.value,
-    notes: elements.reviewNotes.value.trim(),
-  };
-
-  renderJson(elements.reviewResult, "Submitting review...");
-  const result = await requestJson("/review-labels", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-  renderJson(elements.reviewResult, result ?? { ok: true });
-  elements.reviewNotes.value = "";
-  await refreshAll(state.selectedRunId);
-  return result;
-}
-
-function setRoute(route, updateHash = true) {
-  const normalized = normalizeRoute(route);
-  if (state.route === normalized && !updateHash) {
-    renderApp();
-    return;
-  }
-  state.route = normalized;
+function setPage(page, updateHash = true) {
+  state.page = normalizePage(page);
   if (updateHash) {
-    const nextHash = `#${normalized}`;
+    const nextHash = `#${state.page}`;
     if (window.location.hash !== nextHash) {
       window.location.hash = nextHash;
       return;
     }
   }
-  renderApp();
-}
-
-async function openCandidate(runId, candidateId) {
-  if (runId && runId !== state.selectedRunId) {
-    await selectRun(runId);
-  }
-  state.selectedCandidateId = candidateId;
-  setRoute("queue");
-}
-
-function openApproved(entityId) {
-  state.selectedApprovedEntityId = entityId;
-  setRoute("approved");
-}
-
-function bindDelegatedClicks() {
-  document.addEventListener("click", (event) => {
-    const candidateButton = event.target.closest("[data-open-candidate]");
-    if (candidateButton) {
-      const candidateId = candidateButton.getAttribute("data-open-candidate") || "";
-      const runId = candidateButton.getAttribute("data-open-run") || "";
-      void openCandidate(runId, candidateId);
-      return;
-    }
-
-    const approvedButton = event.target.closest("[data-open-approved]");
-    if (approvedButton) {
-      openApproved(approvedButton.getAttribute("data-open-approved") || "");
-      return;
-    }
-
-    const jumpRunButton = event.target.closest("[data-jump-run]");
-    if (jumpRunButton) {
-      const runId = jumpRunButton.getAttribute("data-jump-run") || "";
-      void selectRun(runId);
-      setRoute("queue");
-      return;
-    }
-
-    const runButton = event.target.closest("[data-open-run], [data-run-id]");
-    if (runButton) {
-      const runId = runButton.getAttribute("data-open-run") || runButton.getAttribute("data-run-id") || "";
-      void selectRun(runId);
-      if (runButton.hasAttribute("data-open-run")) {
-        setRoute("runs");
-      }
-      return;
-    }
-
-    const recordButton = event.target.closest("[data-record-id]");
-    if (recordButton) {
-      state.selectedRecordId = recordButton.getAttribute("data-record-id") || "";
-      renderApp();
-      return;
-    }
-
-    const candidateSelectButton = event.target.closest("[data-candidate-id]");
-    if (candidateSelectButton) {
-      state.selectedCandidateId = candidateSelectButton.getAttribute("data-candidate-id") || "";
-      renderApp();
-      return;
-    }
-
-    const approvedSelectButton = event.target.closest("[data-approved-id]");
-    if (approvedSelectButton) {
-      state.selectedApprovedEntityId = approvedSelectButton.getAttribute("data-approved-id") || "";
-      renderApp();
-      return;
-    }
-
-    const routeButton = event.target.closest("[data-route]");
-    if (routeButton) {
-      setRoute(routeButton.getAttribute("data-route") || "overview");
-    }
-  });
+  render();
 }
 
 function bindEvents() {
-  bindDelegatedClicks();
+  elements.refreshButton.addEventListener("click", () => {
+    void loadData();
+  });
+
+  elements.navJobs.addEventListener("click", () => setPage("jobs"));
+  elements.navReview.addEventListener("click", () => setPage("review"));
+  elements.navApproved.addEventListener("click", () => setPage("approved"));
+
+  elements.openRunReviewButton.addEventListener("click", () => {
+    state.reviewRunId = state.selectedJobRunId;
+    ensureSelections();
+    setPage("review");
+  });
+
+  elements.reviewRunFilter.addEventListener("change", () => {
+    state.reviewRunId = elements.reviewRunFilter.value;
+    ensureSelections();
+    render();
+  });
+
+  elements.reviewSearchInput.addEventListener("input", () => {
+    state.reviewSearch = elements.reviewSearchInput.value.trim().toLowerCase();
+    ensureSelections();
+    render();
+  });
+
+  elements.approvedSearchInput.addEventListener("input", () => {
+    state.approvedSearch = elements.approvedSearchInput.value.trim().toLowerCase();
+    ensureSelections();
+    render();
+  });
+
+  elements.jobsTableBody.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-run-id]");
+    if (!button) {
+      return;
+    }
+    state.selectedJobRunId = button.getAttribute("data-run-id") || "";
+    renderJobsDetail();
+    renderJobsTable();
+  });
+
+  elements.reviewTableBody.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-candidate-id]");
+    if (!button) {
+      return;
+    }
+    state.selectedCandidateId = button.getAttribute("data-candidate-id") || "";
+    renderReviewTable();
+    renderReviewDetail();
+  });
+
+  elements.approvedTableBody.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-approved-id]");
+    if (!button) {
+      return;
+    }
+    state.selectedApprovedId = button.getAttribute("data-approved-id") || "";
+    renderApprovedTable();
+    renderApprovedDetail();
+  });
+
+  document.addEventListener("click", (event) => {
+    const actionButton = event.target.closest("[data-review-label]");
+    if (!actionButton) {
+      return;
+    }
+    void submitReview(actionButton.getAttribute("data-review-label") || "unsure");
+  });
 
   window.addEventListener("hashchange", () => {
-    state.route = normalizeRoute(window.location.hash);
-    renderApp();
-  });
-
-  elements.saveSettingsButton.addEventListener("click", () => {
-    saveSettings();
-    void refreshAll(state.selectedRunId);
-  });
-
-  elements.refreshAllButton.addEventListener("click", () => {
-    void refreshAll(state.selectedRunId);
-  });
-
-  elements.refreshRunsButton.addEventListener("click", () => {
-    void refreshAll(state.selectedRunId);
-  });
-
-  elements.completeRunButton.addEventListener("click", () => {
-    void completeSelectedRun();
-  });
-
-  elements.recordTypeFilter.addEventListener("change", () => {
-    state.filters.recordType = elements.recordTypeFilter.value;
-    renderApp();
-  });
-
-  elements.recordSort.addEventListener("change", () => {
-    state.filters.recordSort = elements.recordSort.value;
-    renderApp();
-  });
-
-  elements.recordSearch.addEventListener("input", () => {
-    state.filters.recordSearch = elements.recordSearch.value;
-    renderApp();
-  });
-
-  elements.queueStatusFilter.addEventListener("change", () => {
-    state.filters.queueStatus = elements.queueStatusFilter.value;
-    renderApp();
-  });
-
-  elements.refreshCandidatesButton.addEventListener("click", () => {
-    void refreshCandidateDetails();
-  });
-
-  elements.approvedScopeFilter.addEventListener("change", () => {
-    state.filters.approvedScope = elements.approvedScopeFilter.value;
-    renderApp();
-  });
-
-  elements.approvedSearch.addEventListener("input", () => {
-    state.filters.approvedSearch = elements.approvedSearch.value;
-    renderApp();
-  });
-
-  elements.refreshApprovedButton.addEventListener("click", () => {
-    void refreshApprovedEntities();
-  });
-
-  elements.reviewForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      await submitReviewLabel();
-      setConnectionStatus("Review submitted", "ready");
-    } catch (error) {
-      setConnectionStatus("Review submission failed", "error");
-      renderJson(elements.reviewResult, { error: error.message });
-    }
-  });
-
-  elements.approveSamePersonButton.addEventListener("click", async () => {
-    try {
-      await submitReviewLabel("same_person");
-      setConnectionStatus("Review submitted", "ready");
-    } catch (error) {
-      setConnectionStatus("Review submission failed", "error");
-      renderJson(elements.reviewResult, { error: error.message });
-    }
-  });
-
-  elements.approveNotSamePersonButton.addEventListener("click", async () => {
-    try {
-      await submitReviewLabel("not_same_person");
-      setConnectionStatus("Review submitted", "ready");
-    } catch (error) {
-      setConnectionStatus("Review submission failed", "error");
-      renderJson(elements.reviewResult, { error: error.message });
-    }
-  });
-
-  elements.approveUnsureButton.addEventListener("click", async () => {
-    try {
-      await submitReviewLabel("unsure");
-      setConnectionStatus("Review submitted", "ready");
-    } catch (error) {
-      setConnectionStatus("Review submission failed", "error");
-      renderJson(elements.reviewResult, { error: error.message });
-    }
-  });
-
-  elements.apiBaseUrl.addEventListener("input", () => {
-    renderApp();
-  });
-
-  elements.runId.addEventListener("input", () => {
-    updateUploadCurlPreview();
-  });
-
-  elements.runId.addEventListener("change", () => {
-    const requestedRunId = elements.runId.value.trim();
-    if (requestedRunId) {
-      void refreshAll(requestedRunId);
-    }
-  });
-
-  elements.jsonlFile.addEventListener("change", handleFileSelection);
-  elements.jsonlInput.addEventListener("input", updateUploadCurlPreview);
-  elements.uploadEndpoint.addEventListener("input", updateUploadCurlPreview);
-  elements.createRunButton.addEventListener("click", () => {
-    void createSourceRun();
-  });
-  elements.uploadButton.addEventListener("click", () => {
-    void uploadRecords();
+    state.page = normalizePage(window.location.hash.replace(/^#/, ""));
+    render();
   });
 }
 
 function boot() {
-  elements.apiBaseUrl.value = localStorage.getItem(STORAGE_KEY) || "/api/sourcing";
-  state.route = normalizeRoute(window.location.hash);
-  state.filters.recordSort = elements.recordSort.value;
-  state.filters.queueStatus = elements.queueStatusFilter.value;
-  state.filters.approvedScope = elements.approvedScopeFilter.value;
   bindEvents();
-  setReviewControls(null);
-  renderApp();
-  void refreshAll();
+  void loadData();
 }
 
 boot();

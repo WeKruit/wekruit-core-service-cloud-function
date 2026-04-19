@@ -4,502 +4,212 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WeKruit Sourcing Review</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Halant:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="shell">
-      <aside class="sidebar" aria-label="Primary">
-        <div class="sidebar-brand">
-          <p class="eyebrow">WeKruit sourcing ops</p>
-          <h1>Research ops desk</h1>
-          <p class="sidebar-copy">A multi-page console for reviewing source runs, merge reasoning, and approved researcher entities.</p>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <strong>WeKruit review</strong>
+          <span>Sourcing</span>
         </div>
 
-        <nav class="sidebar-nav" aria-label="Primary navigation">
-          <button type="button" class="nav-link" data-route="overview">
-            <span class="nav-copy">
-              <span class="nav-title">Overview</span>
-              <span class="nav-caption">Load, risk, and recent approvals</span>
-            </span>
-            <span id="navOverviewCount" class="nav-count">0</span>
+        <nav class="topnav" aria-label="Sourcing sections">
+          <button id="navJobs" class="topnav__button" type="button" data-page="jobs">
+            <span>Jobs</span>
+            <span id="navJobsCount" class="topnav__count">0</span>
           </button>
-          <button type="button" class="nav-link" data-route="runs">
-            <span class="nav-copy">
-              <span class="nav-title">Runs</span>
-              <span class="nav-caption">Select and inspect source runs</span>
-            </span>
-            <span id="navRunsCount" class="nav-count">0</span>
+          <button id="navReview" class="topnav__button is-active" type="button" data-page="review">
+            <span>Review</span>
+            <span id="navReviewCount" class="topnav__count">0</span>
           </button>
-          <button type="button" class="nav-link" data-route="queue">
-            <span class="nav-copy">
-              <span class="nav-title">Queue</span>
-              <span class="nav-caption">Review pending merge candidates</span>
-            </span>
-            <span id="navQueueCount" class="nav-count">0</span>
-          </button>
-          <button type="button" class="nav-link" data-route="approved">
-            <span class="nav-copy">
-              <span class="nav-title">Approved</span>
-              <span class="nav-caption">Inspect downstream survivors</span>
-            </span>
-            <span id="navApprovedCount" class="nav-count">0</span>
-          </button>
-          <button type="button" class="nav-link" data-route="utilities">
-            <span class="nav-copy">
-              <span class="nav-title">Utilities</span>
-              <span class="nav-caption">API target, create run, upload</span>
-            </span>
-            <span id="navUtilitiesCount" class="nav-count">Ops</span>
+          <button id="navApproved" class="topnav__button" type="button" data-page="approved">
+            <span>Approved</span>
+            <span id="navApprovedCount" class="topnav__count">0</span>
           </button>
         </nav>
 
-        <section class="sidebar-section">
-          <div class="section-heading section-heading--sidebar">
+        <div class="topbar__actions">
+          <span id="connectionStatus" class="status-badge">Loading</span>
+          <button id="refreshButton" type="button" class="button-muted">Refresh</button>
+        </div>
+      </header>
+
+      <main class="page-stack">
+        <section id="pageJobs" class="page" hidden>
+          <div class="page-head">
             <div>
-              <p class="eyebrow">Focused run</p>
-              <h2>Current scope</h2>
+              <p class="eyebrow">Jobs</p>
+              <h2>Source runs</h2>
             </div>
+            <p id="jobsMeta" class="page-meta">Loading runs...</p>
           </div>
-          <div id="focusedRunCard" class="focus-card">
-            Select a source run to scope records, queue, and approved entities.
-          </div>
-        </section>
 
-        <section class="sidebar-section">
-          <div class="section-heading section-heading--sidebar">
-            <div>
-              <p class="eyebrow">Review load</p>
-              <h2>At a glance</h2>
-            </div>
-          </div>
-          <div id="sidebarHealth" class="sidebar-health">
-            <p class="empty-state empty-state--inverse">Waiting for data.</p>
-          </div>
-        </section>
-      </aside>
-
-      <div class="workspace">
-        <header class="workspace-topbar">
-          <div class="topbar-copy">
-            <p id="pageEyebrow" class="eyebrow">Overview</p>
-            <h2 id="pageTitle">Review operations at a glance</h2>
-            <p id="pageSubtitle" class="subhead">Monitor run load, queue pressure, and recently approved researcher entities.</p>
-          </div>
-          <div class="topbar-actions">
-            <div id="apiBaseChip" class="api-chip">/api/sourcing</div>
-            <div class="status-chip" aria-live="polite">
-              <span class="status-dot" aria-hidden="true"></span>
-              <span id="connectionStatus">API not checked</span>
-            </div>
-            <button id="refreshAllButton" type="button">Refresh all</button>
-          </div>
-        </header>
-
-        <main class="pages">
-          <section id="pageOverview" class="page" aria-labelledby="pageTitle">
-            <div id="overviewMetrics" class="metrics-grid"></div>
-
-            <div class="page-grid page-grid--overview">
-              <section class="panel">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Attention</p>
-                    <h3>Runs needing attention</h3>
-                  </div>
-                  <button type="button" class="button-muted" data-route="runs">Open runs</button>
-                </div>
-                <div id="overviewRunsAttention" class="preview-list">
-                  <p class="empty-state">Loading runs...</p>
-                </div>
-              </section>
-
-              <section class="panel">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Pending</p>
-                    <h3>Queue preview</h3>
-                  </div>
-                  <button type="button" class="button-muted" data-route="queue">Open queue</button>
-                </div>
-                <div id="overviewQueuePreview" class="preview-list">
-                  <p class="empty-state">Loading queue preview...</p>
-                </div>
-              </section>
-            </div>
-
-            <div class="page-grid page-grid--overview-secondary">
-              <section class="panel">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Approved</p>
-                    <h3>Recent approved entities</h3>
-                  </div>
-                  <button type="button" class="button-muted" data-route="approved">Open approved</button>
-                </div>
-                <div id="overviewApprovedPreview" class="preview-list">
-                  <p class="empty-state">Loading recent approvals...</p>
-                </div>
-              </section>
-
-              <section class="panel">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Workflow</p>
-                    <h3>Next actions</h3>
-                  </div>
-                </div>
-                <div id="overviewActions" class="action-grid"></div>
-              </section>
-            </div>
-          </section>
-
-          <section id="pageRuns" class="page" hidden aria-labelledby="pageTitle">
-            <div class="page-grid page-grid--runs">
-              <aside class="panel panel--rail">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Runs</p>
-                    <h3>Source runs</h3>
-                  </div>
-                  <button id="refreshRunsButton" type="button">Refresh</button>
-                </div>
-
-                <div id="runsRunList" class="run-list">
-                  <p class="empty-state">Loading source runs...</p>
-                </div>
-
-                <div class="panel-footer">
-                  <button id="completeRunButton" type="button" class="button-muted">Complete focused run</button>
-                </div>
-              </aside>
-
-              <div class="page-stack">
-                <section class="panel">
-                  <div class="section-heading">
-                    <div>
-                      <p class="eyebrow">Focused run</p>
-                      <h3>Run summary</h3>
-                    </div>
-                  </div>
-                  <div id="runsRunSummary" class="summary-banner">Select a run to inspect its records and review state.</div>
-                </section>
-
-                <section class="panel">
-                  <div class="toolbar">
-                    <label class="inline-field" for="recordTypeFilter">
-                      <span>Type</span>
-                      <select id="recordTypeFilter">
-                        <option value="all">All</option>
-                      </select>
-                    </label>
-                    <label class="inline-field" for="recordSort">
-                      <span>Sort</span>
-                      <select id="recordSort">
-                        <option value="impact_desc">Impact</option>
-                        <option value="recent_desc">Recent</option>
-                        <option value="name_asc">Name / title</option>
-                      </select>
-                    </label>
-                    <label class="inline-field inline-field--wide" for="recordSearch">
-                      <span>Search</span>
-                      <input id="recordSearch" type="search" placeholder="Paper title, person, DOI, institution" />
-                    </label>
-                  </div>
-
-                  <div class="page-grid page-grid--records">
-                    <div class="table-shell table-shell--scroll table-shell--records">
-                      <table class="data-table data-table--records">
-                        <thead>
-                          <tr>
-                            <th scope="col">Record</th>
-                            <th scope="col">Type</th>
-                            <th scope="col">Institution / venue</th>
-                            <th scope="col">Key field</th>
-                            <th scope="col">Source</th>
-                          </tr>
-                        </thead>
-                        <tbody id="runRecordTableBody">
-                          <tr>
-                            <td colspan="5" class="empty-row">No run selected.</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <section class="panel panel--secondary inline-detail">
-                      <div class="section-heading">
-                        <div>
-                          <p class="eyebrow">Record detail</p>
-                          <h3>Selected record</h3>
-                        </div>
-                      </div>
-                      <div id="recordDetail" class="detail-content">
-                        Select a record to inspect paper metadata or researcher profile evidence.
-                      </div>
-                    </section>
-                  </div>
-                </section>
+          <div class="page-layout">
+            <section class="table-panel">
+              <div class="table-scroll">
+                <table class="grid-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Run</th>
+                      <th scope="col">Source</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Records</th>
+                      <th scope="col">Pending</th>
+                      <th scope="col">Evidence</th>
+                      <th scope="col">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody id="jobsTableBody">
+                    <tr>
+                      <td colspan="7" class="empty-row">Loading source runs...</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
+            </section>
+
+            <aside class="detail-panel">
+              <div class="detail-head">
+                <p class="eyebrow">Selected run</p>
+                <h3 id="jobsDetailTitle">No run selected</h3>
+                <p id="jobsDetailSubtitle" class="detail-subtitle">Pick a run to inspect status and jump into review.</p>
+              </div>
+              <div id="jobsDetailBody" class="detail-body">
+                <p class="empty-detail">Select a run from the table.</p>
+              </div>
+              <div class="detail-actions">
+                <button id="openRunReviewButton" type="button">Open review for this run</button>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="pageReview" class="page">
+          <div class="page-head page-head--controls">
+            <div>
+              <p class="eyebrow">Review</p>
+              <h2>Review queue</h2>
             </div>
-          </section>
 
-          <section id="pageQueue" class="page" hidden aria-labelledby="pageTitle">
-            <div class="page-grid page-grid--queue">
-              <section class="panel panel--main">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Queue</p>
-                    <h3>Merge review</h3>
-                    <p id="queueScope" class="inline-copy">Select a focused run to scope the queue.</p>
-                  </div>
-                  <div class="toolbar toolbar--compact">
-                    <label class="inline-field" for="queueStatusFilter">
-                      <span>View</span>
-                      <select id="queueStatusFilter">
-                        <option value="pending_review">Pending review</option>
-                        <option value="reviewed">Reviewed</option>
-                        <option value="all">All candidates</option>
-                      </select>
-                    </label>
-                    <button id="refreshCandidatesButton" type="button">Refresh queue</button>
-                  </div>
-                </div>
+            <div class="toolbar">
+              <label class="field" for="reviewRunFilter">
+                <span>Run scope</span>
+                <select id="reviewRunFilter"></select>
+              </label>
 
-                <div id="queueSummary" class="summary-banner">Choose a focused run to review candidate matches.</div>
-
-                <div class="table-shell table-shell--scroll table-shell--queue">
-                  <table class="data-table data-table--queue">
-                    <thead>
-                      <tr>
-                        <th scope="col">Candidate</th>
-                        <th scope="col">Reasons</th>
-                        <th scope="col">Evid.</th>
-                        <th scope="col">Sources</th>
-                        <th scope="col">Match</th>
-                      </tr>
-                    </thead>
-                    <tbody id="candidateTableBody">
-                      <tr>
-                        <td colspan="5" class="empty-row">Loading pending candidates...</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              <aside class="panel panel--decision">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Decision</p>
-                    <h3>Selected match</h3>
-                    <p class="inline-copy">Inspect evidence, compare sources, and decide whether the merge should survive.</p>
-                  </div>
-                </div>
-
-                <div id="candidateDetail" class="detail-content">
-                  Select a candidate to inspect evidence and source records.
-                </div>
-
-                <form id="reviewForm" class="review-form">
-                  <label class="inline-field" for="dedupCandidateId">
-                    <span>Candidate ID</span>
-                    <input id="dedupCandidateId" readonly placeholder="Select a candidate first" />
-                  </label>
-
-                  <div class="quick-actions">
-                    <button id="approveSamePersonButton" type="button">Approve merge</button>
-                    <button id="approveNotSamePersonButton" type="button" class="button-muted">Keep separate</button>
-                    <button id="approveUnsureButton" type="button" class="button-muted">Hold</button>
-                  </div>
-
-                  <label class="inline-field" for="reviewLabel">
-                    <span>Review outcome</span>
-                    <select id="reviewLabel" required>
-                      <option value="same_person">Approve merge</option>
-                      <option value="not_same_person">Keep separate</option>
-                      <option value="unsure">Need more evidence</option>
-                    </select>
-                  </label>
-
-                  <label class="inline-field" for="reviewNotes">
-                    <span>Reviewer note</span>
-                    <textarea id="reviewNotes" rows="4" placeholder="Write the merge reasoning you want saved for review history"></textarea>
-                  </label>
-
-                  <button type="submit">Submit review</button>
-                </form>
-
-                <details class="response-box">
-                  <summary>Review result</summary>
-                  <pre id="reviewResult">Waiting for review submission.</pre>
-                </details>
-              </aside>
+              <label class="field field--search" for="reviewSearchInput">
+                <span>Search</span>
+                <input id="reviewSearchInput" type="search" placeholder="Name, email, institution, ORCID" />
+              </label>
             </div>
-          </section>
+          </div>
 
-          <section id="pageApproved" class="page" hidden aria-labelledby="pageTitle">
-            <div class="page-grid page-grid--approved">
-              <section class="panel panel--main">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Approved</p>
-                    <h3>Approved entities</h3>
-                    <p class="inline-copy">Review the entities that survived the merge decision and are ready for downstream use.</p>
-                  </div>
-                  <div class="toolbar toolbar--compact">
-                    <label class="inline-field" for="approvedScopeFilter">
-                      <span>Scope</span>
-                      <select id="approvedScopeFilter">
-                        <option value="selected_run">Focused run</option>
-                        <option value="all">All approved entities</option>
-                      </select>
-                    </label>
-                    <button id="refreshApprovedButton" type="button">Refresh approved</button>
-                  </div>
-                </div>
+          <div class="page-layout">
+            <section class="table-panel">
+              <p id="reviewMeta" class="table-meta">Loading queue...</p>
+              <div class="table-scroll table-scroll--tall">
+                <table class="grid-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Candidate</th>
+                      <th scope="col">Match</th>
+                      <th scope="col">Sources</th>
+                      <th scope="col">Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody id="reviewTableBody">
+                    <tr>
+                      <td colspan="4" class="empty-row">Loading review queue...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
 
-                <div class="toolbar toolbar--approved">
-                  <label class="inline-field inline-field--wide" for="approvedSearch">
-                    <span>Search</span>
-                    <input id="approvedSearch" type="search" placeholder="Name, email, institution, homepage" />
-                  </label>
-                </div>
+            <aside class="detail-panel">
+              <div class="detail-head">
+                <p class="eyebrow">Selected candidate</p>
+                <h3 id="reviewDetailTitle">Nothing selected</h3>
+                <p id="reviewDetailSubtitle" class="detail-subtitle">Select a queue row to compare the raw source values.</p>
+              </div>
+              <div id="reviewDetailBody" class="detail-body">
+                <p class="empty-detail">Select a queue row to see why it was flagged, which fields matched, and the source A / source B values.</p>
+              </div>
 
-                <div class="table-shell table-shell--scroll table-shell--approved">
-                  <table class="data-table data-table--approved">
-                    <thead>
-                      <tr>
-                        <th scope="col">Entity</th>
-                        <th scope="col">Emails</th>
-                        <th scope="col">Homepages</th>
-                        <th scope="col">Institutions</th>
-                        <th scope="col">Source records</th>
-                        <th scope="col">Created</th>
-                      </tr>
-                    </thead>
-                    <tbody id="approvedTableBody">
-                      <tr>
-                        <td colspan="6" class="empty-row">Loading approved entities...</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              <aside class="panel panel--secondary">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Approved detail</p>
-                    <h3>Selected entity</h3>
-                  </div>
-                </div>
-                <div id="approvedDetail" class="detail-content">
-                  Select an approved entity to inspect surviving contact fields.
-                </div>
-              </aside>
-            </div>
-          </section>
-
-          <section id="pageUtilities" class="page" hidden aria-labelledby="pageTitle">
-            <div class="page-grid page-grid--utilities">
-              <section class="panel panel--utility">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Connection</p>
-                    <h3>API target</h3>
-                    <p class="inline-copy">Keep transport and manual controls off the main review pages.</p>
-                  </div>
-                  <button id="saveSettingsButton" type="button" class="button-muted">Save target</button>
-                </div>
-
-                <label class="inline-field" for="apiBaseUrl">
-                  <span>API base URL</span>
-                  <input
-                    id="apiBaseUrl"
-                    name="apiBaseUrl"
-                    type="text"
-                    placeholder="/api/sourcing or https://.../sourcing-api/api/sourcing"
-                  />
-                </label>
-              </section>
-
-              <section class="panel panel--utility">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Run metadata</p>
-                    <h3>Create source run</h3>
-                  </div>
-                  <button id="createRunButton" type="button">Create run</button>
-                </div>
-
-                <label class="inline-field" for="sourceRunSourceName">
-                  <span>Source</span>
-                  <input id="sourceRunSourceName" value="openalex" />
-                </label>
-                <label class="inline-field" for="sourceRunDomain">
-                  <span>Domain</span>
-                  <input id="sourceRunDomain" value="researcher" />
-                </label>
-                <label class="inline-field" for="sourceRunPipeline">
-                  <span>Pipeline</span>
-                  <input id="sourceRunPipeline" value="local-jsonl-upload" />
+              <div class="detail-actions detail-actions--stack">
+                <label class="field field--notes" for="reviewNote">
+                  <span>Review note</span>
+                  <textarea id="reviewNote" rows="3" placeholder="Write the reasoning that should be saved with this decision"></textarea>
                 </label>
 
-                <details class="response-box">
-                  <summary>Run API response</summary>
-                  <pre id="sourceRunResult">Create a source run before uploading records.</pre>
-                </details>
-              </section>
-
-              <section class="panel panel--utility panel--wide">
-                <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">Replay</p>
-                    <h3>Upload source records</h3>
-                    <p class="inline-copy">Upload prepared JSONL or CSV to the focused source run without leaving the console.</p>
-                  </div>
-                  <button id="uploadButton" type="button">Upload records</button>
+                <div class="action-row">
+                  <button id="reviewApproveButton" type="button" data-review-label="same_person">Approve merge</button>
+                  <button id="reviewSeparateButton" type="button" class="button-muted" data-review-label="not_same_person">Keep separate</button>
+                  <button id="reviewHoldButton" type="button" class="button-muted" data-review-label="unsure">Hold</button>
                 </div>
 
-                <div class="utilities-grid">
-                  <label class="inline-field" for="runId">
-                    <span>Source run ID</span>
-                    <input id="runId" placeholder="Created automatically, or paste an existing run ID" />
-                  </label>
-                  <label class="inline-field" for="uploadEndpoint">
-                    <span>Batch endpoint</span>
-                    <input id="uploadEndpoint" value="/source-records:batchUpsert" />
-                  </label>
-                  <label class="inline-field" for="jsonlFile">
-                    <span>JSONL or CSV file</span>
-                    <input id="jsonlFile" type="file" accept=".jsonl,.csv,.txt,application/jsonl,text/csv,text/plain" />
-                  </label>
-                  <label class="inline-field inline-field--full" for="jsonlInput">
-                    <span>Prepared source records</span>
-                    <textarea
-                      id="jsonlInput"
-                      rows="10"
-                      spellcheck="false"
-                      placeholder='{"sourceNativeId":"A123","entityType":"person","displayName":"Ada Lovelace","institution":"Analytical Engine Lab","rawSummary":{"email":"ada@example.edu","orcid":"0000-0000-0000-000X"},"display":{"homepage":"https://example.edu/ada"},"raw":{}}'
-                    ></textarea>
-                  </label>
-                </div>
+                <p id="reviewResult" class="detail-result" aria-live="polite"></p>
+              </div>
+            </aside>
+          </div>
+        </section>
 
-                <div class="utilities-results">
-                  <details class="response-box" open>
-                    <summary>Upload result</summary>
-                    <pre id="uploadResult">Waiting for upload.</pre>
-                  </details>
-                  <details class="response-box">
-                    <summary>Fallback curl</summary>
-                    <pre id="uploadCurl">Generated after payload is available.</pre>
-                  </details>
-                </div>
-              </section>
+        <section id="pageApproved" class="page" hidden>
+          <div class="page-head page-head--controls">
+            <div>
+              <p class="eyebrow">Approved</p>
+              <h2>Approved entities</h2>
             </div>
-          </section>
-        </main>
-      </div>
+
+            <div class="toolbar">
+              <label class="field field--search" for="approvedSearchInput">
+                <span>Search</span>
+                <input id="approvedSearchInput" type="search" placeholder="Name, email, institution, homepage, ORCID" />
+              </label>
+            </div>
+          </div>
+
+          <div class="page-layout">
+            <section class="table-panel">
+              <p id="approvedMeta" class="table-meta">Loading approved entities...</p>
+              <div class="table-scroll table-scroll--tall">
+                <table class="grid-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Entity</th>
+                      <th scope="col">Emails</th>
+                      <th scope="col">ORCID</th>
+                      <th scope="col">Institutions</th>
+                      <th scope="col">Source records</th>
+                      <th scope="col">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody id="approvedTableBody">
+                    <tr>
+                      <td colspan="6" class="empty-row">Loading approved entities...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="detail-panel">
+              <div class="detail-head">
+                <p class="eyebrow">Approved detail</p>
+                <h3 id="approvedDetailTitle">Nothing selected</h3>
+                <p id="approvedDetailSubtitle" class="detail-subtitle">Select an approved entity to inspect the surviving fields.</p>
+              </div>
+              <div id="approvedDetailBody" class="detail-body">
+                <p class="empty-detail">Select an approved row to inspect the final person profile.</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </main>
     </div>
 
     <script src="/app.js" defer></script>
