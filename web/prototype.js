@@ -33,6 +33,15 @@ const REASON_CONFIG = {
 };
 
 const FIELD_PRIORITY = ["email", "orcid", "github", "homepage", "source_native_id", "institution", "name"];
+const FIELD_DEFINITIONS = [
+  ["name", "Name"],
+  ["email", "Email"],
+  ["homepage", "Homepage"],
+  ["institution", "Institution"],
+  ["orcid", "ORCID"],
+  ["github", "GitHub"],
+  ["source_native_id", "Source ID"],
+];
 
 const state = {
   page: normalizePage(window.location.hash.replace(/^#/, "") || "review"),
@@ -517,23 +526,16 @@ function comparisonRows(item) {
   const left = recordData(records[0] || {});
   const right = recordData(records[1] || {});
   const matchedFields = new Set(arrayValue(item?.evidence).map((entry) => entry.evidenceType));
-  const fields = [
-    ["name", "Name"],
-    ["email", "Email"],
-    ["homepage", "Homepage"],
-    ["institution", "Institution"],
-    ["orcid", "ORCID"],
-    ["github", "GitHub"],
-    ["source_native_id", "Source ID"],
-  ];
-
-  return fields.map(([key, label]) => ({
+  const rows = FIELD_DEFINITIONS.map(([key, label]) => ({
     key,
     label,
     left: compareFieldValue(left, key),
     right: compareFieldValue(right, key),
     matched: matchedFields.has(key),
   }));
+
+  const visibleRows = rows.filter((row) => row.matched || row.left.length || row.right.length);
+  return visibleRows.length ? visibleRows : rows.filter((row) => row.key === "name" || row.key === "source_native_id");
 }
 
 function renderComparisonValue(values, isMeta = false) {
@@ -588,6 +590,135 @@ function renderComparisonTable(item) {
             .join("")}
         </tbody>
       </table>
+    </div>
+  `;
+}
+
+function bestEvidenceByType(item) {
+  const signalMap = new Map();
+  const evidenceRows = arrayValue(item?.evidence)
+    .slice()
+    .sort((left, right) => {
+      const fieldDelta = evidencePriority(left) - evidencePriority(right);
+      if (fieldDelta !== 0) {
+        return fieldDelta;
+      }
+      return evidenceQualityPriority(left) - evidenceQualityPriority(right);
+    });
+
+  for (const entry of evidenceRows) {
+    if (!signalMap.has(entry.evidenceType)) {
+      signalMap.set(entry.evidenceType, entry);
+    }
+  }
+
+  return Array.from(signalMap.values());
+}
+
+function signalSummary(entry) {
+  const type = stringValue(entry?.evidenceType);
+  if (type === "email" || type === "homepage" || type === "github" || type === "orcid" || type === "source_native_id") {
+    return "Exact match";
+  }
+  if (type === "institution") {
+    return "Same institution";
+  }
+  if (type === "name") {
+    return "Same name";
+  }
+  return displayLabel(entry?.quality || "Matched");
+}
+
+function renderSignalList(item, candidate) {
+  const signals = bestEvidenceByType(item);
+  if (!signals.length) {
+    if (arrayValue(candidate?.reasonCodes).includes("singleton_review")) {
+      return `<div class="subtle-callout">Only one source record exists. A reviewer needs to decide whether this profile should survive as a real person.</div>`;
+    }
+    return `<div class="subtle-callout">No extracted signal was attached to this candidate.</div>`;
+  }
+
+  return `
+    <div class="signal-list">
+      ${signals
+        .map((entry) => {
+          const valueLabel = stringValue(entry.normalizedValue) || stringValue(entry.rawValue) || "—";
+          return `
+            <div class="signal-row">
+              <div class="signal-label">${escapeHtml(evidenceTypeLabel(entry.evidenceType))}</div>
+              <div class="signal-value ${entry.evidenceType === "orcid" || entry.evidenceType === "source_native_id" ? "mono" : ""}">${escapeHtml(valueLabel)}</div>
+              <div class="signal-note">${escapeHtml(signalSummary(entry))}</div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderSourceFieldValues(values, isMeta = false) {
+  if (!values.length) {
+    return `<span class="source-field__value">—</span>`;
+  }
+
+  return values
+    .map(
+      (value, index) =>
+        `<span class="source-field__value ${index > 0 ? "source-field__value--sub" : ""} ${isMeta ? "mono" : ""}">${escapeHtml(value)}</span>`,
+    )
+    .join("");
+}
+
+function renderSourceCard(title, recordInfo, rows, side) {
+  if (!recordInfo) {
+    return `
+      <article class="source-card">
+        <div class="source-card__head">
+          <div class="source-card__title">${escapeHtml(title)}</div>
+          <div class="source-card__meta">No source record available</div>
+        </div>
+      </article>
+    `;
+  }
+
+  const metaParts = [recordInfo.runId, recordInfo.domain].filter(Boolean);
+  return `
+    <article class="source-card">
+      <div class="source-card__head">
+        <div class="source-card__title">${escapeHtml(title)}</div>
+        <div class="source-card__meta">${escapeHtml(metaParts.join(" · ") || "Source record")}</div>
+      </div>
+      <div class="source-card__body">
+        ${rows
+          .map((row) => {
+            const values = side === "left" ? row.left : row.right;
+            const isMeta = row.key === "orcid" || row.key === "source_native_id";
+            return `
+              <div class="source-field">
+                <div class="source-field__label">${escapeHtml(row.label)}</div>
+                <div class="source-field__values">${renderSourceFieldValues(values, isMeta)}</div>
+                ${row.matched ? `<span class="source-field__match">Match</span>` : `<span></span>`}
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderSourceCards(item) {
+  const records = arrayValue(item?.sourceRecords);
+  const left = records[0] ? recordData(records[0]) : null;
+  const right = records[1] ? recordData(records[1]) : null;
+  const rows = comparisonRows(item);
+  const leftLabel = left?.source || "Source A";
+  const rightLabel = right?.source || (records.length > 1 ? "Source B" : "No second source");
+
+  return `
+    <div class="source-grid">
+      ${renderSourceCard(leftLabel, left, rows, "left")}
+      ${renderSourceCard(rightLabel, right, rows, "right")}
     </div>
   `;
 }
@@ -792,60 +923,51 @@ function renderReviewDetail() {
   const matchedFieldsText = matchedFieldsForCandidate(candidate).join(", ") || "Manual review";
   const systemFlags = arrayValue(candidate.reasonCodes).join(" · ");
   const sharedValue = stringValue(primaryEvidence?.normalizedValue) || stringValue(primaryEvidence?.rawValue) || "Manual review";
+  const sourcePairText = `${leftRecord.source || "Source A"} / ${rightRecord.source || (sourceRecords.length > 1 ? "Source B" : "No second source")}`;
+  const explanation = arrayValue(candidate.reasonCodes).includes("singleton_review")
+    ? "Only one source record exists, so a reviewer needs to decide whether this profile should be approved."
+    : `These records were grouped because they match on ${matchedFieldsText}. The strongest signal is ${evidenceTypeLabel(primaryEvidence?.evidenceType || "manual review").toLowerCase()} ${sharedValue}.`;
 
   elements.reviewDetailTitle.textContent = candidate.displayName || "Unnamed candidate";
   elements.reviewDetailSubtitle.textContent = `${sourceRecords.length} source records · ${displayLabel(candidate.status || "pending_review")}`;
   elements.reviewDetailBody.innerHTML = `
     <section class="detail-section">
-      <h4>Match summary</h4>
-      <div class="match-summary-grid">
-        <article class="summary-card">
-          <span class="summary-card__label">Matched now</span>
-          <span class="summary-card__value">${escapeHtml(sharedValue)}</span>
-          <span class="summary-card__meta">${escapeHtml(evidenceTypeLabel(primaryEvidence?.evidenceType || "manual review"))}</span>
-        </article>
-        <article class="summary-card">
-          <span class="summary-card__label">Matched fields</span>
-          <span class="summary-card__value">${escapeHtml(matchedFieldsText)}</span>
-          <span class="summary-card__meta">${escapeHtml(displayLabel(candidate.strength || "weak"))}</span>
-        </article>
-        <article class="summary-card">
-          <span class="summary-card__label">Source pair</span>
-          <span class="summary-card__value">${escapeHtml(leftRecord.source || "Source A")} / ${escapeHtml(rightRecord.source || (sourceRecords.length > 1 ? "Source B" : "No second source"))}</span>
-          <span class="summary-card__meta">${escapeHtml(systemFlags || "manual review")}</span>
-        </article>
-      </div>
+      <p class="detail-kicker">Why this is in review</p>
+      <p class="detail-lead">${escapeHtml(explanation)}</p>
       <div class="pill-row">
         ${renderPill(displayLabel(candidate.status || "pending_review"), statusVariant(candidate.status || "pending_review"))}
         ${renderPill(displayLabel(candidate.strength || "weak"), statusVariant(candidate.strength || "weak"))}
       </div>
-      <ul class="detail-list">
-        ${reasonDetailsForCandidate(candidate).map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}
-      </ul>
-      <div class="subtle-callout">
-        <div class="row-stack">
-          <span class="row-primary">System flags</span>
-          <span class="row-secondary mono">${escapeHtml(systemFlags || "manual review")}</span>
-        </div>
+      <div class="meta-strip">
+        <span><strong>Matched on</strong> ${escapeHtml(matchedFieldsText)}</span>
+        <span><strong>Sources</strong> ${escapeHtml(sourcePairText)}</span>
+        <span><strong>Shared value</strong> ${escapeHtml(sharedValue)}</span>
       </div>
     </section>
 
     <section class="detail-section">
-      <h4>Source comparison</h4>
-      ${renderComparisonTable(item)}
-      <div class="subtle-callout">
-        <div class="row-stack">
-          <span class="row-primary">Record context</span>
-          <span class="row-secondary">${escapeHtml(leftRecord.runId || "—")} · ${escapeHtml(rightRecord.runId || "—")}</span>
-        </div>
-      </div>
+      <h4>Matched signals</h4>
+      ${renderSignalList(item, candidate)}
     </section>
 
     <section class="detail-section">
-      <h4>Evidence ledger</h4>
+      <h4>Source records</h4>
+      ${renderSourceCards(item)}
+    </section>
+
+    <section class="detail-section">
       <details class="payload">
-        <summary>${escapeHtml(String(arrayValue(item.evidence).length))} evidence items</summary>
-        <div style="padding:0 0.8rem 0.8rem;">${renderEvidenceList(item)}</div>
+        <summary>Raw evidence and system flags</summary>
+        <div style="padding:0 0.8rem 0.8rem; display:grid; gap:0.8rem;">
+          <div class="row-stack">
+            <span class="row-primary">System flags</span>
+            <span class="mono cell-subtle">${escapeHtml(systemFlags || "manual review")}</span>
+          </div>
+          <div class="row-stack">
+            <span class="row-primary">Evidence ledger</span>
+            ${renderEvidenceList(item)}
+          </div>
+        </div>
       </details>
     </section>
   `;
