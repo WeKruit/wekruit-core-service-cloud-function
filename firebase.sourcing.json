@@ -16,6 +16,7 @@
     ]
   },
   "hosting": {
+    "site": "wekruit-sourcing",
     "public": "web",
     "ignore": [
       "firebase.json",
