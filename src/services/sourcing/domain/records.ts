@@ -33,6 +33,28 @@ export const sourcingEvidenceTypeSchema = z.enum([
 export const sourcingEvidenceQualitySchema = z.enum(['high', 'medium', 'low']);
 export const sourcingDedupStrengthSchema = z.enum(['strong', 'medium', 'weak']);
 export const sourcingReviewLabelSchema = z.enum(['same_person', 'not_same_person', 'unsure']);
+export const sourcingIdentityLabelSchema = z.enum(['same_person', 'not_same_person', 'unsure']);
+export const sourcingCandidateDecisionSchema = z.enum([
+  'approve_candidate',
+  'reject_bad_record',
+  'reject_not_relevant',
+  'unsure',
+]);
+export const sourcingReviewStatusSchema = z.enum([
+  'pending_review',
+  'approved_candidate',
+  'not_same_person',
+  'rejected_bad_record',
+  'rejected_not_relevant',
+  'unsure',
+  'suppressed',
+  'same_person',
+]);
+export const sourcingReviewSignalSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z][a-z0-9_:-]{1,79}$/);
 
 export const createSourceRunSchema = z.object({
   id: z.string().trim().min(1).optional(),
@@ -147,7 +169,7 @@ export const evidenceRecordSchema = z.object({
 export const dedupCandidateSchema = z.object({
   id: z.string().trim().min(1),
   entityType: sourcingEntityTypeSchema,
-  status: z.enum(['pending_review', 'same_person', 'not_same_person', 'unsure', 'suppressed']),
+  status: sourcingReviewStatusSchema,
   strength: sourcingDedupStrengthSchema,
   reasonCodes: z.array(z.string().trim().min(1)).min(1),
   sourceRecordIds: z.array(z.string().trim().min(1)).min(1),
@@ -161,13 +183,22 @@ export const dedupCandidateSchema = z.object({
 
 export const createReviewLabelSchema = z.object({
   dedupCandidateId: z.string().trim().min(1),
-  label: sourcingReviewLabelSchema,
+  label: sourcingReviewLabelSchema.optional(),
+  identityLabel: sourcingIdentityLabelSchema.nullable().optional(),
+  candidateDecision: sourcingCandidateDecisionSchema.optional(),
   reviewerId: z.string().trim().min(1).default('manual-reviewer'),
   notes: z.string().trim().default(''),
+  confirmedSignals: z.array(sourcingReviewSignalSchema).optional(),
 });
 
 export const reviewLabelRecordSchema = createReviewLabelSchema.extend({
   id: z.string().trim().min(1),
+  identityLabel: sourcingIdentityLabelSchema.nullable(),
+  candidateDecision: sourcingCandidateDecisionSchema,
+  suggestedSignals: z.array(sourcingReviewSignalSchema),
+  confirmedSignals: z.array(sourcingReviewSignalSchema),
+  sourceRecordIds: z.array(z.string().trim().min(1)).min(1),
+  evidenceIds: z.array(z.string().trim().min(1)),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -185,6 +216,8 @@ export const approvedEntitySchema = z.object({
   githubUrls: z.array(z.string()),
   orcids: z.array(z.string()),
   institutions: z.array(z.string()),
+  suggestedSignals: z.array(sourcingReviewSignalSchema),
+  confirmedSignals: z.array(sourcingReviewSignalSchema),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -194,6 +227,9 @@ export type SourcingEvidenceType = z.infer<typeof sourcingEvidenceTypeSchema>;
 export type SourcingEvidenceQuality = z.infer<typeof sourcingEvidenceQualitySchema>;
 export type SourcingDedupStrength = z.infer<typeof sourcingDedupStrengthSchema>;
 export type SourcingReviewLabel = z.infer<typeof sourcingReviewLabelSchema>;
+export type SourcingIdentityLabel = z.infer<typeof sourcingIdentityLabelSchema>;
+export type SourcingCandidateDecision = z.infer<typeof sourcingCandidateDecisionSchema>;
+export type SourcingReviewStatus = z.infer<typeof sourcingReviewStatusSchema>;
 export type CreateSourceRunInput = z.infer<typeof createSourceRunSchema>;
 export type SourceRunRecord = z.infer<typeof sourceRunRecordSchema>;
 export type SourceRecordUpsertInput = z.infer<typeof sourceRecordUpsertSchema>;

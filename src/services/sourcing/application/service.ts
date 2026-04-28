@@ -13,6 +13,9 @@ import {
 import type {
   ApprovedEntity,
   BatchUpsertSourceRecordsInput,
+  SourcingCandidateDecision,
+  SourcingIdentityLabel,
+  SourcingReviewStatus,
   CreateReviewLabelInput,
   CreateSourceRunInput,
   DedupCandidate,
@@ -88,8 +91,37 @@ const dedupStatusRank: Record<DedupCandidate['status'], number> = {
   pending_review: 1,
   unsure: 2,
   not_same_person: 3,
+  rejected_bad_record: 3,
+  rejected_not_relevant: 3,
   same_person: 4,
+  approved_candidate: 5,
 };
+
+export type SourcingRepositoryPort = Pick<
+  SourcingRepository,
+  | 'createSourceRun'
+  | 'getSourceRun'
+  | 'listSourceRuns'
+  | 'updateSourceRun'
+  | 'upsertSourceRecords'
+  | 'getSourceRecordsByIds'
+  | 'listSourceRecordsForRun'
+  | 'countSourceRecordsForRun'
+  | 'upsertEvidence'
+  | 'getEvidenceByIds'
+  | 'listEvidenceBySourceRecordIds'
+  | 'listEvidenceByValueHash'
+  | 'countEvidenceForRun'
+  | 'upsertDedupCandidate'
+  | 'getDedupCandidate'
+  | 'listDedupCandidates'
+  | 'countDedupCandidatesForRun'
+  | 'listRecordsByNameInstitutionKey'
+  | 'createReviewLabel'
+  | 'markDedupCandidatesReviewed'
+  | 'upsertApprovedEntity'
+  | 'listApprovedEntities'
+>;
 
 function buildCandidateGroupId(candidate: Pick<DedupCandidate, 'entityType' | 'sourceRecordIds'>): string {
   return stableHash(`dedup-group:${candidate.entityType}:${sortedUnique(candidate.sourceRecordIds).join(':')}`).slice(0, 32);
@@ -97,6 +129,102 @@ function buildCandidateGroupId(candidate: Pick<DedupCandidate, 'entityType' | 's
 
 function buildCandidateGroupKey(candidate: Pick<DedupCandidate, 'entityType' | 'sourceRecordIds'>): string {
   return `${candidate.entityType}:${sortedUnique(candidate.sourceRecordIds).join(':')}`;
+}
+
+function normalizeReviewSignal(value: string): string | null {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+    .replace(/[^a-z0-9_:-]/g, '');
+  return /^[a-z][a-z0-9_:-]{1,79}$/.test(normalized) ? normalized : null;
+}
+
+function collectSignalValues(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return value.trim() ? [value] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectSignalValues(entry));
+  }
+  return [];
+}
+
+function suggestedSignalsFromRecord(record: SourceRecord): string[] {
+  return sortedUnique(
+    [
+      ...collectSignalValues(record.rawSummary?.suggestedSignals),
+      ...collectSignalValues(record.raw?.suggestedSignals),
+      ...collectSignalValues(record.display?.suggestedSignals),
+    ]
+      .map((signal) => normalizeReviewSignal(signal))
+      .filter((signal): signal is string => Boolean(signal)),
+  );
+}
+
+function collectSuggestedSignals(records: SourceRecord[]): string[] {
+  return sortedUnique(records.flatMap((record) => suggestedSignalsFromRecord(record)));
+}
+
+function isSingletonCandidate(candidate: DedupCandidate): boolean {
+  return candidate.sourceRecordIds.length === 1 || candidate.reasonCodes.includes('singleton_review');
+}
+
+function resolveIdentityLabel(
+  input: CreateReviewLabelInput,
+  candidate: DedupCandidate,
+): SourcingIdentityLabel | null {
+  if (input.identityLabel !== undefined) {
+    return input.identityLabel;
+  }
+  if (input.label) {
+    return input.label;
+  }
+  return isSingletonCandidate(candidate) ? null : 'unsure';
+}
+
+function resolveCandidateDecision(input: CreateReviewLabelInput): SourcingCandidateDecision {
+  if (input.candidateDecision) {
+    return input.candidateDecision;
+  }
+  if (input.label === 'same_person') {
+    return 'approve_candidate';
+  }
+  return 'unsure';
+}
+
+function statusForReview(input: {
+  candidate: DedupCandidate;
+  identityLabel: SourcingIdentityLabel | null;
+  candidateDecision: SourcingCandidateDecision;
+}): SourcingReviewStatus {
+  if (
+    input.candidateDecision === 'approve_candidate' &&
+    (isSingletonCandidate(input.candidate) || input.identityLabel === 'same_person')
+  ) {
+    return 'approved_candidate';
+  }
+  if (input.candidateDecision === 'reject_bad_record') {
+    return 'rejected_bad_record';
+  }
+  if (input.candidateDecision === 'reject_not_relevant') {
+    return 'rejected_not_relevant';
+  }
+  if (input.identityLabel === 'not_same_person') {
+    return 'not_same_person';
+  }
+  return 'unsure';
+}
+
+function shouldMaterializeApprovedEntity(input: {
+  candidate: DedupCandidate;
+  identityLabel: SourcingIdentityLabel | null;
+  candidateDecision: SourcingCandidateDecision;
+}): boolean {
+  if (input.candidateDecision !== 'approve_candidate') {
+    return false;
+  }
+  return isSingletonCandidate(input.candidate) || input.identityLabel === 'same_person';
 }
 
 function aggregateDedupCandidates(candidates: DedupCandidate[]): DedupCandidate[] {
@@ -140,7 +268,7 @@ function aggregateDedupCandidates(candidates: DedupCandidate[]): DedupCandidate[
 }
 
 export class SourcingService {
-  constructor(private readonly repository = new SourcingRepository()) {}
+  constructor(private readonly repository: SourcingRepositoryPort = new SourcingRepository()) {}
 
   async createSourceRun(input: CreateSourceRunInput): Promise<SourceRunRecord> {
     const now = new Date().toISOString();
@@ -292,21 +420,42 @@ export class SourcingService {
     const { candidate, rawCandidates } = resolved;
 
     const now = new Date().toISOString();
+    const [sourceRecords, evidence] = await Promise.all([
+      this.repository.getSourceRecordsByIds(candidate.sourceRecordIds),
+      this.repository.listEvidenceBySourceRecordIds(candidate.sourceRecordIds),
+    ]);
+    const identityLabel = resolveIdentityLabel(input, candidate);
+    const candidateDecision = resolveCandidateDecision(input);
+    const suggestedSignals = collectSuggestedSignals(sourceRecords);
+    const confirmedSignals = sortedUnique(
+      (input.confirmedSignals === undefined ? suggestedSignals : input.confirmedSignals)
+        .map((signal) => normalizeReviewSignal(signal))
+        .filter((signal): signal is string => Boolean(signal)),
+    );
     const reviewLabel: ReviewLabelRecord = {
       id: randomUUID(),
-      ...input,
+      dedupCandidateId: input.dedupCandidateId,
+      identityLabel,
+      candidateDecision,
+      reviewerId: input.reviewerId,
+      notes: input.notes,
+      suggestedSignals,
+      confirmedSignals,
+      sourceRecordIds: sortedUnique(sourceRecords.map((record) => record.id)),
+      evidenceIds: sortedUnique(evidence.map((entry) => entry.id)),
       createdAt: now,
       updatedAt: now,
     };
 
     await this.repository.createReviewLabel(reviewLabel);
-    await this.repository.markDedupCandidatesReviewed(rawCandidates, input.label, now);
+    const reviewedStatus = statusForReview({ candidate, identityLabel, candidateDecision });
+    await this.repository.markDedupCandidatesReviewed(rawCandidates, reviewedStatus, now);
 
-    if (input.label !== 'same_person') {
+    if (!shouldMaterializeApprovedEntity({ candidate, identityLabel, candidateDecision })) {
       return { reviewLabel, approvedEntity: null };
     }
 
-    const approvedEntity = await this.materializeApprovedEntity(candidate, reviewLabel.id, now);
+    const approvedEntity = await this.materializeApprovedEntity(candidate, reviewLabel, now);
     return { reviewLabel, approvedEntity };
   }
 
@@ -448,7 +597,7 @@ export class SourcingService {
 
   private async materializeApprovedEntity(
     candidate: DedupCandidate,
-    reviewLabelId: string,
+    reviewLabel: ReviewLabelRecord,
     now: string,
   ): Promise<ApprovedEntity> {
     const [sourceRecords, evidence] = await Promise.all([
@@ -464,13 +613,15 @@ export class SourcingService {
       status: 'approved',
       sourceRecordIds,
       evidenceIds: sortedUnique(evidence.map((entry) => entry.id)),
-      approvedByReviewLabelId: reviewLabelId,
+      approvedByReviewLabelId: reviewLabel.id,
       displayName: candidate.displayName ?? pickDisplayName(sourceRecords),
       emails: valuesFromEvidence(evidence, 'email'),
       homepages: valuesFromEvidence(evidence, 'homepage'),
       githubUrls: valuesFromEvidence(evidence, 'github'),
       orcids: valuesFromEvidence(evidence, 'orcid'),
       institutions: valuesFromEvidence(evidence, 'institution'),
+      suggestedSignals: reviewLabel.suggestedSignals,
+      confirmedSignals: reviewLabel.confirmedSignals,
       createdAt: now,
       updatedAt: now,
     };

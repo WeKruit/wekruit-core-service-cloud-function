@@ -130,8 +130,11 @@ app.get('/api/sourcing/dedup-candidates', async (req, res, next) => {
     const includeDetails = req.query.include === 'details';
     const status = [
       'pending_review',
+      'approved_candidate',
       'same_person',
       'not_same_person',
+      'rejected_bad_record',
+      'rejected_not_relevant',
       'unsure',
       'suppressed',
     ].includes(requestedStatus ?? '')

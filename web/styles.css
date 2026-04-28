@@ -340,8 +340,9 @@ textarea {
 
 .toolbar {
   display: grid;
-  grid-template-columns: 220px minmax(260px, 360px);
+  grid-template-columns: repeat(4, minmax(150px, 1fr)) minmax(220px, 1.35fr);
   gap: 0.7rem;
+  width: min(100%, 980px);
 }
 
 .field {
@@ -573,6 +574,63 @@ textarea {
 .signal-list {
   display: grid;
   gap: 0.42rem;
+}
+
+.review-signals {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.helper-text {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  line-height: 1.42;
+}
+
+.signal-choice-grid {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.signal-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.48rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 253, 250, 0.74);
+}
+
+.signal-choice input {
+  width: auto;
+  margin: 0;
+}
+
+.signal-choice__label {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 520;
+  overflow-wrap: anywhere;
+}
+
+.signal-choice__meta {
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.signal-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+}
+
+.signal-add-row button {
+  white-space: nowrap;
 }
 
 .signal-row {

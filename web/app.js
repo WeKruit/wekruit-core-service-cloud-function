@@ -43,6 +43,17 @@ const FIELD_DEFINITIONS = [
   ["source_native_id", "Source ID"],
 ];
 
+const REVIEW_STATUS_OPTIONS = [
+  ["pending_review", "Pending"],
+  ["", "All statuses"],
+  ["approved_candidate", "Approved"],
+  ["not_same_person", "Kept separate"],
+  ["rejected_bad_record", "Bad record"],
+  ["rejected_not_relevant", "Not relevant"],
+  ["unsure", "Held"],
+  ["suppressed", "Suppressed"],
+];
+
 const state = {
   page: normalizePage(window.location.hash.replace(/^#/, "") || "review"),
   runs: [],
@@ -50,6 +61,9 @@ const state = {
   approved: [],
   selectedJobRunId: "",
   reviewRunId: "",
+  reviewStatusFilter: "pending_review",
+  reviewSourceFilter: "",
+  reviewSignalFilter: "",
   selectedCandidateId: "",
   selectedApprovedId: "",
   reviewSearch: "",
@@ -57,6 +71,7 @@ const state = {
   reviewSubmitting: false,
   reviewMessage: "",
   reviewMessageStatus: "",
+  reviewSignalSelections: {},
 };
 
 const elements = {
@@ -79,6 +94,9 @@ const elements = {
   openRunReviewButton: document.querySelector("#openRunReviewButton"),
   reviewMeta: document.querySelector("#reviewMeta"),
   reviewRunFilter: document.querySelector("#reviewRunFilter"),
+  reviewStatusFilter: document.querySelector("#reviewStatusFilter"),
+  reviewSourceFilter: document.querySelector("#reviewSourceFilter"),
+  reviewSignalFilter: document.querySelector("#reviewSignalFilter"),
   reviewSearchInput: document.querySelector("#reviewSearchInput"),
   reviewTableBody: document.querySelector("#reviewTableBody"),
   reviewDetailTitle: document.querySelector("#reviewDetailTitle"),
@@ -87,6 +105,8 @@ const elements = {
   reviewNote: document.querySelector("#reviewNote"),
   reviewApproveButton: document.querySelector("#reviewApproveButton"),
   reviewSeparateButton: document.querySelector("#reviewSeparateButton"),
+  reviewRejectBadButton: document.querySelector("#reviewRejectBadButton"),
+  reviewRejectNotRelevantButton: document.querySelector("#reviewRejectNotRelevantButton"),
   reviewHoldButton: document.querySelector("#reviewHoldButton"),
   reviewResult: document.querySelector("#reviewResult"),
   approvedMeta: document.querySelector("#approvedMeta"),
@@ -204,6 +224,23 @@ function collectNonEmpty(...values) {
   return uniqueList(values.flatMap((value) => flattenStrings(value)));
 }
 
+function normalizeSignal(value) {
+  const normalized = stringValue(value)
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:-]/g, "");
+  return /^[a-z][a-z0-9_:-]{1,79}$/.test(normalized) ? normalized : "";
+}
+
+function signalValues(...values) {
+  return uniqueList(
+    values
+      .flatMap((value) => flattenStrings(value))
+      .map((value) => normalizeSignal(value))
+      .filter(Boolean),
+  );
+}
+
 async function requestJson(path, options = {}) {
   const response = await fetch(joinUrl(API_BASE_URL, path), {
     headers: {
@@ -225,13 +262,13 @@ async function requestJson(path, options = {}) {
 }
 
 function statusVariant(status) {
-  if (status === "completed" || status === "approved" || status === "same_person") {
+  if (status === "completed" || status === "approved" || status === "same_person" || status === "approved_candidate") {
     return "success";
   }
   if (status === "pending_review" || status === "medium") {
     return "warning";
   }
-  if (status === "failed" || status === "not_same_person") {
+  if (status === "failed" || status === "not_same_person" || status === "rejected_bad_record" || status === "rejected_not_relevant") {
     return "danger";
   }
   return "neutral";
@@ -297,6 +334,66 @@ function runReviewStats(runId) {
   return reviewStatsByRun().get(runId) || { total: 0, pending: 0, reviewed: 0 };
 }
 
+function sourceKeysForItem(item) {
+  return uniqueList(
+    arrayValue(item?.sourceRecords)
+      .flatMap((record) => [record.source, record.sourceName])
+      .map((source) => stringValue(source).toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function suggestedSignalsForItem(item) {
+  return uniqueList(
+    arrayValue(item?.sourceRecords).flatMap((record) =>
+      signalValues(
+        record?.rawSummary?.suggestedSignals,
+        record?.raw?.suggestedSignals,
+        record?.display?.suggestedSignals,
+      ),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+}
+
+function confirmedSignalsForApproved(entity) {
+  if (Array.isArray(entity?.confirmedSignals)) {
+    return signalValues(entity.confirmedSignals);
+  }
+  return signalValues(entity?.suggestedSignals);
+}
+
+function candidateSignalSelectionId(item) {
+  return candidateObject(item)?.id || "";
+}
+
+function ensureSignalSelection(item) {
+  const id = candidateSignalSelectionId(item);
+  if (!id) {
+    return [];
+  }
+  if (!state.reviewSignalSelections[id]) {
+    state.reviewSignalSelections[id] = suggestedSignalsForItem(item);
+  }
+  return state.reviewSignalSelections[id];
+}
+
+function setSignalSelection(item, signals) {
+  const id = candidateSignalSelectionId(item);
+  if (!id) {
+    return;
+  }
+  state.reviewSignalSelections[id] = uniqueList(signals.map((signal) => normalizeSignal(signal)).filter(Boolean))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function selectedSignalsForItem(item) {
+  return ensureSignalSelection(item).slice();
+}
+
+function isSingletonCandidate(candidate, item) {
+  return arrayValue(candidate?.reasonCodes).includes("singleton_review") || arrayValue(item?.sourceRecords).length <= 1;
+}
+
 function sortRuns(runs) {
   const statusRank = {
     running: 0,
@@ -333,13 +430,22 @@ function getSelectedJobRun() {
 }
 
 function filteredReviewCandidates() {
-  return pendingCandidatesAll()
+  return state.candidates
     .filter((item) => {
       const candidate = candidateObject(item);
       if (!candidate) {
         return false;
       }
-      if (state.reviewRunId && candidate.createdFromSourceRunId !== state.reviewRunId) {
+      if (state.reviewStatusFilter && candidate.status !== state.reviewStatusFilter) {
+        return false;
+      }
+      if (state.reviewRunId && runIdForCandidate(item) !== state.reviewRunId) {
+        return false;
+      }
+      if (state.reviewSourceFilter && !sourceKeysForItem(item).includes(state.reviewSourceFilter)) {
+        return false;
+      }
+      if (state.reviewSignalFilter && !suggestedSignalsForItem(item).includes(state.reviewSignalFilter)) {
         return false;
       }
       if (!state.reviewSearch) {
@@ -348,6 +454,7 @@ function filteredReviewCandidates() {
       const haystack = [
         stringValue(candidate.displayName),
         ...matchedFieldsForCandidate(candidate),
+        ...suggestedSignalsForItem(item),
         ...arrayValue(item.sourceRecords).flatMap((record) => {
           const recordInfo = recordData(record);
           return [
@@ -387,6 +494,7 @@ function filteredApprovedEntities() {
       ...arrayValue(entity.institutions),
       ...arrayValue(entity.orcids),
       ...arrayValue(entity.githubUrls),
+      ...confirmedSignalsForApproved(entity),
     ]
       .join(" ")
       .toLowerCase();
@@ -416,7 +524,11 @@ function ensureSelections() {
   const currentReviewPending = state.reviewRunId ? runReviewStats(state.reviewRunId).pending : 0;
   const fallbackPending = defaultRunId ? runReviewStats(defaultRunId).pending : 0;
 
-  if ((!state.reviewRunId || (currentReviewPending === 0 && fallbackPending > 0)) && defaultRunId) {
+  if (
+    (!state.reviewRunId ||
+      (state.reviewStatusFilter === "pending_review" && currentReviewPending === 0 && fallbackPending > 0)) &&
+    defaultRunId
+  ) {
     state.reviewRunId = defaultRunId;
   }
 
@@ -514,6 +626,9 @@ function sourceSummary(item) {
 }
 
 function tableSourceMeta(candidate) {
+  if (candidate?.status && candidate.status !== "pending_review") {
+    return displayLabel(candidate.status);
+  }
   if (arrayValue(candidate?.reasonCodes).includes("singleton_review")) {
     return "Single-source review";
   }
@@ -708,6 +823,39 @@ function renderSignalList(item, candidate) {
           `;
         })
         .join("")}
+    </div>
+  `;
+}
+
+function renderReviewSignalControls(item) {
+  const suggestedSignals = suggestedSignalsForItem(item);
+  const selectedSignals = selectedSignalsForItem(item);
+  const allSignals = uniqueList([...suggestedSignals, ...selectedSignals]).sort((left, right) => left.localeCompare(right));
+
+  const signalControls = allSignals.length
+    ? allSignals
+        .map((signal) => {
+          const checked = selectedSignals.includes(signal) ? "checked" : "";
+          const origin = suggestedSignals.includes(signal) ? "Suggested" : "Reviewer added";
+          return `
+            <label class="signal-choice">
+              <input type="checkbox" data-review-signal="${escapeHtml(signal)}" ${checked} />
+              <span class="signal-choice__label">${escapeHtml(displayLabel(signal))}</span>
+              <span class="signal-choice__meta">${escapeHtml(origin)}</span>
+            </label>
+          `;
+        })
+        .join("")
+    : `<div class="subtle-callout">No relevance signals were suggested. Add one if the evidence supports it.</div>`;
+
+  return `
+    <div class="review-signals">
+      <p class="helper-text">Confirm the signals that should be saved with this review decision.</p>
+      <div class="signal-choice-grid">${signalControls}</div>
+      <div class="signal-add-row">
+        <input data-review-signal-input type="text" placeholder="Add signal, e.g. robotics_project" />
+        <button type="button" class="button-muted" data-add-review-signal>Add signal</button>
+      </div>
     </div>
   `;
 }
@@ -913,6 +1061,36 @@ function renderReviewRunFilter() {
   ];
   elements.reviewRunFilter.innerHTML = options.join("");
   elements.reviewRunFilter.value = state.reviewRunId;
+
+  elements.reviewStatusFilter.innerHTML = REVIEW_STATUS_OPTIONS
+    .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
+    .join("");
+  elements.reviewStatusFilter.value = state.reviewStatusFilter;
+
+  const sourceOptions = uniqueList(
+    state.candidates.flatMap((item) =>
+      arrayValue(item?.sourceRecords).map((record) => stringValue(record.source || record.sourceName).toLowerCase()).filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+  if (state.reviewSourceFilter && !sourceOptions.includes(state.reviewSourceFilter)) {
+    state.reviewSourceFilter = "";
+  }
+  elements.reviewSourceFilter.innerHTML = [
+    `<option value="">All sources</option>`,
+    ...sourceOptions.map((source) => `<option value="${escapeHtml(source)}">${escapeHtml(displayLabel(source))}</option>`),
+  ].join("");
+  elements.reviewSourceFilter.value = state.reviewSourceFilter;
+
+  const signalOptions = uniqueList(state.candidates.flatMap((item) => suggestedSignalsForItem(item)))
+    .sort((left, right) => left.localeCompare(right));
+  if (state.reviewSignalFilter && !signalOptions.includes(state.reviewSignalFilter)) {
+    state.reviewSignalFilter = "";
+  }
+  elements.reviewSignalFilter.innerHTML = [
+    `<option value="">All signals</option>`,
+    ...signalOptions.map((signal) => `<option value="${escapeHtml(signal)}">${escapeHtml(displayLabel(signal))}</option>`),
+  ].join("");
+  elements.reviewSignalFilter.value = state.reviewSignalFilter;
 }
 
 function renderReviewTable() {
@@ -963,11 +1141,19 @@ function renderReviewTable() {
 
 function renderReviewDetail() {
   const item = getSelectedCandidateItem();
-  const disableActions = !item || state.reviewSubmitting;
+  const candidate = candidateObject(item);
+  const disableActions = !item || candidate?.status !== "pending_review" || state.reviewSubmitting;
+  const singleton = isSingletonCandidate(candidate, item);
 
   elements.reviewApproveButton.disabled = disableActions;
   elements.reviewSeparateButton.disabled = disableActions;
+  elements.reviewRejectBadButton.disabled = disableActions;
+  elements.reviewRejectNotRelevantButton.disabled = disableActions;
   elements.reviewHoldButton.disabled = disableActions;
+  elements.reviewApproveButton.textContent = singleton ? "Approve candidate" : "Approve candidate";
+  elements.reviewSeparateButton.hidden = singleton;
+  elements.reviewRejectBadButton.hidden = false;
+  elements.reviewRejectNotRelevantButton.hidden = false;
   elements.reviewResult.textContent = state.reviewMessage;
   elements.reviewResult.dataset.status = state.reviewMessageStatus;
 
@@ -978,7 +1164,6 @@ function renderReviewDetail() {
     return;
   }
 
-  const candidate = candidateObject(item);
   const sourceRecords = arrayValue(item.sourceRecords);
   const primaryEvidence = bestEvidence(item);
   const leftRecord = recordData(sourceRecords[0] || {});
@@ -1011,6 +1196,11 @@ function renderReviewDetail() {
     <section class="detail-section">
       <h4>Matched signals</h4>
       ${renderSignalList(item, candidate)}
+    </section>
+
+    <section class="detail-section">
+      <h4>Candidate relevance signals</h4>
+      ${renderReviewSignalControls(item)}
     </section>
 
     <section class="detail-section">
@@ -1093,6 +1283,7 @@ function renderApprovedDetail() {
         <div class="fact-row"><span class="fact-label">GitHub</span><div class="fact-value">${renderMaybeLinks(arrayValue(entity.githubUrls))}</div></div>
         <div class="fact-row"><span class="fact-label">ORCID</span><div class="fact-value mono">${escapeHtml(arrayValue(entity.orcids).join(", ") || "—")}</div></div>
         <div class="fact-row"><span class="fact-label">Institutions</span><div class="fact-value">${escapeHtml(arrayValue(entity.institutions).join(", ") || "—")}</div></div>
+        <div class="fact-row"><span class="fact-label">Signals</span><div class="fact-value">${confirmedSignalsForApproved(entity).map((signal) => renderPill(displayLabel(signal), "accent")).join(" ") || "—"}</div></div>
         <div class="fact-row"><span class="fact-label">Created</span><div class="fact-value">${escapeHtml(formatDateTime(entity.createdAt))}</div></div>
       </div>
     </section>
@@ -1171,28 +1362,75 @@ async function loadData() {
   }
 }
 
-async function submitReview(label) {
+function reviewActionLabel(action) {
+  const labels = {
+    approve_candidate: "Approve candidate",
+    keep_separate: "Keep separate",
+    reject_bad_record: "Bad record",
+    reject_not_relevant: "Not relevant",
+    hold: "Hold",
+  };
+  return labels[action] || displayLabel(action);
+}
+
+function reviewPayloadForAction(action, item) {
+  const candidate = candidateObject(item);
+  const singleton = isSingletonCandidate(candidate, item);
+  if (action === "approve_candidate") {
+    return {
+      identityLabel: singleton ? null : "same_person",
+      candidateDecision: "approve_candidate",
+    };
+  }
+  if (action === "keep_separate") {
+    return {
+      identityLabel: "not_same_person",
+      candidateDecision: "unsure",
+    };
+  }
+  if (action === "reject_bad_record") {
+    return {
+      identityLabel: singleton ? null : "unsure",
+      candidateDecision: "reject_bad_record",
+    };
+  }
+  if (action === "reject_not_relevant") {
+    return {
+      identityLabel: singleton ? null : "same_person",
+      candidateDecision: "reject_not_relevant",
+    };
+  }
+  return {
+    identityLabel: singleton ? null : "unsure",
+    candidateDecision: "unsure",
+  };
+}
+
+async function submitReview(action) {
   const item = getSelectedCandidateItem();
-  if (!item) {
+  const candidate = candidateObject(item);
+  if (!item || candidate?.status !== "pending_review") {
     return;
   }
 
   state.reviewSubmitting = true;
-  state.reviewMessage = `Saving ${displayLabel(label)}...`;
+  state.reviewMessage = `Saving ${reviewActionLabel(action)}...`;
   state.reviewMessageStatus = "";
   renderReviewDetail();
 
   try {
+    const decision = reviewPayloadForAction(action, item);
     await requestJson("/review-labels", {
       method: "POST",
       body: JSON.stringify({
         dedupCandidateId: candidateObject(item)?.id,
-        label,
+        ...decision,
+        confirmedSignals: selectedSignalsForItem(item),
         notes: elements.reviewNote.value.trim(),
       }),
     });
     elements.reviewNote.value = "";
-    state.reviewMessage = `${displayLabel(label)} saved`;
+    state.reviewMessage = `${reviewActionLabel(action)} saved`;
     state.reviewMessageStatus = "success";
     await loadData();
   } catch (error) {
@@ -1233,6 +1471,24 @@ function bindEvents() {
 
   elements.reviewRunFilter.addEventListener("change", () => {
     state.reviewRunId = elements.reviewRunFilter.value;
+    ensureSelections();
+    render();
+  });
+
+  elements.reviewStatusFilter.addEventListener("change", () => {
+    state.reviewStatusFilter = elements.reviewStatusFilter.value;
+    ensureSelections();
+    render();
+  });
+
+  elements.reviewSourceFilter.addEventListener("change", () => {
+    state.reviewSourceFilter = elements.reviewSourceFilter.value;
+    ensureSelections();
+    render();
+  });
+
+  elements.reviewSignalFilter.addEventListener("change", () => {
+    state.reviewSignalFilter = elements.reviewSignalFilter.value;
     ensureSelections();
     render();
   });
@@ -1280,11 +1536,43 @@ function bindEvents() {
   });
 
   document.addEventListener("click", (event) => {
-    const actionButton = event.target.closest("[data-review-label]");
+    const addSignalButton = event.target.closest("[data-add-review-signal]");
+    if (addSignalButton) {
+      const item = getSelectedCandidateItem();
+      const input = elements.reviewDetailBody.querySelector("[data-review-signal-input]");
+      const signal = normalizeSignal(input?.value || "");
+      if (item && signal) {
+        setSignalSelection(item, [...selectedSignalsForItem(item), signal]);
+        renderReviewDetail();
+      }
+      return;
+    }
+
+    const actionButton = event.target.closest("[data-review-action]");
     if (!actionButton) {
       return;
     }
-    void submitReview(actionButton.getAttribute("data-review-label") || "unsure");
+    void submitReview(actionButton.getAttribute("data-review-action") || "hold");
+  });
+
+  document.addEventListener("change", (event) => {
+    const signalInput = event.target.closest("[data-review-signal]");
+    if (!signalInput) {
+      return;
+    }
+    const item = getSelectedCandidateItem();
+    const signal = normalizeSignal(signalInput.getAttribute("data-review-signal") || "");
+    if (!item || !signal) {
+      return;
+    }
+    const current = new Set(selectedSignalsForItem(item));
+    if (signalInput.checked) {
+      current.add(signal);
+    } else {
+      current.delete(signal);
+    }
+    setSignalSelection(item, [...current]);
+    renderReviewDetail();
   });
 
   window.addEventListener("hashchange", () => {

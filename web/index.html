@@ -101,6 +101,30 @@
                 <select id="reviewRunFilter"></select>
               </label>
 
+              <label class="field" for="reviewStatusFilter">
+                <span>Status</span>
+                <select id="reviewStatusFilter">
+                  <option value="pending_review">Pending</option>
+                  <option value="">All statuses</option>
+                  <option value="approved_candidate">Approved</option>
+                  <option value="not_same_person">Kept separate</option>
+                  <option value="rejected_bad_record">Bad record</option>
+                  <option value="rejected_not_relevant">Not relevant</option>
+                  <option value="unsure">Held</option>
+                  <option value="suppressed">Suppressed</option>
+                </select>
+              </label>
+
+              <label class="field" for="reviewSourceFilter">
+                <span>Source</span>
+                <select id="reviewSourceFilter"></select>
+              </label>
+
+              <label class="field" for="reviewSignalFilter">
+                <span>Signal</span>
+                <select id="reviewSignalFilter"></select>
+              </label>
+
               <label class="field field--search" for="reviewSearchInput">
                 <span>Search</span>
                 <input id="reviewSearchInput" type="search" placeholder="Name, email, institution, ORCID" />
@@ -147,9 +171,11 @@
                 </label>
 
                 <div class="action-row">
-                  <button id="reviewApproveButton" type="button" data-review-label="same_person">Approve merge</button>
-                  <button id="reviewSeparateButton" type="button" class="button-muted" data-review-label="not_same_person">Keep separate</button>
-                  <button id="reviewHoldButton" type="button" class="button-muted" data-review-label="unsure">Hold</button>
+                  <button id="reviewApproveButton" type="button" data-review-action="approve_candidate">Approve candidate</button>
+                  <button id="reviewSeparateButton" type="button" class="button-muted" data-review-action="keep_separate">Keep separate</button>
+                  <button id="reviewRejectBadButton" type="button" class="button-muted" data-review-action="reject_bad_record">Bad record</button>
+                  <button id="reviewRejectNotRelevantButton" type="button" class="button-muted" data-review-action="reject_not_relevant">Not relevant</button>
+                  <button id="reviewHoldButton" type="button" class="button-muted" data-review-action="hold">Hold</button>
                 </div>
 
                 <p id="reviewResult" class="detail-result" aria-live="polite"></p>
