@@ -431,6 +431,10 @@ textarea {
   background: rgba(43, 24, 10, 0.04);
 }
 
+.grid-table tbody tr[data-candidate-id] {
+  cursor: pointer;
+}
+
 .row-button {
   all: unset;
   display: grid;

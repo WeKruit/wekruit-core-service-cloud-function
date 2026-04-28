@@ -1113,7 +1113,7 @@ function renderReviewTable() {
       const proof = sharedValueSummary(item);
 
       return `
-        <tr class="${selectedClass}">
+        <tr class="${selectedClass}" data-candidate-id="${escapeHtml(candidate.id)}">
           <td>
             <button type="button" class="row-button" data-candidate-id="${escapeHtml(candidate.id)}">
               <span class="row-primary">${escapeHtml(candidate.displayName || "Unnamed candidate")}</span>
@@ -1516,11 +1516,11 @@ function bindEvents() {
   });
 
   elements.reviewTableBody.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-candidate-id]");
-    if (!button) {
+    const candidateTarget = event.target.closest("[data-candidate-id]");
+    if (!candidateTarget || !elements.reviewTableBody.contains(candidateTarget)) {
       return;
     }
-    state.selectedCandidateId = button.getAttribute("data-candidate-id") || "";
+    state.selectedCandidateId = candidateTarget.getAttribute("data-candidate-id") || "";
     renderReviewTable();
     renderReviewDetail();
   });
