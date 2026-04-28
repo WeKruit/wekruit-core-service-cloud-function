@@ -4,7 +4,7 @@
     "indexes": "firestore.indexes.json"
   },
   "functions": {
-    "source": ".",
+    "source": "deploy/sourcing-functions",
     "codebase": "core-service",
     "ignore": [
       "node_modules",
@@ -13,18 +13,14 @@
       "firebase-debug.*.log",
       "*.local",
       "firebase.json",
-      "tsconfig.json",
-      "tsconfig.dev.json",
-      ".eslintrc.js",
-      "src",
-      "database",
       "*.log"
     ],
     "predeploy": [
-      "npm --prefix \"$RESOURCE_DIR\" run build"
+      "npm run build:sourcing-bundle"
     ]
   },
   "hosting": {
+    "site": "wekruit-sourcing",
     "public": "web",
     "ignore": [
       "firebase.json",

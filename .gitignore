@@ -1,4 +1,5 @@
 lib
+deploy/
 node_modules
 .firebaserc
 .firebase

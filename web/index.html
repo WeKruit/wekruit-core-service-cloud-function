@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WeKruit Sourcing Review</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Halant:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <strong>WeKruit review</strong>
+          <span>Sourcing</span>
+        </div>
+
+        <nav class="topnav" aria-label="Sourcing sections">
+          <button id="navJobs" class="topnav__button" type="button" data-page="jobs">
+            <span>Jobs</span>
+            <span id="navJobsCount" class="topnav__count">0</span>
+          </button>
+          <button id="navReview" class="topnav__button is-active" type="button" data-page="review">
+            <span>Review</span>
+            <span id="navReviewCount" class="topnav__count">0</span>
+          </button>
+          <button id="navApproved" class="topnav__button" type="button" data-page="approved">
+            <span>Approved</span>
+            <span id="navApprovedCount" class="topnav__count">0</span>
+          </button>
+        </nav>
+
+        <div class="topbar__actions">
+          <span id="connectionStatus" class="status-badge">Loading</span>
+          <button id="refreshButton" type="button" class="button-muted">Refresh</button>
+        </div>
+      </header>
+
+      <main class="page-stack">
+        <section id="pageJobs" class="page" hidden>
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">Jobs</p>
+              <h2>Source runs</h2>
+            </div>
+            <p id="jobsMeta" class="page-meta">Loading runs...</p>
+          </div>
+
+          <div class="page-layout">
+            <section class="table-panel">
+              <div class="table-scroll">
+                <table class="grid-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Run</th>
+                      <th scope="col">Source</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Records</th>
+                      <th scope="col">Pending</th>
+                      <th scope="col">Evidence</th>
+                      <th scope="col">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody id="jobsTableBody">
+                    <tr>
+                      <td colspan="7" class="empty-row">Loading source runs...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="detail-panel">
+              <div class="detail-head">
+                <p class="eyebrow">Selected run</p>
+                <h3 id="jobsDetailTitle">No run selected</h3>
+                <p id="jobsDetailSubtitle" class="detail-subtitle">Pick a run to inspect status and jump into review.</p>
+              </div>
+              <div id="jobsDetailBody" class="detail-body">
+                <p class="empty-detail">Select a run from the table.</p>
+              </div>
+              <div class="detail-actions">
+                <button id="openRunReviewButton" type="button">Open review for this run</button>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="pageReview" class="page">
+          <div class="page-head page-head--controls">
+            <div>
+              <p class="eyebrow">Review</p>
+              <h2>Review queue</h2>
+            </div>
+
+            <div class="toolbar">
+              <label class="field" for="reviewRunFilter">
+                <span>Run scope</span>
+                <select id="reviewRunFilter"></select>
+              </label>
+
+              <label class="field field--search" for="reviewSearchInput">
+                <span>Search</span>
+                <input id="reviewSearchInput" type="search" placeholder="Name, email, institution, ORCID" />
+              </label>
+            </div>
+          </div>
+
+          <div class="page-layout">
+            <section class="table-panel">
+              <p id="reviewMeta" class="table-meta">Loading queue...</p>
+              <div class="table-scroll table-scroll--tall">
+                <table class="grid-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Candidate</th>
+                      <th scope="col">Match</th>
+                      <th scope="col">Sources</th>
+                      <th scope="col">Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody id="reviewTableBody">
+                    <tr>
+                      <td colspan="4" class="empty-row">Loading review queue...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="detail-panel">
+              <div class="detail-head">
+                <p class="eyebrow">Selected candidate</p>
+                <h3 id="reviewDetailTitle">Nothing selected</h3>
+                <p id="reviewDetailSubtitle" class="detail-subtitle">Select a queue row to compare the raw source values.</p>
+              </div>
+              <div id="reviewDetailBody" class="detail-body">
+                <p class="empty-detail">Select a queue row to see why it was flagged, which fields matched, and the source A / source B values.</p>
+              </div>
+
+              <div class="detail-actions detail-actions--stack">
+                <label class="field field--notes" for="reviewNote">
+                  <span>Review note</span>
+                  <textarea id="reviewNote" rows="3" placeholder="Write the reasoning that should be saved with this decision"></textarea>
+                </label>
+
+                <div class="action-row">
+                  <button id="reviewApproveButton" type="button" data-review-label="same_person">Approve merge</button>
+                  <button id="reviewSeparateButton" type="button" class="button-muted" data-review-label="not_same_person">Keep separate</button>
+                  <button id="reviewHoldButton" type="button" class="button-muted" data-review-label="unsure">Hold</button>
+                </div>
+
+                <p id="reviewResult" class="detail-result" aria-live="polite"></p>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="pageApproved" class="page" hidden>
+          <div class="page-head page-head--controls">
+            <div>
+              <p class="eyebrow">Approved</p>
+              <h2>Approved entities</h2>
+            </div>
+
+            <div class="toolbar">
+              <label class="field field--search" for="approvedSearchInput">
+                <span>Search</span>
+                <input id="approvedSearchInput" type="search" placeholder="Name, email, institution, homepage, ORCID" />
+              </label>
+            </div>
+          </div>
+
+          <div class="page-layout">
+            <section class="table-panel">
+              <p id="approvedMeta" class="table-meta">Loading approved entities...</p>
+              <div class="table-scroll table-scroll--tall">
+                <table class="grid-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Entity</th>
+                      <th scope="col">Emails</th>
+                      <th scope="col">ORCID</th>
+                      <th scope="col">Institutions</th>
+                      <th scope="col">Source records</th>
+                      <th scope="col">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody id="approvedTableBody">
+                    <tr>
+                      <td colspan="6" class="empty-row">Loading approved entities...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="detail-panel">
+              <div class="detail-head">
+                <p class="eyebrow">Approved detail</p>
+                <h3 id="approvedDetailTitle">Nothing selected</h3>
+                <p id="approvedDetailSubtitle" class="detail-subtitle">Select an approved entity to inspect the surviving fields.</p>
+              </div>
+              <div id="approvedDetailBody" class="detail-body">
+                <p class="empty-detail">Select an approved row to inspect the final person profile.</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
