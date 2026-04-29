@@ -1,5 +1,5 @@
 const API_BASE_URL = "/api/sourcing";
-const PAGE_IDS = new Set(["jobs", "review", "approved", "enrichment"]);
+const PAGE_IDS = new Set(["jobs", "review", "approved", "enrichment", "profiles"]);
 
 const REASON_CONFIG = {
   singleton_review: {
@@ -116,25 +116,36 @@ const state = {
   candidates: [],
   approved: [],
   enrichmentItems: [],
+  profiles: [],
+  profileDetails: {},
   selectedJobRunId: "",
   reviewRunId: "",
   reviewStatusFilter: "pending_review",
   reviewSourceFilter: "",
   reviewSignalFilter: "",
+  profileTrackFilter: "",
+  profileDomainFilter: "",
+  profileSourceFilter: "",
+  profileContactabilityFilter: "",
   selectedCandidateId: "",
   selectedApprovedId: "",
   selectedEnrichmentId: "",
+  selectedProfileId: "",
   reviewSearch: "",
   approvedSearch: "",
+  profileSearch: "",
   reviewSubmitting: false,
   approvedSubmitting: false,
   enrichmentSubmitting: false,
+  profileDetailsLoadingId: "",
   reviewMessage: "",
   reviewMessageStatus: "",
   approvedMessage: "",
   approvedMessageStatus: "",
   enrichmentMessage: "",
   enrichmentMessageStatus: "",
+  profileMessage: "",
+  profileMessageStatus: "",
   reviewSignalSelections: {},
 };
 
@@ -145,14 +156,17 @@ const elements = {
   navReview: document.querySelector("#navReview"),
   navApproved: document.querySelector("#navApproved"),
   navEnrichment: document.querySelector("#navEnrichment"),
+  navProfiles: document.querySelector("#navProfiles"),
   navJobsCount: document.querySelector("#navJobsCount"),
   navReviewCount: document.querySelector("#navReviewCount"),
   navApprovedCount: document.querySelector("#navApprovedCount"),
   navEnrichmentCount: document.querySelector("#navEnrichmentCount"),
+  navProfilesCount: document.querySelector("#navProfilesCount"),
   pageJobs: document.querySelector("#pageJobs"),
   pageReview: document.querySelector("#pageReview"),
   pageApproved: document.querySelector("#pageApproved"),
   pageEnrichment: document.querySelector("#pageEnrichment"),
+  pageProfiles: document.querySelector("#pageProfiles"),
   jobsMeta: document.querySelector("#jobsMeta"),
   jobsTableBody: document.querySelector("#jobsTableBody"),
   jobsDetailTitle: document.querySelector("#jobsDetailTitle"),
@@ -192,6 +206,16 @@ const elements = {
   enrichmentHoldButton: document.querySelector("#enrichmentHoldButton"),
   enrichmentRejectButton: document.querySelector("#enrichmentRejectButton"),
   enrichmentResult: document.querySelector("#enrichmentResult"),
+  profilesMeta: document.querySelector("#profilesMeta"),
+  profileTrackFilter: document.querySelector("#profileTrackFilter"),
+  profileDomainFilter: document.querySelector("#profileDomainFilter"),
+  profileSourceFilter: document.querySelector("#profileSourceFilter"),
+  profileContactabilityFilter: document.querySelector("#profileContactabilityFilter"),
+  profileSearchInput: document.querySelector("#profileSearchInput"),
+  profilesTableBody: document.querySelector("#profilesTableBody"),
+  profileDetailTitle: document.querySelector("#profileDetailTitle"),
+  profileDetailSubtitle: document.querySelector("#profileDetailSubtitle"),
+  profileDetailBody: document.querySelector("#profileDetailBody"),
 };
 
 function normalizePage(value) {
@@ -443,6 +467,10 @@ function pendingEnrichmentItems() {
   return state.enrichmentItems.filter((item) => item?.status === "pending_review");
 }
 
+function activeProfiles() {
+  return state.profiles.filter((profile) => (profile?.status || "active") === "active");
+}
+
 function filteredEnrichmentItems() {
   return state.enrichmentItems
     .slice()
@@ -451,6 +479,14 @@ function filteredEnrichmentItems() {
 
 function getSelectedEnrichmentItem() {
   return filteredEnrichmentItems().find((item) => item.id === state.selectedEnrichmentId) ?? null;
+}
+
+function getSelectedProfile() {
+  return filteredProfiles().find((profile) => profile.id === state.selectedProfileId) ?? null;
+}
+
+function getSelectedProfileDetails() {
+  return state.profileDetails[state.selectedProfileId] || null;
 }
 
 function commaList(value) {
@@ -623,6 +659,51 @@ function filteredApprovedEntities() {
   });
 }
 
+function filteredProfiles() {
+  return activeProfiles()
+    .filter((profile) => {
+      if (state.profileTrackFilter && profile.primaryTrack !== state.profileTrackFilter) {
+        return false;
+      }
+      if (
+        state.profileDomainFilter &&
+        !arrayValue(profile.industryDomainInterests).some((entry) => entry.domain === state.profileDomainFilter)
+      ) {
+        return false;
+      }
+      if (state.profileSourceFilter) {
+        const sourceKeys = uniqueList([...arrayValue(profile.sourceNames), ...arrayValue(profile.sourceDomains)])
+          .map((source) => stringValue(source).toLowerCase());
+        if (!sourceKeys.includes(state.profileSourceFilter)) {
+          return false;
+        }
+      }
+      if (state.profileContactabilityFilter && profile.contactability?.value !== state.profileContactabilityFilter) {
+        return false;
+      }
+      if (!state.profileSearch) {
+        return true;
+      }
+      const haystack = [
+        stringValue(profile.displayName),
+        stringValue(profile.primaryTrack),
+        stringValue(profile.careerStage?.value),
+        stringValue(profile.contactability?.value),
+        stringValue(profile.matchingSummary),
+        ...arrayValue(profile.sourceNames),
+        ...arrayValue(profile.sourceDomains),
+        ...arrayValue(profile.specializations).map((entry) => entry.specialization),
+        ...arrayValue(profile.skills).map((entry) => entry.skill),
+        ...arrayValue(profile.industryDomainInterests).map((entry) => entry.domain),
+        ...arrayValue(profile.proposedTags).map((entry) => entry.tag),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(state.profileSearch);
+    })
+    .sort((left, right) => new Date(right.updatedAt || 0).getTime() - new Date(left.updatedAt || 0).getTime());
+}
+
 function getSelectedCandidateItem() {
   return filteredReviewCandidates().find((item) => candidateObject(item)?.id === state.selectedCandidateId) ?? null;
 }
@@ -666,6 +747,11 @@ function ensureSelections() {
   const enrichmentItems = filteredEnrichmentItems();
   if (!enrichmentItems.some((item) => item.id === state.selectedEnrichmentId)) {
     state.selectedEnrichmentId = enrichmentItems[0]?.id || "";
+  }
+
+  const profileItems = filteredProfiles();
+  if (!profileItems.some((profile) => profile.id === state.selectedProfileId)) {
+    state.selectedProfileId = profileItems[0]?.id || "";
   }
 }
 
@@ -1626,12 +1712,300 @@ function renderEnrichmentDetail() {
   `;
 }
 
+function confidencePercent(value) {
+  const number = numberValue(value);
+  if (!number) {
+    return "";
+  }
+  return `${Math.round(number * 100)}%`;
+}
+
+function renderProfileFilters() {
+  const sourceOptions = uniqueList(
+    state.profiles.flatMap((profile) => [...arrayValue(profile.sourceNames), ...arrayValue(profile.sourceDomains)])
+      .map((source) => stringValue(source).toLowerCase())
+      .filter(Boolean),
+  ).sort((left, right) => left.localeCompare(right));
+
+  if (state.profileSourceFilter && !sourceOptions.includes(state.profileSourceFilter)) {
+    state.profileSourceFilter = "";
+  }
+
+  elements.profileTrackFilter.innerHTML = [
+    `<option value="">All tracks</option>`,
+    ...TRACK_VALUES.map((track) => `<option value="${escapeHtml(track)}">${escapeHtml(displayLabel(track))}</option>`),
+  ].join("");
+  elements.profileTrackFilter.value = state.profileTrackFilter;
+
+  elements.profileDomainFilter.innerHTML = [
+    `<option value="">All domains</option>`,
+    ...INDUSTRY_DOMAIN_VALUES.map((domain) => `<option value="${escapeHtml(domain)}">${escapeHtml(displayLabel(domain))}</option>`),
+  ].join("");
+  elements.profileDomainFilter.value = state.profileDomainFilter;
+
+  elements.profileSourceFilter.innerHTML = [
+    `<option value="">All sources</option>`,
+    ...sourceOptions.map((source) => `<option value="${escapeHtml(source)}">${escapeHtml(displayLabel(source))}</option>`),
+  ].join("");
+  elements.profileSourceFilter.value = state.profileSourceFilter;
+
+  elements.profileContactabilityFilter.innerHTML = [
+    `<option value="">Any contactability</option>`,
+    ...CONTACTABILITY_VALUES.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(displayLabel(value))}</option>`),
+  ].join("");
+  elements.profileContactabilityFilter.value = state.profileContactabilityFilter;
+}
+
+function renderProfileTable() {
+  const profiles = filteredProfiles();
+  elements.navProfilesCount.textContent = String(activeProfiles().length);
+  elements.profilesMeta.textContent = profiles.length
+    ? `${profiles.length} matching-ready profiles`
+    : "No final candidate profiles found";
+
+  if (!profiles.length) {
+    elements.profilesTableBody.innerHTML = `<tr><td colspan="6" class="empty-row">No profiles for the current filter.</td></tr>`;
+    return;
+  }
+
+  elements.profilesTableBody.innerHTML = profiles
+    .map((profile) => {
+      const selectedClass = profile.id === state.selectedProfileId ? "is-selected" : "";
+      const domains = arrayValue(profile.industryDomainInterests).map((entry) => displayLabel(entry.domain)).slice(0, 3);
+      const skills = arrayValue(profile.skills).map((entry) => entry.skill).slice(0, 3);
+      return `
+        <tr class="${selectedClass}" data-profile-id="${escapeHtml(profile.id)}">
+          <td>
+            <button type="button" class="row-button" data-profile-id="${escapeHtml(profile.id)}">
+              <span class="row-primary">${escapeHtml(profile.displayName || profile.id)}</span>
+              <span class="row-secondary mono">${escapeHtml(profile.id)}</span>
+            </button>
+          </td>
+          <td>${renderPill(displayLabel(profile.primaryTrack || "unknown_other"), "accent")}</td>
+          <td>
+            <div class="row-stack">
+              <span class="row-primary">${escapeHtml(domains.join(", ") || "—")}</span>
+              <span class="cell-subtle">${escapeHtml(skills.join(", ") || "No skills")}</span>
+            </div>
+          </td>
+          <td>${renderPill(displayLabel(profile.contactability?.value || "unknown"), statusVariant(profile.contactability?.value || "unknown"))}</td>
+          <td>${escapeHtml(arrayValue(profile.sourceNames).join(" + ") || "—")}</td>
+          <td>${escapeHtml(formatDateTime(profile.updatedAt || profile.createdAt))}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderProfileScoredItems(items, key, scoreKey = "confidence") {
+  const rows = arrayValue(items);
+  if (!rows.length) {
+    return "—";
+  }
+  return rows
+    .map((entry) => {
+      const confidence = confidencePercent(entry.score ?? entry[scoreKey]);
+      return `${escapeHtml(displayLabel(entry[key]))}${confidence ? ` <span class="cell-subtle">${escapeHtml(confidence)}</span>` : ""}`;
+    })
+    .join("<br />");
+}
+
+function renderProfileSkillItems(items) {
+  const rows = arrayValue(items);
+  if (!rows.length) {
+    return "—";
+  }
+  return rows
+    .map((entry) => {
+      const confidence = confidencePercent(entry.confidence);
+      return `${escapeHtml(entry.skill)}${confidence ? ` <span class="cell-subtle">${escapeHtml(confidence)}</span>` : ""}`;
+    })
+    .join("<br />");
+}
+
+function renderProfileEvidenceValue(entry) {
+  const value = stringValue(entry.normalizedValue) || stringValue(entry.rawValue) || "—";
+  const text = escapeHtml(value);
+  if (/^https?:\/\//.test(value)) {
+    return `<a class="inline-link" href="${text}" target="_blank" rel="noreferrer">${text}</a>`;
+  }
+  const sourceUrl = stringValue(entry.extractedFrom?.sourceUrl);
+  if (sourceUrl) {
+    return `<a class="inline-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">${text}</a>`;
+  }
+  return text;
+}
+
+function sourceLabelForEvidence(details, entry) {
+  const sourceRecord = arrayValue(details.sourceRecords).find((record) => record.id === entry.sourceRecordId);
+  return displayLabel(sourceRecord?.sourceName || entry.sourceName || "source");
+}
+
+function renderProfileFieldEvidence(details) {
+  const rows = arrayValue(details.fieldEvidence).filter((row) => arrayValue(row.evidence).length);
+  if (!rows.length) {
+    return `<p class="empty-detail">No field evidence was attached to this profile.</p>`;
+  }
+  return `
+    <div class="evidence-list">
+      ${rows
+        .map((row) => `
+          <div class="profile-evidence-group">
+            <div class="profile-evidence-group__field">${escapeHtml(displayLabel(row.field))}</div>
+            <div class="profile-evidence-group__items">
+              ${arrayValue(row.evidence)
+                .map((entry) => `
+                  <div class="evidence-row evidence-row--profile">
+                    <div class="evidence-field">${escapeHtml(evidenceTypeLabel(entry.evidenceType))}</div>
+                    <div class="row-stack">
+                      <span class="row-primary">${renderProfileEvidenceValue(entry)}</span>
+                      <span class="cell-subtle">${escapeHtml(sourceLabelForEvidence(details, entry))} · ${escapeHtml(entry.extractedFrom?.sourcePath || entry.sourceRecordId || "—")}</span>
+                    </div>
+                    <div class="cell-subtle">${escapeHtml(displayLabel(entry.quality || "low"))}</div>
+                  </div>
+                `)
+                .join("")}
+            </div>
+          </div>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
+function renderProfileSourceLineage(details) {
+  const rows = arrayValue(details.sourceRecords);
+  if (!rows.length) {
+    return `<p class="empty-detail">No source record summaries are attached.</p>`;
+  }
+  return `
+    <div class="source-grid">
+      ${rows
+        .map((record) => `
+          <article class="source-card">
+            <div class="source-card__head">
+              <div class="source-card__title">${escapeHtml(record.displayName || record.id)}</div>
+              <div class="source-card__meta">${escapeHtml(`${displayLabel(record.sourceName)} · ${displayLabel(record.sourceDomain)}`)}</div>
+            </div>
+            <div class="source-card__body">
+              <div class="source-field">
+                <div class="source-field__label">Source URL</div>
+                <div class="source-field__values">${renderMaybeLinks(record.sourceUrl ? [record.sourceUrl] : [])}</div>
+                <span></span>
+              </div>
+              <div class="source-field">
+                <div class="source-field__label">Native ID</div>
+                <div class="source-field__values">${renderSourceFieldValues(record.sourceNativeId ? [record.sourceNativeId] : [], true)}</div>
+                <span></span>
+              </div>
+              <div class="source-field">
+                <div class="source-field__label">Run</div>
+                <div class="source-field__values">${renderSourceFieldValues([record.sourceRunId], true)}</div>
+                <span></span>
+              </div>
+            </div>
+          </article>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
+function renderProfileReviewLineage(details) {
+  const reviewRows = arrayValue(details.reviewLabels);
+  const enrichmentReview = details.enrichmentReview;
+  return `
+    <div class="fact-grid">
+      <div class="fact-row"><span class="fact-label">Identity reviews</span><div class="fact-value">${escapeHtml(String(reviewRows.length))}</div></div>
+      <div class="fact-row"><span class="fact-label">Enrichment</span><div class="fact-value">${enrichmentReview ? renderPill(displayLabel(enrichmentReview.status), statusVariant(enrichmentReview.status)) : "—"}</div></div>
+      <div class="fact-row"><span class="fact-label">Reviewer</span><div class="fact-value">${escapeHtml(enrichmentReview?.reviewerId || "—")}</div></div>
+      <div class="fact-row"><span class="fact-label">Review note</span><div class="fact-value">${escapeHtml(enrichmentReview?.reviewNote || "—")}</div></div>
+    </div>
+    <div class="inline-list">
+      ${reviewRows.map((review) => renderPill(`${displayLabel(review.candidateDecision)} · ${review.id}`, "neutral")).join("") || renderPill("No identity reviews", "warning")}
+    </div>
+  `;
+}
+
+function renderProfileDetail() {
+  const profile = getSelectedProfile();
+  const details = getSelectedProfileDetails();
+  const loading = state.profileDetailsLoadingId && state.profileDetailsLoadingId === state.selectedProfileId;
+
+  if (!profile) {
+    elements.profileDetailTitle.textContent = "Nothing selected";
+    elements.profileDetailSubtitle.textContent = "Select a profile to inspect clean matching fields and lineage.";
+    elements.profileDetailBody.innerHTML = `<p class="empty-detail">Select a final profile row to see reviewed labels, evidence links, and source lineage.</p>`;
+    return;
+  }
+
+  elements.profileDetailTitle.textContent = profile.displayName || profile.id;
+  elements.profileDetailSubtitle.textContent = `${displayLabel(profile.primaryTrack || "unknown_other")} · v${profile.profileVersion || 1} · ${arrayValue(profile.sourceRecordIds).length} source records`;
+
+  if (!details) {
+    elements.profileDetailBody.innerHTML = `<p class="empty-detail">${loading ? "Loading profile detail..." : "Profile detail has not loaded yet."}</p>`;
+    return;
+  }
+
+  elements.profileDetailBody.innerHTML = `
+    <section class="detail-section">
+      <h4>Profile summary</h4>
+      <p class="detail-lead">${escapeHtml(profile.matchingSummary || "No matching summary saved.")}</p>
+      <div class="pill-row">
+        ${renderPill(displayLabel(profile.primaryTrack || "unknown_other"), "accent")}
+        ${renderPill(displayLabel(profile.contactability?.value || "unknown"), statusVariant(profile.contactability?.value || "unknown"))}
+        ${renderPill(displayLabel(profile.careerStage?.value || "unknown"), "neutral")}
+        ${renderPill(`v${profile.profileVersion || 1}`, "neutral")}
+      </div>
+    </section>
+
+    <section class="detail-section">
+      <h4>Matching fields</h4>
+      <div class="fact-grid">
+        <div class="fact-row"><span class="fact-label">Primary track</span><div class="fact-value">${escapeHtml(displayLabel(profile.primaryTrack || "unknown_other"))}</div></div>
+        <div class="fact-row"><span class="fact-label">Scored tracks</span><div class="fact-value">${renderProfileScoredItems(profile.scoredTracks, "track", "score")}</div></div>
+        <div class="fact-row"><span class="fact-label">Specializations</span><div class="fact-value">${renderProfileScoredItems(profile.specializations, "specialization")}</div></div>
+        <div class="fact-row"><span class="fact-label">Skills</span><div class="fact-value">${renderProfileSkillItems(profile.skills)}</div></div>
+        <div class="fact-row"><span class="fact-label">Domains</span><div class="fact-value">${renderProfileScoredItems(profile.industryDomainInterests, "domain")}</div></div>
+        <div class="fact-row"><span class="fact-label">Contactability</span><div class="fact-value">${escapeHtml(`${displayLabel(profile.contactability?.value || "unknown")} ${confidencePercent(profile.contactability?.confidence)}`.trim())}</div></div>
+        <div class="fact-row"><span class="fact-label">Career stage</span><div class="fact-value">${escapeHtml(`${displayLabel(profile.careerStage?.value || "unknown")} ${confidencePercent(profile.careerStage?.confidence)}`.trim())}</div></div>
+      </div>
+    </section>
+
+    <section class="detail-section">
+      <h4>Evidence by field</h4>
+      ${renderProfileFieldEvidence(details)}
+    </section>
+
+    <section class="detail-section">
+      <h4>Source lineage</h4>
+      ${renderProfileSourceLineage(details)}
+    </section>
+
+    <section class="detail-section">
+      <h4>Review lineage</h4>
+      ${renderProfileReviewLineage(details)}
+    </section>
+
+    <section class="detail-section">
+      <h4>Lineage IDs</h4>
+      <div class="inline-list">
+        ${renderPill(details.lineage.approvedEntityId, "neutral")}
+        ${renderPill(details.lineage.enrichmentRunId, "neutral")}
+        ${renderPill(details.lineage.enrichmentReviewItemId, "neutral")}
+        ${arrayValue(details.lineage.sourceRecordIds).map((id) => renderPill(id, "neutral")).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderNav() {
   const navConfig = [
     [elements.navJobs, "jobs"],
     [elements.navReview, "review"],
     [elements.navApproved, "approved"],
     [elements.navEnrichment, "enrichment"],
+    [elements.navProfiles, "profiles"],
   ];
 
   navConfig.forEach(([element, page]) => {
@@ -1642,6 +2016,7 @@ function renderNav() {
   elements.pageReview.hidden = state.page !== "review";
   elements.pageApproved.hidden = state.page !== "approved";
   elements.pageEnrichment.hidden = state.page !== "enrichment";
+  elements.pageProfiles.hidden = state.page !== "profiles";
 }
 
 function render() {
@@ -1655,6 +2030,9 @@ function render() {
   renderApprovedDetail();
   renderEnrichmentTable();
   renderEnrichmentDetail();
+  renderProfileFilters();
+  renderProfileTable();
+  renderProfileDetail();
 }
 
 async function loadData() {
@@ -1665,26 +2043,32 @@ async function loadData() {
   const previousCandidateId = state.selectedCandidateId;
   const previousApprovedId = state.selectedApprovedId;
   const previousEnrichmentId = state.selectedEnrichmentId;
+  const previousProfileId = state.selectedProfileId;
 
   try {
     await requestJson("/health");
-    const [runsPayload, candidatesPayload, approvedPayload, enrichmentPayload] = await Promise.all([
+    const [runsPayload, candidatesPayload, approvedPayload, enrichmentPayload, profilesPayload] = await Promise.all([
       requestJson("/source-runs?limit=50"),
       requestJson("/dedup-candidates?include=details"),
       requestJson("/approved-entities"),
       requestJson("/enrichment-review-items"),
+      requestJson("/candidate-profiles?status=active&limit=200"),
     ]);
 
     state.runs = sortRuns(normalizeListPayload(runsPayload));
     state.candidates = normalizeListPayload(candidatesPayload);
     state.approved = normalizeListPayload(approvedPayload);
     state.enrichmentItems = normalizeListPayload(enrichmentPayload);
+    state.profiles = normalizeListPayload(profilesPayload);
+    state.profileDetails = {};
     state.selectedJobRunId = previousJobRunId;
     state.reviewRunId = previousReviewRunId;
     state.selectedCandidateId = previousCandidateId;
     state.selectedApprovedId = previousApprovedId;
     state.selectedEnrichmentId = previousEnrichmentId;
+    state.selectedProfileId = previousProfileId;
     ensureSelections();
+    await loadSelectedProfileDetails();
     setConnectionStatus("Ready", "ready");
     render();
   } catch (error) {
@@ -1692,6 +2076,45 @@ async function loadData() {
     elements.reviewResult.textContent = error.message;
     elements.reviewResult.dataset.status = "error";
   }
+}
+
+async function loadProfileDetails(profileId) {
+  if (!profileId || state.profileDetails[profileId]) {
+    return;
+  }
+  state.profileDetailsLoadingId = profileId;
+  state.profileMessage = "";
+  state.profileMessageStatus = "";
+  renderProfileDetail();
+
+  try {
+    const payload = await requestJson(`/candidate-profiles/${encodeURIComponent(profileId)}`);
+    if (payload?.data) {
+      state.profileDetails[profileId] = payload.data;
+    }
+  } catch (error) {
+    state.profileMessage = error.message;
+    state.profileMessageStatus = "error";
+    if (profileId === state.selectedProfileId) {
+      elements.profileDetailBody.innerHTML = `<p class="empty-detail">${escapeHtml(error.message)}</p>`;
+    }
+  } finally {
+    if (state.profileDetailsLoadingId === profileId) {
+      state.profileDetailsLoadingId = "";
+    }
+  }
+}
+
+async function loadSelectedProfileDetails() {
+  await loadProfileDetails(state.selectedProfileId);
+}
+
+async function selectProfile(profileId) {
+  state.selectedProfileId = profileId;
+  renderProfileTable();
+  renderProfileDetail();
+  await loadProfileDetails(profileId);
+  renderProfileDetail();
 }
 
 function reviewActionLabel(action, item = null) {
@@ -1906,6 +2329,9 @@ async function submitEnrichmentDecision(action) {
 
 function setPage(page, updateHash = true) {
   state.page = normalizePage(page);
+  if (state.page === "profiles") {
+    void loadSelectedProfileDetails().then(() => renderProfileDetail());
+  }
   if (updateHash) {
     const nextHash = `#${state.page}`;
     if (window.location.hash !== nextHash) {
@@ -1925,6 +2351,7 @@ function bindEvents() {
   elements.navReview.addEventListener("click", () => setPage("review"));
   elements.navApproved.addEventListener("click", () => setPage("approved"));
   elements.navEnrichment.addEventListener("click", () => setPage("enrichment"));
+  elements.navProfiles.addEventListener("click", () => setPage("profiles"));
 
   elements.openRunReviewButton.addEventListener("click", () => {
     state.reviewRunId = state.selectedJobRunId;
@@ -1968,6 +2395,41 @@ function bindEvents() {
     render();
   });
 
+  elements.profileTrackFilter.addEventListener("change", () => {
+    state.profileTrackFilter = elements.profileTrackFilter.value;
+    ensureSelections();
+    render();
+    void loadSelectedProfileDetails().then(() => renderProfileDetail());
+  });
+
+  elements.profileDomainFilter.addEventListener("change", () => {
+    state.profileDomainFilter = elements.profileDomainFilter.value;
+    ensureSelections();
+    render();
+    void loadSelectedProfileDetails().then(() => renderProfileDetail());
+  });
+
+  elements.profileSourceFilter.addEventListener("change", () => {
+    state.profileSourceFilter = elements.profileSourceFilter.value;
+    ensureSelections();
+    render();
+    void loadSelectedProfileDetails().then(() => renderProfileDetail());
+  });
+
+  elements.profileContactabilityFilter.addEventListener("change", () => {
+    state.profileContactabilityFilter = elements.profileContactabilityFilter.value;
+    ensureSelections();
+    render();
+    void loadSelectedProfileDetails().then(() => renderProfileDetail());
+  });
+
+  elements.profileSearchInput.addEventListener("input", () => {
+    state.profileSearch = elements.profileSearchInput.value.trim().toLowerCase();
+    ensureSelections();
+    render();
+    void loadSelectedProfileDetails().then(() => renderProfileDetail());
+  });
+
   elements.jobsTableBody.addEventListener("click", (event) => {
     const button = event.target.closest("[data-run-id]");
     if (!button) {
@@ -2006,6 +2468,14 @@ function bindEvents() {
     state.selectedEnrichmentId = button.getAttribute("data-enrichment-id") || "";
     renderEnrichmentTable();
     renderEnrichmentDetail();
+  });
+
+  elements.profilesTableBody.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-profile-id]");
+    if (!button) {
+      return;
+    }
+    void selectProfile(button.getAttribute("data-profile-id") || "");
   });
 
   document.addEventListener("click", (event) => {
@@ -2062,6 +2532,9 @@ function bindEvents() {
 
   window.addEventListener("hashchange", () => {
     state.page = normalizePage(window.location.hash.replace(/^#/, ""));
+    if (state.page === "profiles") {
+      void loadSelectedProfileDetails().then(() => renderProfileDetail());
+    }
     render();
   });
 }

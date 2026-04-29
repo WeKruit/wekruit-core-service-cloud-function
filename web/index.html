@@ -34,6 +34,10 @@
             <span>Enrichment</span>
             <span id="navEnrichmentCount" class="topnav__count">0</span>
           </button>
+          <button id="navProfiles" class="topnav__button" type="button" data-page="profiles">
+            <span>Profiles</span>
+            <span id="navProfilesCount" class="topnav__count">0</span>
+          </button>
         </nav>
 
         <div class="topbar__actions">
@@ -297,9 +301,81 @@
             </aside>
           </div>
         </section>
+
+        <section id="pageProfiles" class="page" hidden>
+          <div class="page-head page-head--controls">
+            <div>
+              <p class="eyebrow">Profiles</p>
+              <h2>Final profiles</h2>
+            </div>
+
+            <div class="toolbar toolbar--profiles">
+              <label class="field" for="profileTrackFilter">
+                <span>Track</span>
+                <select id="profileTrackFilter"></select>
+              </label>
+
+              <label class="field" for="profileDomainFilter">
+                <span>Domain</span>
+                <select id="profileDomainFilter"></select>
+              </label>
+
+              <label class="field" for="profileSourceFilter">
+                <span>Source</span>
+                <select id="profileSourceFilter"></select>
+              </label>
+
+              <label class="field" for="profileContactabilityFilter">
+                <span>Contact</span>
+                <select id="profileContactabilityFilter"></select>
+              </label>
+
+              <label class="field field--search" for="profileSearchInput">
+                <span>Search</span>
+                <input id="profileSearchInput" type="search" placeholder="Name, skill, domain, source" />
+              </label>
+            </div>
+          </div>
+
+          <div class="page-layout">
+            <section class="table-panel">
+              <p id="profilesMeta" class="table-meta">Loading final profiles...</p>
+              <div class="table-scroll table-scroll--tall">
+                <table class="grid-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Profile</th>
+                      <th scope="col">Track</th>
+                      <th scope="col">Domains / skills</th>
+                      <th scope="col">Contact</th>
+                      <th scope="col">Sources</th>
+                      <th scope="col">Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody id="profilesTableBody">
+                    <tr>
+                      <td colspan="6" class="empty-row">Loading final profiles...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="detail-panel">
+              <div class="detail-head">
+                <p class="eyebrow">Profile detail</p>
+                <h3 id="profileDetailTitle">Nothing selected</h3>
+                <p id="profileDetailSubtitle" class="detail-subtitle">Select a profile to inspect clean matching fields and lineage.</p>
+              </div>
+              <div id="profileDetailBody" class="detail-body">
+                <p class="empty-detail">Select a final profile row to see reviewed labels, evidence links, and source lineage.</p>
+              </div>
+            </aside>
+          </div>
+        </section>
       </main>
     </div>
 
-    <script src="/app.js?v=phase5-enrichment" defer></script>
+    <script src="/app.js?v=phase6-profiles" defer></script>
   </body>
 </html>

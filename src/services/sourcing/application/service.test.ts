@@ -193,6 +193,72 @@ function buildEnrichmentDraft(overrides: Partial<CandidateEnrichmentDraft> = {})
   };
 }
 
+function buildCandidateProfile(overrides: Partial<CandidateProfile> = {}): CandidateProfile {
+  return {
+    id: 'profile_cand_existing_alex',
+    approvedEntityId: 'cand_existing_alex',
+    enrichmentRunId: 'enrich_run_alex',
+    enrichmentReviewItemId: 'enrich_review_alex',
+    schemaVersion: 'candidate-profile-v1',
+    profileVersion: 1,
+    status: 'active',
+    displayName: 'Alex Rivera',
+    sourceNames: ['github', 'devpost'],
+    sourceDomains: ['developer', 'hackathon'],
+    sourceRecordIds: ['src_github_person_alex'],
+    evidenceIds: ['evidence_github_alex'],
+    reviewLabelIds: ['review_existing'],
+    primaryTrack: 'software_engineering',
+    scoredTracks: [
+      {
+        track: 'software_engineering',
+        score: 0.88,
+        evidenceIds: ['evidence_github_alex'],
+      },
+    ],
+    specializations: [
+      {
+        specialization: 'developer_experience',
+        confidence: 0.72,
+        evidenceIds: ['evidence_github_alex'],
+      },
+    ],
+    skills: [
+      {
+        skill: 'typescript',
+        confidence: 0.68,
+        evidenceIds: ['evidence_github_alex'],
+      },
+    ],
+    industryDomainInterests: [
+      {
+        domain: 'developer_tools',
+        confidence: 0.66,
+        evidenceIds: ['evidence_github_alex'],
+      },
+    ],
+    careerStage: {
+      value: 'unknown',
+      confidence: 0.2,
+      evidenceIds: [],
+    },
+    contactability: {
+      value: 'medium',
+      confidence: 0.74,
+      evidenceIds: ['evidence_github_alex'],
+    },
+    matchingSummary: 'Open-source software engineering candidate with developer tooling evidence.',
+    fieldEvidence: {
+      primaryTrack: ['evidence_github_alex'],
+      skills: ['evidence_github_alex'],
+    },
+    proposedTags: [],
+    createdAt: '2026-04-28T00:00:00.000Z',
+    updatedAt: '2026-04-28T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
 function buildReviewHarness(input: {
   candidate: DedupCandidate;
   sourceRecords: SourceRecord[];
@@ -497,4 +563,65 @@ test('generateEnrichmentForApprovedEntity creates review item and approval mater
   assert.equal(approved.candidateProfile.profileVersion, 1);
   assert.equal(approvedEntitiesById.get(approvedEntity.id)?.enrichmentStatus, 'enriched');
   assert.equal(approvedEntitiesById.get(approvedEntity.id)?.needsEnrichment, false);
+});
+
+test('candidate profile listing filters matching-ready profiles and details preserve clean lineage', async () => {
+  const profile = buildCandidateProfile();
+  const sourceRecord = buildSourceRecord({
+    raw: { largePayload: true },
+    rawSummary: { github: 'https://github.com/alex', nestedPayload: true },
+  });
+  const evidence = buildEvidence();
+  const reviewLabel = buildReviewLabel();
+  const enrichmentReview: CandidateEnrichmentReviewItem = {
+    id: profile.enrichmentReviewItemId,
+    approvedEntityId: profile.approvedEntityId,
+    enrichmentRunId: profile.enrichmentRunId,
+    status: 'approved',
+    evidencePackHash: 'pack-hash',
+    sourceRecordIds: profile.sourceRecordIds,
+    evidenceIds: profile.evidenceIds,
+    reviewLabelIds: profile.reviewLabelIds,
+    displayName: profile.displayName,
+    draft: buildEnrichmentDraft(),
+    validationWarnings: [],
+    reviewerId: 'phase6-test',
+    reviewNote: 'Approved labels.',
+    reviewedDraft: buildEnrichmentDraft(),
+    reviewedAt: '2026-04-28T00:00:00.000Z',
+    createdAt: '2026-04-28T00:00:00.000Z',
+    updatedAt: '2026-04-28T00:00:00.000Z',
+  };
+
+  const repository = {
+    listCandidateProfiles: async () => [profile],
+    getCandidateProfile: async (id: string) => id === profile.id ? profile : null,
+    getApprovedEntity: async (id: string) => id === profile.approvedEntityId ? buildApprovedEntity() : null,
+    getSourceRecordsByIds: async (ids: string[]) => [sourceRecord].filter((record) => ids.includes(record.id)),
+    getEvidenceByIds: async (ids: string[]) => [evidence].filter((entry) => ids.includes(entry.id)),
+    getReviewLabelsByIds: async (ids: string[]) => [reviewLabel].filter((label) => ids.includes(label.id)),
+    getEnrichmentReviewItem: async (id: string) => id === enrichmentReview.id ? enrichmentReview : null,
+  } as Partial<SourcingRepositoryPort> as SourcingRepositoryPort;
+
+  const service = new SourcingService(repository);
+  const filtered = await service.listCandidateProfiles({
+    track: 'software_engineering',
+    domain: 'developer_tools',
+    contactability: 'medium',
+    source: 'github',
+    q: 'typescript',
+  });
+
+  assert.deepEqual(filtered.map((item) => item.id), [profile.id]);
+
+  const details = await service.getCandidateProfileDetails(profile.id);
+  assert.equal(details.profile.id, profile.id);
+  assert.equal(details.lineage.profileVersion, 1);
+  assert.equal(details.sourceRecords[0].id, sourceRecord.id);
+  assert.equal('raw' in details.sourceRecords[0], false);
+  assert.equal('rawSummary' in details.sourceRecords[0], false);
+  assert.equal(details.fieldEvidence[0].field, 'primaryTrack');
+  assert.deepEqual(details.fieldEvidence[0].evidence.map((entry) => entry.id), [evidence.id]);
+  assert.equal(details.reviewLabels[0].notes, reviewLabel.notes);
+  assert.equal(details.enrichmentReview?.reviewNote, 'Approved labels.');
 });

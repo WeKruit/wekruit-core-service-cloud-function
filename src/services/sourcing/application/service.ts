@@ -150,8 +150,91 @@ export type SourcingRepositoryPort = Pick<
   | 'listEnrichmentReviewItemsForApprovedEntity'
   | 'updateEnrichmentReviewItem'
   | 'upsertCandidateProfile'
+  | 'listCandidateProfiles'
+  | 'getCandidateProfile'
   | 'getCandidateProfileByApprovedEntityId'
 >;
+
+export type CandidateProfileListOptions = {
+  limit?: number;
+  status?: CandidateProfile['status'];
+  track?: CandidateProfile['primaryTrack'];
+  domain?: CandidateProfile['industryDomainInterests'][number]['domain'];
+  source?: string;
+  contactability?: CandidateProfile['contactability']['value'];
+  q?: string;
+};
+
+export type CandidateProfileSourceSummary = Pick<
+  SourceRecord,
+  | 'id'
+  | 'sourceRunId'
+  | 'sourceName'
+  | 'sourceDomain'
+  | 'pipelineName'
+  | 'entityType'
+  | 'sourceNativeId'
+  | 'sourceUrl'
+  | 'displayName'
+  | 'institution'
+  | 'observedAt'
+  | 'createdAt'
+  | 'updatedAt'
+>;
+
+export type CandidateProfileReviewSummary = Pick<
+  ReviewLabelRecord,
+  | 'id'
+  | 'dedupCandidateId'
+  | 'identityLabel'
+  | 'candidateDecision'
+  | 'reviewerId'
+  | 'notes'
+  | 'confirmedSignals'
+  | 'sourceRecordIds'
+  | 'evidenceIds'
+  | 'createdAt'
+  | 'updatedAt'
+>;
+
+export type CandidateProfileEnrichmentReviewSummary = Pick<
+  CandidateEnrichmentReviewItem,
+  | 'id'
+  | 'approvedEntityId'
+  | 'enrichmentRunId'
+  | 'status'
+  | 'evidencePackHash'
+  | 'reviewerId'
+  | 'reviewNote'
+  | 'reviewedAt'
+  | 'validationWarnings'
+  | 'createdAt'
+  | 'updatedAt'
+>;
+
+export type CandidateProfileDetails = {
+  profile: CandidateProfile;
+  approvedEntity: ApprovedEntity | null;
+  sourceRecords: CandidateProfileSourceSummary[];
+  evidence: EvidenceRecord[];
+  fieldEvidence: Array<{
+    field: string;
+    evidenceIds: string[];
+    evidence: EvidenceRecord[];
+  }>;
+  reviewLabels: CandidateProfileReviewSummary[];
+  enrichmentReview: CandidateProfileEnrichmentReviewSummary | null;
+  lineage: {
+    approvedEntityId: string;
+    sourceRecordIds: string[];
+    evidenceIds: string[];
+    reviewLabelIds: string[];
+    enrichmentRunId: string;
+    enrichmentReviewItemId: string;
+    schemaVersion: string;
+    profileVersion: number;
+  };
+};
 
 const strongIdentityEvidenceTypes = new Set<EvidenceRecord['evidenceType']>([
   'email',
@@ -243,6 +326,84 @@ function isUpdatableCandidateEntity(entity: ApprovedEntity): boolean {
 
 function isSingletonCandidate(candidate: DedupCandidate): boolean {
   return candidate.sourceRecordIds.length === 1 || candidate.reasonCodes.includes('singleton_review');
+}
+
+function lowerSet(values: string[]): Set<string> {
+  return new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean));
+}
+
+function profileMatchesText(profile: CandidateProfile, query: string): boolean {
+  if (!query) {
+    return true;
+  }
+  const haystack = [
+    profile.displayName ?? '',
+    profile.primaryTrack,
+    profile.careerStage.value,
+    profile.contactability.value,
+    profile.matchingSummary,
+    ...profile.sourceNames,
+    ...profile.sourceDomains,
+    ...profile.specializations.map((entry) => entry.specialization),
+    ...profile.skills.map((entry) => entry.skill),
+    ...profile.industryDomainInterests.map((entry) => entry.domain),
+    ...profile.proposedTags.map((entry) => entry.tag),
+  ]
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
+function summarizeSourceRecord(record: SourceRecord): CandidateProfileSourceSummary {
+  return {
+    id: record.id,
+    sourceRunId: record.sourceRunId,
+    sourceName: record.sourceName,
+    sourceDomain: record.sourceDomain,
+    pipelineName: record.pipelineName,
+    entityType: record.entityType,
+    sourceNativeId: record.sourceNativeId,
+    sourceUrl: record.sourceUrl,
+    displayName: record.displayName,
+    institution: record.institution,
+    observedAt: record.observedAt,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function summarizeReviewLabel(label: ReviewLabelRecord): CandidateProfileReviewSummary {
+  return {
+    id: label.id,
+    dedupCandidateId: label.dedupCandidateId,
+    identityLabel: label.identityLabel,
+    candidateDecision: label.candidateDecision,
+    reviewerId: label.reviewerId,
+    notes: label.notes,
+    confirmedSignals: label.confirmedSignals,
+    sourceRecordIds: label.sourceRecordIds,
+    evidenceIds: label.evidenceIds,
+    createdAt: label.createdAt,
+    updatedAt: label.updatedAt,
+  };
+}
+
+function summarizeEnrichmentReview(
+  item: CandidateEnrichmentReviewItem,
+): CandidateProfileEnrichmentReviewSummary {
+  return {
+    id: item.id,
+    approvedEntityId: item.approvedEntityId,
+    enrichmentRunId: item.enrichmentRunId,
+    status: item.status,
+    evidencePackHash: item.evidencePackHash,
+    reviewerId: item.reviewerId,
+    reviewNote: item.reviewNote,
+    reviewedAt: item.reviewedAt,
+    validationWarnings: item.validationWarnings,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
 }
 
 function resolveIdentityLabel(
@@ -546,6 +707,77 @@ export class SourcingService {
 
   async listApprovedEntities(): Promise<ApprovedEntity[]> {
     return this.repository.listApprovedEntities();
+  }
+
+  async listCandidateProfiles(options: CandidateProfileListOptions = {}): Promise<CandidateProfile[]> {
+    const limit = Math.max(1, Math.min(options.limit ?? 200, 500));
+    const query = options.q?.trim().toLowerCase() ?? '';
+    const source = options.source?.trim().toLowerCase() ?? '';
+    const profiles = await this.repository.listCandidateProfiles(limit, options.status);
+
+    return profiles.filter((profile) => {
+      if (options.track && profile.primaryTrack !== options.track) {
+        return false;
+      }
+      if (
+        options.domain &&
+        !profile.industryDomainInterests.some((entry) => entry.domain === options.domain)
+      ) {
+        return false;
+      }
+      if (options.contactability && profile.contactability.value !== options.contactability) {
+        return false;
+      }
+      if (source) {
+        const sourceNames = lowerSet([...profile.sourceNames, ...profile.sourceDomains]);
+        if (!sourceNames.has(source)) {
+          return false;
+        }
+      }
+      return profileMatchesText(profile, query);
+    });
+  }
+
+  async getCandidateProfileDetails(profileId: string): Promise<CandidateProfileDetails> {
+    const profile = await this.repository.getCandidateProfile(profileId);
+    if (!profile) {
+      throw new Error(`Candidate profile "${profileId}" was not found.`);
+    }
+
+    const [approvedEntity, sourceRecords, evidence, reviewLabels, enrichmentReview] = await Promise.all([
+      this.repository.getApprovedEntity(profile.approvedEntityId),
+      this.repository.getSourceRecordsByIds(profile.sourceRecordIds),
+      this.repository.getEvidenceByIds(profile.evidenceIds),
+      this.repository.getReviewLabelsByIds(profile.reviewLabelIds),
+      this.repository.getEnrichmentReviewItem(profile.enrichmentReviewItemId),
+    ]);
+    const evidenceById = new Map(evidence.map((entry) => [entry.id, entry]));
+
+    return {
+      profile,
+      approvedEntity,
+      sourceRecords: sourceRecords.map((record) => summarizeSourceRecord(record)),
+      evidence,
+      fieldEvidence: Object.entries(profile.fieldEvidence)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([field, evidenceIds]) => ({
+          field,
+          evidenceIds,
+          evidence: evidenceIds.map((id) => evidenceById.get(id)).filter((entry): entry is EvidenceRecord => Boolean(entry)),
+        })),
+      reviewLabels: reviewLabels.map((label) => summarizeReviewLabel(label)),
+      enrichmentReview: enrichmentReview ? summarizeEnrichmentReview(enrichmentReview) : null,
+      lineage: {
+        approvedEntityId: profile.approvedEntityId,
+        sourceRecordIds: profile.sourceRecordIds,
+        evidenceIds: profile.evidenceIds,
+        reviewLabelIds: profile.reviewLabelIds,
+        enrichmentRunId: profile.enrichmentRunId,
+        enrichmentReviewItemId: profile.enrichmentReviewItemId,
+        schemaVersion: profile.schemaVersion,
+        profileVersion: profile.profileVersion,
+      },
+    };
   }
 
   async generateEnrichmentForApprovedEntity(approvedEntityId: string): Promise<{

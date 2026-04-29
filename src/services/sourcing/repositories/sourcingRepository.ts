@@ -320,6 +320,28 @@ export class SourcingRepository {
     return profile;
   }
 
+  async listCandidateProfiles(
+    limit = 200,
+    status?: CandidateProfile['status'],
+  ): Promise<CandidateProfile[]> {
+    const snapshot = status
+      ? await this.candidateProfileCollection
+        .where('status', '==', status)
+        .limit(Math.max(1, Math.min(limit, 500)))
+        .get()
+      : await this.candidateProfileCollection
+        .limit(Math.max(1, Math.min(limit, 500)))
+        .get();
+    return snapshot.docs
+      .map((doc) => doc.data() as CandidateProfile)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  async getCandidateProfile(id: string): Promise<CandidateProfile | null> {
+    const snapshot = await this.candidateProfileCollection.doc(id).get();
+    return snapshot.exists ? (snapshot.data() as CandidateProfile) : null;
+  }
+
   async getCandidateProfileByApprovedEntityId(approvedEntityId: string): Promise<CandidateProfile | null> {
     const snapshot = await this.candidateProfileCollection
       .where('approvedEntityId', '==', approvedEntityId)

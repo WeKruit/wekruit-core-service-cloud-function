@@ -10,6 +10,9 @@ import {
   createReviewLabelSchema,
   createSourceRunSchema,
   candidateEnrichmentReviewStatusSchema,
+  candidateContactabilitySchema,
+  candidateIndustryDomainSchema,
+  candidateTrackSchema,
 } from '../../domain/records';
 import { SourcingService } from '../../application/service';
 
@@ -172,6 +175,46 @@ app.get('/api/sourcing/approved-entities', async (_req, res, next) => {
     const data = await service.listApprovedEntities();
     res.status(200).json({ data, total: data.length });
   } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/sourcing/candidate-profiles', async (req, res, next) => {
+  try {
+    const status = req.query.status === 'archived' ? 'archived' : req.query.status === 'active' ? 'active' : undefined;
+    const parsedTrack = typeof req.query.track === 'string'
+      ? candidateTrackSchema.safeParse(req.query.track)
+      : null;
+    const parsedDomain = typeof req.query.domain === 'string'
+      ? candidateIndustryDomainSchema.safeParse(req.query.domain)
+      : null;
+    const parsedContactability = typeof req.query.contactability === 'string'
+      ? candidateContactabilitySchema.safeParse(req.query.contactability)
+      : null;
+    const data = await service.listCandidateProfiles({
+      limit: parseLimit(req.query.limit, 200, 500),
+      status,
+      track: parsedTrack?.success ? parsedTrack.data : undefined,
+      domain: parsedDomain?.success ? parsedDomain.data : undefined,
+      contactability: parsedContactability?.success ? parsedContactability.data : undefined,
+      source: typeof req.query.source === 'string' ? req.query.source : undefined,
+      q: typeof req.query.q === 'string' ? req.query.q : undefined,
+    });
+    res.status(200).json({ data, total: data.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/sourcing/candidate-profiles/:profileId', async (req, res, next) => {
+  try {
+    const data = await service.getCandidateProfileDetails(req.params.profileId);
+    res.status(200).json({ data });
+  } catch (error) {
+    if (error instanceof Error) {
+      jsonError(res, 404, error.message);
+      return;
+    }
     next(error);
   }
 });
