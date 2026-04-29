@@ -239,6 +239,242 @@ export const approvedEntitySchema = z.object({
   updatedAt: z.string(),
 });
 
+export const candidateTrackValues = [
+  'software_engineering',
+  'ai_research',
+  'data_science',
+  'product_design',
+  'product_management',
+  'marketing_growth',
+  'business_founder',
+  'hardware_mechanical',
+  'academic_research',
+  'unknown_other',
+] as const;
+
+export const candidateSpecializationValues = [
+  'frontend_engineering',
+  'backend_engineering',
+  'full_stack_engineering',
+  'mobile_engineering',
+  'machine_learning',
+  'natural_language_processing',
+  'computer_vision',
+  'data_engineering',
+  'data_analysis',
+  'academic_publishing',
+  'developer_experience',
+  'product_strategy',
+  'growth_marketing',
+  'mechanical_design',
+  'embedded_systems',
+  'robotics',
+  'ux_ui_design',
+  'unknown_other',
+] as const;
+
+export const candidateIndustryDomainValues = [
+  'artificial_intelligence',
+  'ai_infrastructure',
+  'developer_tools',
+  'healthcare_ai',
+  'robotics',
+  'education_technology',
+  'climate_energy',
+  'finance_fintech',
+  'biotech_life_sciences',
+  'enterprise_saas',
+  'cybersecurity',
+  'gaming_media',
+  'accessibility_assistive_technology',
+  'research_tools',
+  'open_source',
+  'unknown_other',
+] as const;
+
+export const candidateCareerStageValues = [
+  'student',
+  'early_career',
+  'mid_career',
+  'senior',
+  'founder',
+  'academic_researcher',
+  'unknown',
+] as const;
+
+export const candidateContactabilityValues = ['high', 'medium', 'low', 'unknown'] as const;
+
+export const candidateTrackSchema = z.enum(candidateTrackValues);
+export const candidateSpecializationSchema = z.enum(candidateSpecializationValues);
+export const candidateIndustryDomainSchema = z.enum(candidateIndustryDomainValues);
+export const candidateCareerStageSchema = z.enum(candidateCareerStageValues);
+export const candidateContactabilitySchema = z.enum(candidateContactabilityValues);
+export const candidateEnrichmentReviewStatusSchema = z.enum([
+  'pending_review',
+  'approved',
+  'held',
+  'rejected',
+]);
+export const candidateEnrichmentRunStatusSchema = z.enum(['completed', 'failed']);
+
+const enrichmentConfidenceSchema = z.number().min(0).max(1);
+const evidenceIdListSchema = z.array(z.string().trim().min(1)).default([]);
+const normalizedSkillSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .transform((value) =>
+    value
+      .replace(/&/g, ' and ')
+      .replace(/[^a-z0-9+#./ -]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  )
+  .refine((value) => /^[a-z0-9][a-z0-9+#./ -]{1,63}$/.test(value), {
+    message: 'Skill must normalize to a readable 2-64 character label.',
+  });
+const normalizedEnrichmentTagSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .transform((value) =>
+    value
+      .replace(/[\s-]+/g, '_')
+      .replace(/[^a-z0-9_:-]/g, '')
+      .trim(),
+  )
+  .refine((value) => /^[a-z][a-z0-9_:-]{1,79}$/.test(value), {
+    message: 'Tag must normalize to a stable review signal token.',
+  });
+
+export const enrichmentScoredTrackSchema = z.object({
+  track: candidateTrackSchema,
+  score: enrichmentConfidenceSchema,
+  evidenceIds: evidenceIdListSchema,
+});
+
+export const enrichmentSpecializationSchema = z.object({
+  specialization: candidateSpecializationSchema,
+  confidence: enrichmentConfidenceSchema,
+  evidenceIds: evidenceIdListSchema,
+});
+
+export const enrichmentSkillSchema = z.object({
+  skill: normalizedSkillSchema,
+  confidence: enrichmentConfidenceSchema,
+  evidenceIds: evidenceIdListSchema,
+});
+
+export const enrichmentIndustryDomainSchema = z.object({
+  domain: candidateIndustryDomainSchema,
+  confidence: enrichmentConfidenceSchema,
+  evidenceIds: evidenceIdListSchema,
+});
+
+export const enrichmentCareerStageSchema = z.object({
+  value: candidateCareerStageSchema,
+  confidence: enrichmentConfidenceSchema,
+  evidenceIds: evidenceIdListSchema,
+});
+
+export const enrichmentContactabilitySchema = z.object({
+  value: candidateContactabilitySchema,
+  confidence: enrichmentConfidenceSchema,
+  evidenceIds: evidenceIdListSchema,
+});
+
+export const enrichmentProposedTagSchema = z.object({
+  tag: normalizedEnrichmentTagSchema,
+  reason: z.string().trim().min(1).max(280),
+  evidenceIds: evidenceIdListSchema,
+});
+
+export const candidateEnrichmentDraftSchema = z.object({
+  schemaVersion: z.literal('candidate-enrichment-draft-v1'),
+  primaryTrack: candidateTrackSchema,
+  scoredTracks: z.array(enrichmentScoredTrackSchema).min(1).max(6),
+  specializations: z.array(enrichmentSpecializationSchema).max(10),
+  skills: z.array(enrichmentSkillSchema).max(20),
+  industryDomainInterests: z.array(enrichmentIndustryDomainSchema).max(10),
+  careerStage: enrichmentCareerStageSchema,
+  contactability: enrichmentContactabilitySchema,
+  matchingSummary: z.string().trim().min(1).max(900),
+  fieldEvidence: z.record(z.string(), evidenceIdListSchema).default({}),
+  proposedTags: z.array(enrichmentProposedTagSchema).max(12).default([]),
+  warnings: z.array(z.string().trim().min(1).max(280)).max(12).default([]),
+});
+
+export const candidateEnrichmentRunSchema = z.object({
+  id: z.string().trim().min(1),
+  approvedEntityId: z.string().trim().min(1),
+  status: candidateEnrichmentRunStatusSchema,
+  provider: z.string().trim().min(1),
+  model: z.string().trim().min(1),
+  evidencePackHash: z.string().trim().min(1),
+  evidencePack: rawObjectSchema,
+  deterministicFeatures: rawObjectSchema,
+  draft: candidateEnrichmentDraftSchema.nullable(),
+  validationWarnings: z.array(z.string().trim().min(1)).default([]),
+  error: z.string().trim().min(1).nullable().default(null),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const candidateEnrichmentReviewItemSchema = z.object({
+  id: z.string().trim().min(1),
+  approvedEntityId: z.string().trim().min(1),
+  enrichmentRunId: z.string().trim().min(1),
+  status: candidateEnrichmentReviewStatusSchema,
+  evidencePackHash: z.string().trim().min(1),
+  sourceRecordIds: z.array(z.string().trim().min(1)),
+  evidenceIds: z.array(z.string().trim().min(1)),
+  reviewLabelIds: z.array(z.string().trim().min(1)),
+  displayName: z.string().nullable(),
+  draft: candidateEnrichmentDraftSchema,
+  validationWarnings: z.array(z.string().trim().min(1)).default([]),
+  reviewerId: z.string().trim().min(1).nullable().default(null),
+  reviewNote: z.string().trim().default(''),
+  reviewedDraft: candidateEnrichmentDraftSchema.nullable().default(null),
+  reviewedAt: z.string().nullable().default(null),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const candidateProfileSchema = z.object({
+  id: z.string().trim().min(1),
+  approvedEntityId: z.string().trim().min(1),
+  enrichmentRunId: z.string().trim().min(1),
+  enrichmentReviewItemId: z.string().trim().min(1),
+  schemaVersion: z.literal('candidate-profile-v1'),
+  profileVersion: z.number().int().min(1),
+  status: z.enum(['active', 'archived']).default('active'),
+  displayName: z.string().nullable(),
+  sourceNames: z.array(z.string().trim().min(1)),
+  sourceDomains: z.array(z.string().trim().min(1)),
+  sourceRecordIds: z.array(z.string().trim().min(1)),
+  evidenceIds: z.array(z.string().trim().min(1)),
+  reviewLabelIds: z.array(z.string().trim().min(1)),
+  primaryTrack: candidateTrackSchema,
+  scoredTracks: z.array(enrichmentScoredTrackSchema),
+  specializations: z.array(enrichmentSpecializationSchema),
+  skills: z.array(enrichmentSkillSchema),
+  industryDomainInterests: z.array(enrichmentIndustryDomainSchema),
+  careerStage: enrichmentCareerStageSchema,
+  contactability: enrichmentContactabilitySchema,
+  matchingSummary: z.string().trim().min(1).max(900),
+  fieldEvidence: z.record(z.string(), evidenceIdListSchema),
+  proposedTags: z.array(enrichmentProposedTagSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const createEnrichmentReviewDecisionSchema = z.object({
+  action: z.enum(['approve', 'hold', 'reject']),
+  reviewerId: z.string().trim().min(1).default('manual-reviewer'),
+  notes: z.string().trim().default(''),
+  reviewedDraft: candidateEnrichmentDraftSchema.optional(),
+});
+
 export type SourcingEntityType = z.infer<typeof sourcingEntityTypeSchema>;
 export type SourcingEvidenceType = z.infer<typeof sourcingEvidenceTypeSchema>;
 export type SourcingEvidenceQuality = z.infer<typeof sourcingEvidenceQualitySchema>;
@@ -259,3 +495,15 @@ export type DedupCandidate = z.infer<typeof dedupCandidateSchema>;
 export type CreateReviewLabelInput = z.infer<typeof createReviewLabelSchema>;
 export type ReviewLabelRecord = z.infer<typeof reviewLabelRecordSchema>;
 export type ApprovedEntity = z.infer<typeof approvedEntitySchema>;
+export type CandidateTrack = z.infer<typeof candidateTrackSchema>;
+export type CandidateSpecialization = z.infer<typeof candidateSpecializationSchema>;
+export type CandidateIndustryDomain = z.infer<typeof candidateIndustryDomainSchema>;
+export type CandidateCareerStage = z.infer<typeof candidateCareerStageSchema>;
+export type CandidateContactability = z.infer<typeof candidateContactabilitySchema>;
+export type CandidateEnrichmentReviewStatus = z.infer<typeof candidateEnrichmentReviewStatusSchema>;
+export type CandidateEnrichmentRunStatus = z.infer<typeof candidateEnrichmentRunStatusSchema>;
+export type CandidateEnrichmentDraft = z.infer<typeof candidateEnrichmentDraftSchema>;
+export type CandidateEnrichmentRun = z.infer<typeof candidateEnrichmentRunSchema>;
+export type CandidateEnrichmentReviewItem = z.infer<typeof candidateEnrichmentReviewItemSchema>;
+export type CandidateProfile = z.infer<typeof candidateProfileSchema>;
+export type CreateEnrichmentReviewDecisionInput = z.infer<typeof createEnrichmentReviewDecisionSchema>;

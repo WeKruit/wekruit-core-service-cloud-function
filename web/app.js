@@ -1,5 +1,5 @@
 const API_BASE_URL = "/api/sourcing";
-const PAGE_IDS = new Set(["jobs", "review", "approved"]);
+const PAGE_IDS = new Set(["jobs", "review", "approved", "enrichment"]);
 
 const REASON_CONFIG = {
   singleton_review: {
@@ -54,11 +54,68 @@ const REVIEW_STATUS_OPTIONS = [
   ["suppressed", "Suppressed"],
 ];
 
+const TRACK_VALUES = [
+  "software_engineering",
+  "ai_research",
+  "data_science",
+  "product_design",
+  "product_management",
+  "marketing_growth",
+  "business_founder",
+  "hardware_mechanical",
+  "academic_research",
+  "unknown_other",
+];
+
+const SPECIALIZATION_VALUES = [
+  "frontend_engineering",
+  "backend_engineering",
+  "full_stack_engineering",
+  "mobile_engineering",
+  "machine_learning",
+  "natural_language_processing",
+  "computer_vision",
+  "data_engineering",
+  "data_analysis",
+  "academic_publishing",
+  "developer_experience",
+  "product_strategy",
+  "growth_marketing",
+  "mechanical_design",
+  "embedded_systems",
+  "robotics",
+  "ux_ui_design",
+  "unknown_other",
+];
+
+const INDUSTRY_DOMAIN_VALUES = [
+  "artificial_intelligence",
+  "ai_infrastructure",
+  "developer_tools",
+  "healthcare_ai",
+  "robotics",
+  "education_technology",
+  "climate_energy",
+  "finance_fintech",
+  "biotech_life_sciences",
+  "enterprise_saas",
+  "cybersecurity",
+  "gaming_media",
+  "accessibility_assistive_technology",
+  "research_tools",
+  "open_source",
+  "unknown_other",
+];
+
+const CAREER_STAGE_VALUES = ["student", "early_career", "mid_career", "senior", "founder", "academic_researcher", "unknown"];
+const CONTACTABILITY_VALUES = ["high", "medium", "low", "unknown"];
+
 const state = {
   page: normalizePage(window.location.hash.replace(/^#/, "") || "review"),
   runs: [],
   candidates: [],
   approved: [],
+  enrichmentItems: [],
   selectedJobRunId: "",
   reviewRunId: "",
   reviewStatusFilter: "pending_review",
@@ -66,11 +123,18 @@ const state = {
   reviewSignalFilter: "",
   selectedCandidateId: "",
   selectedApprovedId: "",
+  selectedEnrichmentId: "",
   reviewSearch: "",
   approvedSearch: "",
   reviewSubmitting: false,
+  approvedSubmitting: false,
+  enrichmentSubmitting: false,
   reviewMessage: "",
   reviewMessageStatus: "",
+  approvedMessage: "",
+  approvedMessageStatus: "",
+  enrichmentMessage: "",
+  enrichmentMessageStatus: "",
   reviewSignalSelections: {},
 };
 
@@ -80,12 +144,15 @@ const elements = {
   navJobs: document.querySelector("#navJobs"),
   navReview: document.querySelector("#navReview"),
   navApproved: document.querySelector("#navApproved"),
+  navEnrichment: document.querySelector("#navEnrichment"),
   navJobsCount: document.querySelector("#navJobsCount"),
   navReviewCount: document.querySelector("#navReviewCount"),
   navApprovedCount: document.querySelector("#navApprovedCount"),
+  navEnrichmentCount: document.querySelector("#navEnrichmentCount"),
   pageJobs: document.querySelector("#pageJobs"),
   pageReview: document.querySelector("#pageReview"),
   pageApproved: document.querySelector("#pageApproved"),
+  pageEnrichment: document.querySelector("#pageEnrichment"),
   jobsMeta: document.querySelector("#jobsMeta"),
   jobsTableBody: document.querySelector("#jobsTableBody"),
   jobsDetailTitle: document.querySelector("#jobsDetailTitle"),
@@ -115,6 +182,16 @@ const elements = {
   approvedDetailTitle: document.querySelector("#approvedDetailTitle"),
   approvedDetailSubtitle: document.querySelector("#approvedDetailSubtitle"),
   approvedDetailBody: document.querySelector("#approvedDetailBody"),
+  enrichmentMeta: document.querySelector("#enrichmentMeta"),
+  enrichmentTableBody: document.querySelector("#enrichmentTableBody"),
+  enrichmentDetailTitle: document.querySelector("#enrichmentDetailTitle"),
+  enrichmentDetailSubtitle: document.querySelector("#enrichmentDetailSubtitle"),
+  enrichmentDetailBody: document.querySelector("#enrichmentDetailBody"),
+  enrichmentNote: document.querySelector("#enrichmentNote"),
+  enrichmentApproveButton: document.querySelector("#enrichmentApproveButton"),
+  enrichmentHoldButton: document.querySelector("#enrichmentHoldButton"),
+  enrichmentRejectButton: document.querySelector("#enrichmentRejectButton"),
+  enrichmentResult: document.querySelector("#enrichmentResult"),
 };
 
 function normalizePage(value) {
@@ -265,10 +342,10 @@ function statusVariant(status) {
   if (status === "completed" || status === "approved" || status === "active" || status === "same_person" || status === "approved_candidate" || status === "enriched") {
     return "success";
   }
-  if (status === "pending_review" || status === "medium" || status === "not_started" || status === "needs_enrichment" || status === "in_review") {
+  if (status === "pending_review" || status === "medium" || status === "not_started" || status === "needs_enrichment" || status === "in_review" || status === "held") {
     return "warning";
   }
-  if (status === "failed" || status === "archived" || status === "not_same_person" || status === "rejected_bad_record" || status === "rejected_not_relevant") {
+  if (status === "failed" || status === "archived" || status === "not_same_person" || status === "rejected_bad_record" || status === "rejected_not_relevant" || status === "rejected") {
     return "danger";
   }
   return "neutral";
@@ -360,6 +437,50 @@ function confirmedSignalsForApproved(entity) {
     return signalValues(entity.confirmedSignals);
   }
   return signalValues(entity?.suggestedSignals);
+}
+
+function pendingEnrichmentItems() {
+  return state.enrichmentItems.filter((item) => item?.status === "pending_review");
+}
+
+function filteredEnrichmentItems() {
+  return state.enrichmentItems
+    .slice()
+    .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0).getTime() - new Date(left.updatedAt || left.createdAt || 0).getTime());
+}
+
+function getSelectedEnrichmentItem() {
+  return filteredEnrichmentItems().find((item) => item.id === state.selectedEnrichmentId) ?? null;
+}
+
+function commaList(value) {
+  return uniqueList(
+    stringValue(value)
+      .split(",")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function selectedOptions(select) {
+  return Array.from(select?.selectedOptions || []).map((option) => option.value).filter(Boolean);
+}
+
+function renderOptions(values, selected, labeler = displayLabel) {
+  const selectedSet = new Set(arrayValue(selected));
+  return values
+    .map((value) => `<option value="${escapeHtml(value)}" ${selectedSet.has(value) ? "selected" : ""}>${escapeHtml(labeler(value))}</option>`)
+    .join("");
+}
+
+function evidenceForField(item, field) {
+  const draft = item?.draft || {};
+  const fieldEvidence = draft.fieldEvidence || {};
+  return arrayValue(fieldEvidence[field]).length ? arrayValue(fieldEvidence[field]) : arrayValue(item?.evidenceIds);
+}
+
+function existingByKey(items, key) {
+  return new Map(arrayValue(items).map((item) => [item?.[key], item]));
 }
 
 function candidateSignalSelectionId(item) {
@@ -540,6 +661,11 @@ function ensureSelections() {
   const approvedItems = filteredApprovedEntities();
   if (!approvedItems.some((entity) => entity.id === state.selectedApprovedId)) {
     state.selectedApprovedId = approvedItems[0]?.id || "";
+  }
+
+  const enrichmentItems = filteredEnrichmentItems();
+  if (!enrichmentItems.some((item) => item.id === state.selectedEnrichmentId)) {
+    state.selectedEnrichmentId = enrichmentItems[0]?.id || "";
   }
 }
 
@@ -1268,6 +1394,9 @@ function renderApprovedDetail() {
     return;
   }
 
+  const canGenerate = entity.status === "active" && !state.approvedSubmitting && entity.enrichmentStatus !== "in_review";
+  const generateLabel = entity.enrichmentStatus === "enriched" && entity.needsEnrichment === false ? "Regenerate enrichment" : "Generate enrichment";
+
   elements.approvedDetailTitle.textContent = entity.displayName || entity.id;
   elements.approvedDetailSubtitle.textContent = `${arrayValue(entity.sourceRecordIds).length} source records · ${arrayValue(entity.reviewLabelIds).length || 1} review decisions`;
   elements.approvedDetailBody.innerHTML = `
@@ -1291,6 +1420,14 @@ function renderApprovedDetail() {
         <div class="fact-row"><span class="fact-label">Created</span><div class="fact-value">${escapeHtml(formatDateTime(entity.createdAt))}</div></div>
         <div class="fact-row"><span class="fact-label">Updated</span><div class="fact-value">${escapeHtml(formatDateTime(entity.updatedAt || entity.createdAt))}</div></div>
       </div>
+    </section>
+
+    <section class="detail-section">
+      <h4>Enrichment</h4>
+      <div class="action-row">
+        <button type="button" data-generate-enrichment="${escapeHtml(entity.id)}" ${canGenerate ? "" : "disabled"}>${escapeHtml(generateLabel)}</button>
+      </div>
+      <p class="detail-result" data-status="${escapeHtml(state.approvedMessageStatus)}">${escapeHtml(state.approvedMessage)}</p>
     </section>
 
     <section class="detail-section">
@@ -1321,11 +1458,180 @@ function renderApprovedDetail() {
   `;
 }
 
+function renderEnrichmentTable() {
+  const items = filteredEnrichmentItems();
+  elements.navEnrichmentCount.textContent = String(pendingEnrichmentItems().length);
+  elements.enrichmentMeta.textContent = items.length
+    ? `${items.length} enrichment items · ${pendingEnrichmentItems().length} pending`
+    : "No enrichment items found";
+
+  if (!items.length) {
+    elements.enrichmentTableBody.innerHTML = `<tr><td colspan="4" class="empty-row">No enrichment items found.</td></tr>`;
+    return;
+  }
+
+  elements.enrichmentTableBody.innerHTML = items
+    .map((item) => {
+      const selectedClass = item.id === state.selectedEnrichmentId ? "is-selected" : "";
+      return `
+        <tr class="${selectedClass}">
+          <td>
+            <button type="button" class="row-button" data-enrichment-id="${escapeHtml(item.id)}">
+              <span class="row-primary">${escapeHtml(item.displayName || item.approvedEntityId)}</span>
+              <span class="row-secondary mono">${escapeHtml(item.approvedEntityId)}</span>
+            </button>
+          </td>
+          <td>${escapeHtml(displayLabel(item.draft?.primaryTrack || "unknown_other"))}</td>
+          <td>${renderPill(displayLabel(item.status || "pending_review"), statusVariant(item.status || "pending_review"))}</td>
+          <td>${escapeHtml(formatDateTime(item.updatedAt || item.createdAt))}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function labelList(items, key, fallback = "—") {
+  const labels = arrayValue(items).map((item) => displayLabel(item?.[key])).filter(Boolean);
+  return labels.length ? labels.join(", ") : fallback;
+}
+
+function renderMultiSelect(id, values, selected) {
+  return `<select id="${escapeHtml(id)}" data-enrichment-field="${escapeHtml(id)}" multiple size="6">${renderOptions(values, selected)}</select>`;
+}
+
+function renderProposedTagControls(item) {
+  const tags = arrayValue(item?.draft?.proposedTags);
+  if (!tags.length) {
+    return `<p class="empty-detail">No open-ended tags were proposed.</p>`;
+  }
+  return `
+    <div class="signal-choice-grid">
+      ${tags
+        .map((tag) => `
+          <label class="signal-choice">
+            <input type="checkbox" data-proposed-tag="${escapeHtml(tag.tag)}" checked />
+            <span class="signal-choice__label">${escapeHtml(displayLabel(tag.tag))}</span>
+            <span class="signal-choice__meta">${escapeHtml(tag.reason || "Proposed")}</span>
+          </label>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
+function renderEnrichmentDetail() {
+  const item = getSelectedEnrichmentItem();
+  const disableActions = !item || item.status !== "pending_review" || state.enrichmentSubmitting;
+
+  elements.enrichmentApproveButton.disabled = disableActions;
+  elements.enrichmentHoldButton.disabled = disableActions;
+  elements.enrichmentRejectButton.disabled = disableActions;
+  elements.enrichmentResult.textContent = state.enrichmentMessage;
+  elements.enrichmentResult.dataset.status = state.enrichmentMessageStatus;
+
+  if (!item) {
+    elements.enrichmentDetailTitle.textContent = "Nothing selected";
+    elements.enrichmentDetailSubtitle.textContent = "Select an enrichment item to review suggested labels.";
+    elements.enrichmentDetailBody.innerHTML = `<p class="empty-detail">Select an enrichment row to inspect labels and supporting evidence.</p>`;
+    return;
+  }
+
+  const draft = item.draft || {};
+  const selectedTracks = uniqueList(arrayValue(draft.scoredTracks).map((track) => track.track));
+  const selectedSpecializations = uniqueList(arrayValue(draft.specializations).map((entry) => entry.specialization));
+  const selectedDomains = uniqueList(arrayValue(draft.industryDomainInterests).map((entry) => entry.domain));
+  const selectedSkills = arrayValue(draft.skills).map((entry) => entry.skill).join(", ");
+
+  elements.enrichmentDetailTitle.textContent = item.displayName || item.approvedEntityId;
+  elements.enrichmentDetailSubtitle.textContent = `${arrayValue(item.evidenceIds).length} evidence records · ${displayLabel(item.status || "pending_review")}`;
+  elements.enrichmentDetailBody.innerHTML = `
+    <section class="detail-section">
+      <h4>Suggested summary</h4>
+      <p class="detail-lead">${escapeHtml(draft.matchingSummary || "No summary generated.")}</p>
+      <div class="pill-row">
+        ${renderPill(displayLabel(draft.primaryTrack || "unknown_other"), "accent")}
+        ${renderPill(displayLabel(draft.contactability?.value || "unknown"), statusVariant(draft.contactability?.value || "unknown"))}
+        ${renderPill(displayLabel(draft.careerStage?.value || "unknown"), "neutral")}
+      </div>
+      ${
+        arrayValue(item.validationWarnings).length
+          ? `<div class="subtle-callout">${escapeHtml(item.validationWarnings.join(" "))}</div>`
+          : ""
+      }
+    </section>
+
+    <section class="detail-section">
+      <h4>Editable labels</h4>
+      <div class="edit-grid">
+        <label class="field" for="enrichmentPrimaryTrack">
+          <span>Primary track</span>
+          <select id="enrichmentPrimaryTrack" data-enrichment-primary-track>${renderOptions(TRACK_VALUES, [draft.primaryTrack || "unknown_other"])}</select>
+        </label>
+        <label class="field" for="enrichmentCareerStage">
+          <span>Career stage</span>
+          <select id="enrichmentCareerStage" data-enrichment-career-stage>${renderOptions(CAREER_STAGE_VALUES, [draft.careerStage?.value || "unknown"])}</select>
+        </label>
+        <label class="field" for="enrichmentContactability">
+          <span>Contactability</span>
+          <select id="enrichmentContactability" data-enrichment-contactability>${renderOptions(CONTACTABILITY_VALUES, [draft.contactability?.value || "unknown"])}</select>
+        </label>
+      </div>
+
+      <div class="edit-grid edit-grid--stacked">
+        <label class="field" for="enrichmentTracks">
+          <span>Tracks</span>
+          ${renderMultiSelect("enrichmentTracks", TRACK_VALUES, selectedTracks)}
+        </label>
+        <label class="field" for="enrichmentSpecializations">
+          <span>Specializations</span>
+          ${renderMultiSelect("enrichmentSpecializations", SPECIALIZATION_VALUES, selectedSpecializations)}
+        </label>
+        <label class="field" for="enrichmentDomains">
+          <span>Industry/domain interests</span>
+          ${renderMultiSelect("enrichmentDomains", INDUSTRY_DOMAIN_VALUES, selectedDomains)}
+        </label>
+        <label class="field" for="enrichmentSkills">
+          <span>Skills</span>
+          <textarea id="enrichmentSkills" data-enrichment-skills rows="3">${escapeHtml(selectedSkills)}</textarea>
+        </label>
+      </div>
+    </section>
+
+    <section class="detail-section">
+      <h4>Suggested fields</h4>
+      <div class="fact-grid">
+        <div class="fact-row"><span class="fact-label">Tracks</span><div class="fact-value">${escapeHtml(labelList(draft.scoredTracks, "track"))}</div></div>
+        <div class="fact-row"><span class="fact-label">Specializations</span><div class="fact-value">${escapeHtml(labelList(draft.specializations, "specialization"))}</div></div>
+        <div class="fact-row"><span class="fact-label">Domains</span><div class="fact-value">${escapeHtml(labelList(draft.industryDomainInterests, "domain"))}</div></div>
+        <div class="fact-row"><span class="fact-label">Skills</span><div class="fact-value">${escapeHtml(arrayValue(draft.skills).map((skill) => skill.skill).join(", ") || "—")}</div></div>
+      </div>
+    </section>
+
+    <section class="detail-section">
+      <h4>Proposed tags</h4>
+      ${renderProposedTagControls(item)}
+    </section>
+
+    <section class="detail-section">
+      <h4>Evidence IDs</h4>
+      <div class="inline-list">
+        ${arrayValue(item.evidenceIds).map((id) => renderPill(id, "neutral")).join("") || renderPill("No evidence IDs", "warning")}
+      </div>
+    </section>
+
+    <details class="payload">
+      <summary>Enrichment payload</summary>
+      <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+    </details>
+  `;
+}
+
 function renderNav() {
   const navConfig = [
     [elements.navJobs, "jobs"],
     [elements.navReview, "review"],
     [elements.navApproved, "approved"],
+    [elements.navEnrichment, "enrichment"],
   ];
 
   navConfig.forEach(([element, page]) => {
@@ -1335,6 +1641,7 @@ function renderNav() {
   elements.pageJobs.hidden = state.page !== "jobs";
   elements.pageReview.hidden = state.page !== "review";
   elements.pageApproved.hidden = state.page !== "approved";
+  elements.pageEnrichment.hidden = state.page !== "enrichment";
 }
 
 function render() {
@@ -1346,6 +1653,8 @@ function render() {
   renderReviewDetail();
   renderApprovedTable();
   renderApprovedDetail();
+  renderEnrichmentTable();
+  renderEnrichmentDetail();
 }
 
 async function loadData() {
@@ -1355,22 +1664,26 @@ async function loadData() {
   const previousReviewRunId = state.reviewRunId;
   const previousCandidateId = state.selectedCandidateId;
   const previousApprovedId = state.selectedApprovedId;
+  const previousEnrichmentId = state.selectedEnrichmentId;
 
   try {
     await requestJson("/health");
-    const [runsPayload, candidatesPayload, approvedPayload] = await Promise.all([
+    const [runsPayload, candidatesPayload, approvedPayload, enrichmentPayload] = await Promise.all([
       requestJson("/source-runs?limit=50"),
       requestJson("/dedup-candidates?include=details"),
       requestJson("/approved-entities"),
+      requestJson("/enrichment-review-items"),
     ]);
 
     state.runs = sortRuns(normalizeListPayload(runsPayload));
     state.candidates = normalizeListPayload(candidatesPayload);
     state.approved = normalizeListPayload(approvedPayload);
+    state.enrichmentItems = normalizeListPayload(enrichmentPayload);
     state.selectedJobRunId = previousJobRunId;
     state.reviewRunId = previousReviewRunId;
     state.selectedCandidateId = previousCandidateId;
     state.selectedApprovedId = previousApprovedId;
+    state.selectedEnrichmentId = previousEnrichmentId;
     ensureSelections();
     setConnectionStatus("Ready", "ready");
     render();
@@ -1464,6 +1777,133 @@ async function submitReview(action) {
   }
 }
 
+async function generateEnrichment(approvedEntityId) {
+  if (!approvedEntityId || state.approvedSubmitting) {
+    return;
+  }
+
+  state.approvedSubmitting = true;
+  state.approvedMessage = "Generating enrichment...";
+  state.approvedMessageStatus = "";
+  renderApprovedDetail();
+
+  try {
+    const payload = await requestJson(`/approved-entities/${encodeURIComponent(approvedEntityId)}/enrichment:generate`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    const reviewItem = payload?.data?.reviewItem;
+    state.approvedMessage = "Enrichment draft created";
+    state.approvedMessageStatus = "success";
+    await loadData();
+    if (reviewItem?.id) {
+      state.selectedEnrichmentId = reviewItem.id;
+      setPage("enrichment");
+    }
+  } catch (error) {
+    state.approvedMessage = error.message;
+    state.approvedMessageStatus = "error";
+  } finally {
+    state.approvedSubmitting = false;
+    renderApprovedDetail();
+  }
+}
+
+function buildDraftFromEnrichmentForm(item) {
+  const draft = item?.draft || {};
+  const primaryTrack = elements.enrichmentDetailBody.querySelector("[data-enrichment-primary-track]")?.value || draft.primaryTrack || "unknown_other";
+  const trackValues = uniqueList([
+    primaryTrack,
+    ...selectedOptions(elements.enrichmentDetailBody.querySelector("#enrichmentTracks")),
+  ]);
+  const specializationValues = selectedOptions(elements.enrichmentDetailBody.querySelector("#enrichmentSpecializations"));
+  const domainValues = selectedOptions(elements.enrichmentDetailBody.querySelector("#enrichmentDomains"));
+  const skillValues = commaList(elements.enrichmentDetailBody.querySelector("[data-enrichment-skills]")?.value || "");
+  const careerStage = elements.enrichmentDetailBody.querySelector("[data-enrichment-career-stage]")?.value || draft.careerStage?.value || "unknown";
+  const contactability = elements.enrichmentDetailBody.querySelector("[data-enrichment-contactability]")?.value || draft.contactability?.value || "unknown";
+  const existingTracks = existingByKey(draft.scoredTracks, "track");
+  const existingSpecializations = existingByKey(draft.specializations, "specialization");
+  const existingDomains = existingByKey(draft.industryDomainInterests, "domain");
+  const existingSkills = existingByKey(draft.skills, "skill");
+  const checkedProposedTags = new Set(
+    Array.from(elements.enrichmentDetailBody.querySelectorAll("[data-proposed-tag]:checked")).map((input) => input.getAttribute("data-proposed-tag")),
+  );
+
+  return {
+    ...draft,
+    schemaVersion: "candidate-enrichment-draft-v1",
+    primaryTrack,
+    scoredTracks: trackValues.map((track) => existingTracks.get(track) || {
+      track,
+      score: track === primaryTrack ? 1 : 0.8,
+      evidenceIds: evidenceForField(item, "scoredTracks"),
+    }),
+    specializations: specializationValues.map((specialization) => existingSpecializations.get(specialization) || {
+      specialization,
+      confidence: 1,
+      evidenceIds: evidenceForField(item, "specializations"),
+    }),
+    skills: skillValues.map((skill) => existingSkills.get(skill) || {
+      skill,
+      confidence: 1,
+      evidenceIds: evidenceForField(item, "skills"),
+    }),
+    industryDomainInterests: domainValues.map((domain) => existingDomains.get(domain) || {
+      domain,
+      confidence: 1,
+      evidenceIds: evidenceForField(item, "industryDomainInterests"),
+    }),
+    careerStage: {
+      ...(draft.careerStage || {}),
+      value: careerStage,
+      confidence: draft.careerStage?.value === careerStage ? draft.careerStage?.confidence ?? 0.5 : 1,
+      evidenceIds: careerStage === "unknown" ? [] : arrayValue(draft.careerStage?.evidenceIds).length ? arrayValue(draft.careerStage.evidenceIds) : evidenceForField(item, "careerStage"),
+    },
+    contactability: {
+      ...(draft.contactability || {}),
+      value: contactability,
+      confidence: draft.contactability?.value === contactability ? draft.contactability?.confidence ?? 0.5 : 1,
+      evidenceIds: contactability === "unknown" ? [] : arrayValue(draft.contactability?.evidenceIds).length ? arrayValue(draft.contactability.evidenceIds) : evidenceForField(item, "contactability"),
+    },
+    proposedTags: arrayValue(draft.proposedTags).filter((tag) => checkedProposedTags.has(tag.tag)),
+    fieldEvidence: draft.fieldEvidence || {},
+    warnings: arrayValue(draft.warnings),
+  };
+}
+
+async function submitEnrichmentDecision(action) {
+  const item = getSelectedEnrichmentItem();
+  if (!item || item.status !== "pending_review" || state.enrichmentSubmitting) {
+    return;
+  }
+
+  state.enrichmentSubmitting = true;
+  state.enrichmentMessage = action === "approve" ? "Saving enrichment approval..." : "Saving enrichment decision...";
+  state.enrichmentMessageStatus = "";
+  renderEnrichmentDetail();
+
+  try {
+    await requestJson(`/enrichment-review-items/${encodeURIComponent(item.id)}/decision`, {
+      method: "POST",
+      body: JSON.stringify({
+        action,
+        notes: elements.enrichmentNote.value.trim(),
+        reviewedDraft: action === "approve" ? buildDraftFromEnrichmentForm(item) : undefined,
+      }),
+    });
+    elements.enrichmentNote.value = "";
+    state.enrichmentMessage = action === "approve" ? "Enrichment approved" : "Enrichment decision saved";
+    state.enrichmentMessageStatus = "success";
+    await loadData();
+  } catch (error) {
+    state.enrichmentMessage = error.message;
+    state.enrichmentMessageStatus = "error";
+  } finally {
+    state.enrichmentSubmitting = false;
+    renderEnrichmentDetail();
+  }
+}
+
 function setPage(page, updateHash = true) {
   state.page = normalizePage(page);
   if (updateHash) {
@@ -1484,6 +1924,7 @@ function bindEvents() {
   elements.navJobs.addEventListener("click", () => setPage("jobs"));
   elements.navReview.addEventListener("click", () => setPage("review"));
   elements.navApproved.addEventListener("click", () => setPage("approved"));
+  elements.navEnrichment.addEventListener("click", () => setPage("enrichment"));
 
   elements.openRunReviewButton.addEventListener("click", () => {
     state.reviewRunId = state.selectedJobRunId;
@@ -1557,7 +1998,23 @@ function bindEvents() {
     renderApprovedDetail();
   });
 
+  elements.enrichmentTableBody.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-enrichment-id]");
+    if (!button) {
+      return;
+    }
+    state.selectedEnrichmentId = button.getAttribute("data-enrichment-id") || "";
+    renderEnrichmentTable();
+    renderEnrichmentDetail();
+  });
+
   document.addEventListener("click", (event) => {
+    const generateButton = event.target.closest("[data-generate-enrichment]");
+    if (generateButton) {
+      void generateEnrichment(generateButton.getAttribute("data-generate-enrichment") || "");
+      return;
+    }
+
     const addSignalButton = event.target.closest("[data-add-review-signal]");
     if (addSignalButton) {
       const item = getSelectedCandidateItem();
@@ -1567,6 +2024,12 @@ function bindEvents() {
         setSignalSelection(item, [...selectedSignalsForItem(item), signal]);
         renderReviewDetail();
       }
+      return;
+    }
+
+    const enrichmentActionButton = event.target.closest("[data-enrichment-action]");
+    if (enrichmentActionButton) {
+      void submitEnrichmentDecision(enrichmentActionButton.getAttribute("data-enrichment-action") || "hold");
       return;
     }
 

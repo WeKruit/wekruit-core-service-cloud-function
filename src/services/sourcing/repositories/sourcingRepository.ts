@@ -2,6 +2,10 @@ import { getCoreFirestore } from '../../../bootstrap/firebase';
 import { sourcingCollections } from '../../../shared/firestore/collections';
 import type {
   ApprovedEntity,
+  CandidateEnrichmentReviewItem,
+  CandidateEnrichmentReviewStatus,
+  CandidateEnrichmentRun,
+  CandidateProfile,
   DedupCandidate,
   EvidenceRecord,
   ReviewLabelRecord,
@@ -29,6 +33,9 @@ export class SourcingRepository {
   private readonly dedupCandidateCollection = this.db.collection(sourcingCollections.dedupCandidates);
   private readonly reviewLabelCollection = this.db.collection(sourcingCollections.reviewLabels);
   private readonly approvedEntityCollection = this.db.collection(sourcingCollections.approvedEntities);
+  private readonly enrichmentRunCollection = this.db.collection(sourcingCollections.enrichmentRuns);
+  private readonly enrichmentReviewItemCollection = this.db.collection(sourcingCollections.enrichmentReviewItems);
+  private readonly candidateProfileCollection = this.db.collection(sourcingCollections.candidateProfiles);
 
   async createSourceRun(run: SourceRunRecord): Promise<SourceRunRecord> {
     await this.sourceRunCollection.doc(run.id).set(run);
@@ -248,5 +255,78 @@ export class SourcingRepository {
     return snapshot.docs
       .map((doc) => doc.data() as ApprovedEntity)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async getApprovedEntity(id: string): Promise<ApprovedEntity | null> {
+    const snapshot = await this.approvedEntityCollection.doc(id).get();
+    return snapshot.exists ? (snapshot.data() as ApprovedEntity) : null;
+  }
+
+  async getReviewLabelsByIds(ids: string[]): Promise<ReviewLabelRecord[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    const snapshots = await Promise.all(ids.map((id) => this.reviewLabelCollection.doc(id).get()));
+    return snapshots
+      .filter((snapshot) => snapshot.exists)
+      .map((snapshot) => snapshot.data() as ReviewLabelRecord);
+  }
+
+  async createEnrichmentRun(run: CandidateEnrichmentRun): Promise<CandidateEnrichmentRun> {
+    await this.enrichmentRunCollection.doc(run.id).set(run);
+    return run;
+  }
+
+  async createEnrichmentReviewItem(item: CandidateEnrichmentReviewItem): Promise<CandidateEnrichmentReviewItem> {
+    await this.enrichmentReviewItemCollection.doc(item.id).set(item);
+    return item;
+  }
+
+  async getEnrichmentReviewItem(id: string): Promise<CandidateEnrichmentReviewItem | null> {
+    const snapshot = await this.enrichmentReviewItemCollection.doc(id).get();
+    return snapshot.exists ? (snapshot.data() as CandidateEnrichmentReviewItem) : null;
+  }
+
+  async listEnrichmentReviewItems(
+    status?: CandidateEnrichmentReviewStatus,
+  ): Promise<CandidateEnrichmentReviewItem[]> {
+    const snapshot = status
+      ? await this.enrichmentReviewItemCollection.where('status', '==', status).limit(200).get()
+      : await this.enrichmentReviewItemCollection.limit(200).get();
+    return snapshot.docs
+      .map((doc) => doc.data() as CandidateEnrichmentReviewItem)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async listEnrichmentReviewItemsForApprovedEntity(
+    approvedEntityId: string,
+  ): Promise<CandidateEnrichmentReviewItem[]> {
+    const snapshot = await this.enrichmentReviewItemCollection
+      .where('approvedEntityId', '==', approvedEntityId)
+      .limit(50)
+      .get();
+    return snapshot.docs
+      .map((doc) => doc.data() as CandidateEnrichmentReviewItem)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async updateEnrichmentReviewItem(item: CandidateEnrichmentReviewItem): Promise<CandidateEnrichmentReviewItem> {
+    await this.enrichmentReviewItemCollection.doc(item.id).set(item);
+    return item;
+  }
+
+  async upsertCandidateProfile(profile: CandidateProfile): Promise<CandidateProfile> {
+    await this.candidateProfileCollection.doc(profile.id).set(profile);
+    return profile;
+  }
+
+  async getCandidateProfileByApprovedEntityId(approvedEntityId: string): Promise<CandidateProfile | null> {
+    const snapshot = await this.candidateProfileCollection
+      .where('approvedEntityId', '==', approvedEntityId)
+      .where('status', '==', 'active')
+      .limit(1)
+      .get();
+    const doc = snapshot.docs[0];
+    return doc ? (doc.data() as CandidateProfile) : null;
   }
 }

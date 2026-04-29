@@ -4,6 +4,10 @@ import test from 'node:test';
 import { SourcingService, type SourcingRepositoryPort } from './service';
 import type {
   ApprovedEntity,
+  CandidateEnrichmentDraft,
+  CandidateEnrichmentReviewItem,
+  CandidateEnrichmentRun,
+  CandidateProfile,
   DedupCandidate,
   EvidenceRecord,
   ReviewLabelRecord,
@@ -108,6 +112,83 @@ function buildApprovedEntity(overrides: Partial<ApprovedEntity> = {}): ApprovedE
     mergedAt: null,
     createdAt: '2026-04-27T00:00:00.000Z',
     updatedAt: '2026-04-27T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function buildReviewLabel(overrides: Partial<ReviewLabelRecord> = {}): ReviewLabelRecord {
+  return {
+    id: 'review_existing',
+    dedupCandidateId: 'dedup_alex',
+    identityLabel: null,
+    candidateDecision: 'approve_candidate',
+    reviewerId: 'phase5-test',
+    notes: 'Approved as a real technical candidate.',
+    suggestedSignals: ['open_source_contribution'],
+    confirmedSignals: ['open_source_contribution'],
+    sourceRecordIds: ['src_github_person_alex'],
+    evidenceIds: ['evidence_github_alex'],
+    createdAt: '2026-04-28T00:00:00.000Z',
+    updatedAt: '2026-04-28T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function buildEnrichmentDraft(overrides: Partial<CandidateEnrichmentDraft> = {}): CandidateEnrichmentDraft {
+  return {
+    schemaVersion: 'candidate-enrichment-draft-v1',
+    primaryTrack: 'software_engineering',
+    scoredTracks: [
+      {
+        track: 'software_engineering',
+        score: 0.88,
+        evidenceIds: ['evidence_github_alex'],
+      },
+    ],
+    specializations: [
+      {
+        specialization: 'developer_experience',
+        confidence: 0.72,
+        evidenceIds: ['evidence_github_alex'],
+      },
+    ],
+    skills: [
+      {
+        skill: 'typescript',
+        confidence: 0.68,
+        evidenceIds: ['evidence_github_alex'],
+      },
+    ],
+    industryDomainInterests: [
+      {
+        domain: 'developer_tools',
+        confidence: 0.66,
+        evidenceIds: ['evidence_github_alex'],
+      },
+    ],
+    careerStage: {
+      value: 'unknown',
+      confidence: 0.2,
+      evidenceIds: [],
+    },
+    contactability: {
+      value: 'medium',
+      confidence: 0.74,
+      evidenceIds: ['evidence_github_alex'],
+    },
+    matchingSummary: 'Open-source software engineering candidate with developer tooling evidence.',
+    fieldEvidence: {
+      primaryTrack: ['evidence_github_alex'],
+      scoredTracks: ['evidence_github_alex'],
+      specializations: ['evidence_github_alex'],
+      skills: ['evidence_github_alex'],
+      industryDomainInterests: ['evidence_github_alex'],
+      careerStage: [],
+      contactability: ['evidence_github_alex'],
+      matchingSummary: ['evidence_github_alex'],
+    },
+    proposedTags: [],
+    warnings: [],
     ...overrides,
   };
 }
@@ -348,4 +429,72 @@ test('createReviewLabel updates an existing global candidate when approved evide
   assert.deepEqual(result.approvedEntity.confirmedSignals, ['hackathon_participation', 'open_source_contribution']);
   assert.equal(result.approvedEntity.createdAt, existingEntity.createdAt);
   assert.equal(result.approvedEntity.needsEnrichment, true);
+});
+
+test('generateEnrichmentForApprovedEntity creates review item and approval materializes profile', async () => {
+  const approvedEntity = buildApprovedEntity();
+  const sourceRecord = buildSourceRecord();
+  const evidence = buildEvidence();
+  const reviewLabel = buildReviewLabel();
+  const enrichmentRuns: CandidateEnrichmentRun[] = [];
+  const enrichmentItemsById = new Map<string, CandidateEnrichmentReviewItem>();
+  const profilesById = new Map<string, CandidateProfile>();
+  const approvedEntitiesById = new Map([[approvedEntity.id, approvedEntity]]);
+  const draft = buildEnrichmentDraft();
+
+  const repository = {
+    getApprovedEntity: async (id: string) => approvedEntitiesById.get(id) ?? null,
+    getSourceRecordsByIds: async (ids: string[]) => [sourceRecord].filter((record) => ids.includes(record.id)),
+    getEvidenceByIds: async (ids: string[]) => [evidence].filter((entry) => ids.includes(entry.id)),
+    getReviewLabelsByIds: async (ids: string[]) => [reviewLabel].filter((label) => ids.includes(label.id)),
+    listEnrichmentReviewItemsForApprovedEntity: async (approvedEntityId: string) =>
+      [...enrichmentItemsById.values()].filter((item) => item.approvedEntityId === approvedEntityId),
+    createEnrichmentRun: async (run: CandidateEnrichmentRun) => {
+      enrichmentRuns.push(run);
+      return run;
+    },
+    createEnrichmentReviewItem: async (item: CandidateEnrichmentReviewItem) => {
+      enrichmentItemsById.set(item.id, item);
+      return item;
+    },
+    getEnrichmentReviewItem: async (id: string) => enrichmentItemsById.get(id) ?? null,
+    updateEnrichmentReviewItem: async (item: CandidateEnrichmentReviewItem) => {
+      enrichmentItemsById.set(item.id, item);
+      return item;
+    },
+    listEnrichmentReviewItems: async () => [...enrichmentItemsById.values()],
+    upsertApprovedEntity: async (entity: ApprovedEntity) => {
+      approvedEntitiesById.set(entity.id, entity);
+      return entity;
+    },
+    getCandidateProfileByApprovedEntityId: async (approvedEntityId: string) =>
+      [...profilesById.values()].find((profile) => profile.approvedEntityId === approvedEntityId) ?? null,
+    upsertCandidateProfile: async (profile: CandidateProfile) => {
+      profilesById.set(profile.id, profile);
+      return profile;
+    },
+  } as Partial<SourcingRepositoryPort> as SourcingRepositoryPort;
+
+  const service = new SourcingService(repository, {
+    inferCandidateProfile: async () => draft,
+  });
+
+  const generated = await service.generateEnrichmentForApprovedEntity(approvedEntity.id);
+  assert.equal(generated.enrichmentRun?.status, 'completed');
+  assert.equal(generated.reviewItem.status, 'pending_review');
+  assert.equal(generated.reviewItem.draft.primaryTrack, 'software_engineering');
+  assert.equal(approvedEntitiesById.get(approvedEntity.id)?.enrichmentStatus, 'in_review');
+
+  const approved = await service.submitEnrichmentReviewDecision(generated.reviewItem.id, {
+    action: 'approve',
+    reviewerId: 'phase5-test',
+    notes: 'Looks correct.',
+  });
+
+  assert.equal(approved.reviewItem.status, 'approved');
+  assert.ok(approved.candidateProfile);
+  assert.equal(approved.candidateProfile.primaryTrack, 'software_engineering');
+  assert.equal(approved.candidateProfile.profileVersion, 1);
+  assert.equal(approvedEntitiesById.get(approvedEntity.id)?.enrichmentStatus, 'enriched');
+  assert.equal(approvedEntitiesById.get(approvedEntity.id)?.needsEnrichment, false);
 });

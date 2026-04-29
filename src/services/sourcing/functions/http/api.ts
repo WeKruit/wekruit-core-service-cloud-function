@@ -1,12 +1,15 @@
 import cors from 'cors';
 import express from 'express';
+import { defineSecret } from 'firebase-functions/params';
 import { onRequest } from 'firebase-functions/v2/https';
 import { z } from 'zod';
 
 import {
   batchUpsertSourceRecordsSchema,
+  createEnrichmentReviewDecisionSchema,
   createReviewLabelSchema,
   createSourceRunSchema,
+  candidateEnrichmentReviewStatusSchema,
 } from '../../domain/records';
 import { SourcingService } from '../../application/service';
 
@@ -15,6 +18,7 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: '2mb' }));
 
 const service = new SourcingService();
+const sourcingOpenAiApiKey = defineSecret('OPENAI_API_KEY');
 
 function parseLimit(value: unknown, fallback: number, max: number): number {
   if (typeof value !== 'string') {
@@ -172,6 +176,47 @@ app.get('/api/sourcing/approved-entities', async (_req, res, next) => {
   }
 });
 
+app.post('/api/sourcing/approved-entities/:approvedEntityId/enrichment:generate', async (req, res, next) => {
+  try {
+    const data = await service.generateEnrichmentForApprovedEntity(req.params.approvedEntityId);
+    res.status(201).json({ data });
+  } catch (error) {
+    if (error instanceof Error) {
+      jsonError(res, 422, error.message);
+      return;
+    }
+    next(error);
+  }
+});
+
+app.get('/api/sourcing/enrichment-review-items', async (req, res, next) => {
+  try {
+    const parsedStatus = typeof req.query.status === 'string'
+      ? candidateEnrichmentReviewStatusSchema.safeParse(req.query.status)
+      : null;
+    const data = await service.listEnrichmentReviewItems(
+      parsedStatus?.success ? parsedStatus.data : undefined,
+    );
+    res.status(200).json({ data, total: data.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/sourcing/enrichment-review-items/:reviewItemId/decision', async (req, res, next) => {
+  try {
+    const parsed = createEnrichmentReviewDecisionSchema.parse(req.body);
+    const data = await service.submitEnrichmentReviewDecision(req.params.reviewItemId, parsed);
+    res.status(200).json({ data });
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof Error) {
+      jsonError(res, 422, error.message);
+      return;
+    }
+    next(error);
+  }
+});
+
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const message = error instanceof Error ? error.message : 'Internal server error';
   jsonError(res, 500, message);
@@ -181,6 +226,7 @@ export const sourcingApi = onRequest(
   {
     region: 'us-central1',
     invoker: 'public',
+    secrets: [sourcingOpenAiApiKey],
   },
   app,
 );

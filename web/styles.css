@@ -325,6 +325,13 @@ textarea {
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
+#pageEnrichment .detail-panel {
+  position: sticky;
+  top: 4.6rem;
+  max-height: calc(100vh - 5.4rem);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
 .detail-head {
   display: grid;
   gap: 0.22rem;
@@ -475,6 +482,11 @@ textarea {
 }
 
 #pageReview .detail-body {
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+#pageEnrichment .detail-body {
   overflow: auto;
   padding-right: 0.2rem;
 }
@@ -793,6 +805,22 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.edit-grid--stacked {
+  grid-template-columns: 1fr;
+  margin-top: 0.65rem;
+}
+
+.edit-grid select[multiple] {
+  min-height: 10rem;
+  border-radius: 14px;
+}
+
 .compare-table-wrap {
   overflow: auto;
   border: 1px solid var(--line);
@@ -964,14 +992,20 @@ details.payload pre {
     grid-template-columns: 1fr;
   }
 
-  #pageReview .detail-panel {
+  #pageReview .detail-panel,
+  #pageEnrichment .detail-panel {
     position: static;
     max-height: none;
   }
 
-  #pageReview .detail-body {
+  #pageReview .detail-body,
+  #pageEnrichment .detail-body {
     overflow: visible;
     padding-right: 0;
+  }
+
+  .edit-grid {
+    grid-template-columns: 1fr;
   }
 
   .source-grid {

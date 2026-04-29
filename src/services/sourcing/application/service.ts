@@ -10,9 +10,27 @@ import {
   extractEvidenceFromSourceRecord,
   stableHash,
 } from './extraction';
+import {
+  buildEnrichmentEvidencePack,
+  buildEvidencePackHash,
+  deriveDraftFieldEvidence,
+  extractDeterministicFeatures,
+  validateCandidateEnrichmentDraft,
+} from './enrichment';
+import {
+  getOpenAISourcingEnrichmentConfig,
+  OpenAISourcingEnrichmentClient,
+  type SourcingEnrichmentInferencePort,
+} from '../integrations/openai';
 import type {
   ApprovedEntity,
   BatchUpsertSourceRecordsInput,
+  CandidateEnrichmentDraft,
+  CandidateEnrichmentReviewItem,
+  CandidateEnrichmentReviewStatus,
+  CandidateEnrichmentRun,
+  CandidateProfile,
+  CreateEnrichmentReviewDecisionInput,
   SourcingCandidateDecision,
   SourcingIdentityLabel,
   SourcingReviewStatus,
@@ -123,6 +141,16 @@ export type SourcingRepositoryPort = Pick<
   | 'findApprovedEntitiesBySourceRecordIds'
   | 'findApprovedEntitiesByIdentityEvidenceHashes'
   | 'listApprovedEntities'
+  | 'getApprovedEntity'
+  | 'getReviewLabelsByIds'
+  | 'createEnrichmentRun'
+  | 'createEnrichmentReviewItem'
+  | 'getEnrichmentReviewItem'
+  | 'listEnrichmentReviewItems'
+  | 'listEnrichmentReviewItemsForApprovedEntity'
+  | 'updateEnrichmentReviewItem'
+  | 'upsertCandidateProfile'
+  | 'getCandidateProfileByApprovedEntityId'
 >;
 
 const strongIdentityEvidenceTypes = new Set<EvidenceRecord['evidenceType']>([
@@ -315,7 +343,10 @@ function aggregateDedupCandidates(candidates: DedupCandidate[]): DedupCandidate[
 }
 
 export class SourcingService {
-  constructor(private readonly repository: SourcingRepositoryPort = new SourcingRepository()) {}
+  constructor(
+    private readonly repository: SourcingRepositoryPort = new SourcingRepository(),
+    private readonly enrichmentInference?: SourcingEnrichmentInferencePort,
+  ) {}
 
   async createSourceRun(input: CreateSourceRunInput): Promise<SourceRunRecord> {
     const now = new Date().toISOString();
@@ -515,6 +546,264 @@ export class SourcingService {
 
   async listApprovedEntities(): Promise<ApprovedEntity[]> {
     return this.repository.listApprovedEntities();
+  }
+
+  async generateEnrichmentForApprovedEntity(approvedEntityId: string): Promise<{
+    enrichmentRun: CandidateEnrichmentRun | null;
+    reviewItem: CandidateEnrichmentReviewItem;
+  }> {
+    const approvedEntity = await this.repository.getApprovedEntity(approvedEntityId);
+    if (!approvedEntity) {
+      throw new Error(`Approved entity "${approvedEntityId}" was not found.`);
+    }
+    if (!isUpdatableCandidateEntity(approvedEntity)) {
+      throw new Error(`Approved entity "${approvedEntityId}" is not active.`);
+    }
+
+    const [sourceRecords, evidence, reviewLabels] = await Promise.all([
+      this.repository.getSourceRecordsByIds(approvedEntity.sourceRecordIds),
+      this.repository.getEvidenceByIds(approvedEntity.evidenceIds),
+      this.repository.getReviewLabelsByIds(approvedEntity.reviewLabelIds),
+    ]);
+    const evidencePack = buildEnrichmentEvidencePack({
+      approvedEntity,
+      sourceRecords,
+      evidence,
+      reviewLabels,
+    });
+    const evidencePackHash = buildEvidencePackHash(evidencePack);
+    const existingReviewItem = (await this.repository.listEnrichmentReviewItemsForApprovedEntity(approvedEntity.id))
+      .find((item) => item.status === 'pending_review' && item.evidencePackHash === evidencePackHash);
+    if (existingReviewItem) {
+      return {
+        enrichmentRun: null,
+        reviewItem: existingReviewItem,
+      };
+    }
+
+    const now = new Date().toISOString();
+    const deterministicFeatures = extractDeterministicFeatures(evidencePack);
+    const { inference, provider, model } = this.resolveEnrichmentInference();
+    const runId = `enrich_run_${randomUUID()}`;
+
+    try {
+      const rawDraft = await inference.inferCandidateProfile({
+        evidencePack,
+        deterministicFeatures,
+      });
+      const { draft, warnings } = validateCandidateEnrichmentDraft(
+        deriveDraftFieldEvidence(rawDraft),
+        approvedEntity.evidenceIds,
+      );
+      const enrichmentRun: CandidateEnrichmentRun = {
+        id: runId,
+        approvedEntityId: approvedEntity.id,
+        status: 'completed',
+        provider,
+        model,
+        evidencePackHash,
+        evidencePack: evidencePack as unknown as Record<string, unknown>,
+        deterministicFeatures,
+        draft,
+        validationWarnings: warnings,
+        error: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.repository.createEnrichmentRun(enrichmentRun);
+
+      const reviewItem: CandidateEnrichmentReviewItem = {
+        id: `enrich_review_${stableHash(`enrichment-review:${approvedEntity.id}:${evidencePackHash}`).slice(0, 24)}`,
+        approvedEntityId: approvedEntity.id,
+        enrichmentRunId: enrichmentRun.id,
+        status: 'pending_review',
+        evidencePackHash,
+        sourceRecordIds: approvedEntity.sourceRecordIds,
+        evidenceIds: approvedEntity.evidenceIds,
+        reviewLabelIds: approvedEntity.reviewLabelIds,
+        displayName: approvedEntity.displayName,
+        draft,
+        validationWarnings: warnings,
+        reviewerId: null,
+        reviewNote: '',
+        reviewedDraft: null,
+        reviewedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.repository.createEnrichmentReviewItem(reviewItem);
+      await this.repository.upsertApprovedEntity({
+        ...approvedEntity,
+        needsEnrichment: true,
+        enrichmentStatus: 'in_review',
+        updatedAt: now,
+      });
+
+      return {
+        enrichmentRun,
+        reviewItem,
+      };
+    } catch (error) {
+      const enrichmentRun: CandidateEnrichmentRun = {
+        id: runId,
+        approvedEntityId: approvedEntity.id,
+        status: 'failed',
+        provider,
+        model,
+        evidencePackHash,
+        evidencePack: evidencePack as unknown as Record<string, unknown>,
+        deterministicFeatures,
+        draft: null,
+        validationWarnings: [],
+        error: error instanceof Error ? error.message : String(error),
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.repository.createEnrichmentRun(enrichmentRun);
+      throw error;
+    }
+  }
+
+  async listEnrichmentReviewItems(
+    status?: CandidateEnrichmentReviewStatus,
+  ): Promise<CandidateEnrichmentReviewItem[]> {
+    return this.repository.listEnrichmentReviewItems(status);
+  }
+
+  async submitEnrichmentReviewDecision(
+    reviewItemId: string,
+    input: CreateEnrichmentReviewDecisionInput,
+  ): Promise<{
+    reviewItem: CandidateEnrichmentReviewItem;
+    candidateProfile: CandidateProfile | null;
+  }> {
+    const reviewItem = await this.repository.getEnrichmentReviewItem(reviewItemId);
+    if (!reviewItem) {
+      throw new Error(`Enrichment review item "${reviewItemId}" was not found.`);
+    }
+    if (reviewItem.status !== 'pending_review') {
+      throw new Error(`Enrichment review item "${reviewItemId}" is already ${reviewItem.status}.`);
+    }
+
+    const now = new Date().toISOString();
+    const reviewedAt = input.action === 'hold' ? null : now;
+
+    if (input.action !== 'approve') {
+      const updatedReviewItem: CandidateEnrichmentReviewItem = {
+        ...reviewItem,
+        status: input.action === 'hold' ? 'held' : 'rejected',
+        reviewerId: input.reviewerId,
+        reviewNote: input.notes,
+        reviewedAt,
+        updatedAt: now,
+      };
+      await this.repository.updateEnrichmentReviewItem(updatedReviewItem);
+      const approvedEntity = await this.repository.getApprovedEntity(reviewItem.approvedEntityId);
+      if (approvedEntity && input.action === 'reject') {
+        await this.repository.upsertApprovedEntity({
+          ...approvedEntity,
+          needsEnrichment: true,
+          enrichmentStatus: 'needs_enrichment',
+          updatedAt: now,
+        });
+      }
+      return {
+        reviewItem: updatedReviewItem,
+        candidateProfile: null,
+      };
+    }
+
+    const { draft, warnings } = validateCandidateEnrichmentDraft(
+      deriveDraftFieldEvidence(input.reviewedDraft ?? reviewItem.draft),
+      reviewItem.evidenceIds,
+    );
+    const candidateProfile = await this.materializeCandidateProfile(reviewItem, draft, now);
+    const updatedReviewItem: CandidateEnrichmentReviewItem = {
+      ...reviewItem,
+      status: 'approved',
+      reviewerId: input.reviewerId,
+      reviewNote: input.notes,
+      reviewedDraft: draft,
+      reviewedAt,
+      validationWarnings: sortedUnique([...reviewItem.validationWarnings, ...warnings]),
+      updatedAt: now,
+    };
+    await this.repository.updateEnrichmentReviewItem(updatedReviewItem);
+
+    const approvedEntity = await this.repository.getApprovedEntity(reviewItem.approvedEntityId);
+    if (approvedEntity) {
+      await this.repository.upsertApprovedEntity({
+        ...approvedEntity,
+        needsEnrichment: false,
+        enrichmentStatus: 'enriched',
+        updatedAt: now,
+      });
+    }
+
+    return {
+      reviewItem: updatedReviewItem,
+      candidateProfile,
+    };
+  }
+
+  private resolveEnrichmentInference(): {
+    inference: SourcingEnrichmentInferencePort;
+    provider: string;
+    model: string;
+  } {
+    if (this.enrichmentInference) {
+      return {
+        inference: this.enrichmentInference,
+        provider: 'test',
+        model: 'test-model',
+      };
+    }
+    const config = getOpenAISourcingEnrichmentConfig();
+    return {
+      inference: new OpenAISourcingEnrichmentClient(config),
+      provider: 'openai',
+      model: config.model,
+    };
+  }
+
+  private async materializeCandidateProfile(
+    reviewItem: CandidateEnrichmentReviewItem,
+    draft: CandidateEnrichmentDraft,
+    now: string,
+  ): Promise<CandidateProfile> {
+    const approvedEntity = await this.repository.getApprovedEntity(reviewItem.approvedEntityId);
+    if (!approvedEntity) {
+      throw new Error(`Approved entity "${reviewItem.approvedEntityId}" was not found.`);
+    }
+    const existingProfile = await this.repository.getCandidateProfileByApprovedEntityId(approvedEntity.id);
+    const profile: CandidateProfile = {
+      id: existingProfile?.id ?? `profile_${approvedEntity.id}`,
+      approvedEntityId: approvedEntity.id,
+      enrichmentRunId: reviewItem.enrichmentRunId,
+      enrichmentReviewItemId: reviewItem.id,
+      schemaVersion: 'candidate-profile-v1',
+      profileVersion: (existingProfile?.profileVersion ?? 0) + 1,
+      status: 'active',
+      displayName: approvedEntity.displayName,
+      sourceNames: approvedEntity.sourceNames,
+      sourceDomains: approvedEntity.sourceDomains,
+      sourceRecordIds: reviewItem.sourceRecordIds,
+      evidenceIds: reviewItem.evidenceIds,
+      reviewLabelIds: reviewItem.reviewLabelIds,
+      primaryTrack: draft.primaryTrack,
+      scoredTracks: draft.scoredTracks,
+      specializations: draft.specializations,
+      skills: draft.skills,
+      industryDomainInterests: draft.industryDomainInterests,
+      careerStage: draft.careerStage,
+      contactability: draft.contactability,
+      matchingSummary: draft.matchingSummary,
+      fieldEvidence: draft.fieldEvidence,
+      proposedTags: draft.proposedTags,
+      createdAt: existingProfile?.createdAt ?? now,
+      updatedAt: now,
+    };
+    return this.repository.upsertCandidateProfile(profile);
   }
 
   private async refreshRunCounts(runId: string, now: string): Promise<SourceRunRecord> {

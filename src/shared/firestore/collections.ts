@@ -20,4 +20,7 @@ export const sourcingCollections = {
   dedupCandidates: 'sourcing-dedup-candidates',
   reviewLabels: 'sourcing-review-labels',
   approvedEntities: 'sourcing-approved-entities',
+  enrichmentRuns: 'sourcing-enrichment-runs',
+  enrichmentReviewItems: 'sourcing-enrichment-review-items',
+  candidateProfiles: 'sourcing-candidate-profiles',
 } as const;

@@ -30,6 +30,10 @@
             <span>Approved</span>
             <span id="navApprovedCount" class="topnav__count">0</span>
           </button>
+          <button id="navEnrichment" class="topnav__button" type="button" data-page="enrichment">
+            <span>Enrichment</span>
+            <span id="navEnrichmentCount" class="topnav__count">0</span>
+          </button>
         </nav>
 
         <div class="topbar__actions">
@@ -235,9 +239,67 @@
             </aside>
           </div>
         </section>
+
+        <section id="pageEnrichment" class="page" hidden>
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">Enrichment</p>
+              <h2>Enrichment review</h2>
+            </div>
+            <p id="enrichmentMeta" class="page-meta">Loading enrichment queue...</p>
+          </div>
+
+          <div class="page-layout">
+            <section class="table-panel">
+              <div class="table-scroll table-scroll--tall">
+                <table class="grid-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Candidate</th>
+                      <th scope="col">Primary track</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody id="enrichmentTableBody">
+                    <tr>
+                      <td colspan="4" class="empty-row">Loading enrichment queue...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="detail-panel">
+              <div class="detail-head">
+                <p class="eyebrow">Enrichment detail</p>
+                <h3 id="enrichmentDetailTitle">Nothing selected</h3>
+                <p id="enrichmentDetailSubtitle" class="detail-subtitle">Select an enrichment item to review suggested labels.</p>
+              </div>
+              <div id="enrichmentDetailBody" class="detail-body">
+                <p class="empty-detail">Select an enrichment row to inspect labels and supporting evidence.</p>
+              </div>
+
+              <div class="detail-actions detail-actions--stack">
+                <label class="field field--notes" for="enrichmentNote">
+                  <span>Review note</span>
+                  <textarea id="enrichmentNote" rows="3" placeholder="Write the reasoning that should be saved with this enrichment decision"></textarea>
+                </label>
+
+                <div class="action-row">
+                  <button id="enrichmentApproveButton" type="button" data-enrichment-action="approve">Approve enrichment</button>
+                  <button id="enrichmentHoldButton" type="button" class="button-muted" data-enrichment-action="hold">Hold</button>
+                  <button id="enrichmentRejectButton" type="button" class="button-muted" data-enrichment-action="reject">Reject draft</button>
+                </div>
+
+                <p id="enrichmentResult" class="detail-result" aria-live="polite"></p>
+              </div>
+            </aside>
+          </div>
+        </section>
       </main>
     </div>
 
-    <script src="/app.js?v=phase4-review-labels" defer></script>
+    <script src="/app.js?v=phase5-enrichment" defer></script>
   </body>
 </html>
