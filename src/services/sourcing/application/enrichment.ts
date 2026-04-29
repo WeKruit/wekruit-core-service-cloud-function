@@ -244,9 +244,28 @@ export function validateCandidateEnrichmentDraft(input: unknown, approvedEvidenc
   draft: CandidateEnrichmentDraft;
   warnings: string[];
 } {
-  const draft = candidateEnrichmentDraftSchema.parse(input);
+  const parsedDraft = candidateEnrichmentDraftSchema.parse(input);
   const availableEvidenceIds = new Set(approvedEvidenceIds);
   const warnings: string[] = [];
+  const draft: CandidateEnrichmentDraft = {
+    ...parsedDraft,
+    skills: parsedDraft.skills.filter((skill) => {
+      assertKnownEvidenceIds(`skills.${skill.skill}`, skill.evidenceIds, availableEvidenceIds);
+      if (skill.evidenceIds.length > 0) {
+        return true;
+      }
+      warnings.push(`Dropped skill "${skill.skill}" because it did not include approved evidence.`);
+      return false;
+    }),
+    proposedTags: parsedDraft.proposedTags.filter((tag) => {
+      assertKnownEvidenceIds(`proposedTags.${tag.tag}`, tag.evidenceIds, availableEvidenceIds);
+      if (tag.evidenceIds.length > 0) {
+        return true;
+      }
+      warnings.push(`Dropped proposed tag "${tag.tag}" because it did not include approved evidence.`);
+      return false;
+    }),
+  };
 
   if (!draft.scoredTracks.some((track) => track.track === draft.primaryTrack)) {
     throw new Error(`Primary track "${draft.primaryTrack}" must also appear in scoredTracks.`);
@@ -272,10 +291,6 @@ export function validateCandidateEnrichmentDraft(input: unknown, approvedEvidenc
     }
   }
 
-  for (const skill of draft.skills) {
-    requireEvidence(`skills.${skill.skill}`, skill.evidenceIds, availableEvidenceIds);
-  }
-
   for (const interest of draft.industryDomainInterests) {
     if (interest.domain !== 'unknown_other') {
       requireEvidence(
@@ -295,10 +310,6 @@ export function validateCandidateEnrichmentDraft(input: unknown, approvedEvidenc
       draft.contactability.evidenceIds,
       availableEvidenceIds,
     );
-  }
-
-  for (const proposedTag of draft.proposedTags) {
-    requireEvidence(`proposedTags.${proposedTag.tag}`, proposedTag.evidenceIds, availableEvidenceIds);
   }
 
   return {

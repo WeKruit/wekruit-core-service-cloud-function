@@ -1452,7 +1452,7 @@ function renderApprovedTable() {
     .map((entity) => {
       const selectedClass = entity.id === state.selectedApprovedId ? "is-selected" : "";
       return `
-        <tr class="${selectedClass}">
+        <tr class="${selectedClass}" data-approved-id="${escapeHtml(entity.id)}">
           <td>
             <button type="button" class="row-button" data-approved-id="${escapeHtml(entity.id)}">
               <span class="row-primary">${escapeHtml(entity.displayName || entity.id)}</span>
@@ -1546,7 +1546,7 @@ function renderApprovedDetail() {
 
 function renderEnrichmentTable() {
   const items = filteredEnrichmentItems();
-  elements.navEnrichmentCount.textContent = String(pendingEnrichmentItems().length);
+  elements.navEnrichmentCount.textContent = String(state.enrichmentItems.length);
   elements.enrichmentMeta.textContent = items.length
     ? `${items.length} enrichment items · ${pendingEnrichmentItems().length} pending`
     : "No enrichment items found";
@@ -1560,7 +1560,7 @@ function renderEnrichmentTable() {
     .map((item) => {
       const selectedClass = item.id === state.selectedEnrichmentId ? "is-selected" : "";
       return `
-        <tr class="${selectedClass}">
+        <tr class="${selectedClass}" data-enrichment-id="${escapeHtml(item.id)}">
           <td>
             <button type="button" class="row-button" data-enrichment-id="${escapeHtml(item.id)}">
               <span class="row-primary">${escapeHtml(item.displayName || item.approvedEntityId)}</span>

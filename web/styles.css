@@ -458,6 +458,8 @@ textarea {
   cursor: pointer;
 }
 
+.grid-table tbody tr[data-approved-id],
+.grid-table tbody tr[data-enrichment-id],
 .grid-table tbody tr[data-profile-id] {
   cursor: pointer;
 }
