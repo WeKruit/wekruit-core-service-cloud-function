@@ -1150,7 +1150,7 @@ function renderReviewDetail() {
   elements.reviewRejectBadButton.disabled = disableActions;
   elements.reviewRejectNotRelevantButton.disabled = disableActions;
   elements.reviewHoldButton.disabled = disableActions;
-  elements.reviewApproveButton.textContent = singleton ? "Approve candidate" : "Approve candidate";
+  elements.reviewApproveButton.textContent = singleton ? "Approve candidate" : "Approve merge";
   elements.reviewSeparateButton.hidden = singleton;
   elements.reviewRejectBadButton.hidden = false;
   elements.reviewRejectNotRelevantButton.hidden = false;
@@ -1381,7 +1381,10 @@ async function loadData() {
   }
 }
 
-function reviewActionLabel(action) {
+function reviewActionLabel(action, item = null) {
+  if (action === "approve_candidate" && item && !isSingletonCandidate(candidateObject(item), item)) {
+    return "Approve merge";
+  }
   const labels = {
     approve_candidate: "Approve candidate",
     keep_separate: "Keep separate",
@@ -1433,7 +1436,7 @@ async function submitReview(action) {
   }
 
   state.reviewSubmitting = true;
-  state.reviewMessage = `Saving ${reviewActionLabel(action)}...`;
+  state.reviewMessage = `Saving ${reviewActionLabel(action, item)}...`;
   state.reviewMessageStatus = "";
   renderReviewDetail();
 
@@ -1449,7 +1452,7 @@ async function submitReview(action) {
       }),
     });
     elements.reviewNote.value = "";
-    state.reviewMessage = `${reviewActionLabel(action)} saved`;
+    state.reviewMessage = `${reviewActionLabel(action, item)} saved`;
     state.reviewMessageStatus = "success";
     await loadData();
   } catch (error) {
