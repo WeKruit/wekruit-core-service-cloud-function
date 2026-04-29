@@ -120,8 +120,22 @@ export type SourcingRepositoryPort = Pick<
   | 'createReviewLabel'
   | 'markDedupCandidatesReviewed'
   | 'upsertApprovedEntity'
+  | 'findApprovedEntitiesBySourceRecordIds'
+  | 'findApprovedEntitiesByIdentityEvidenceHashes'
   | 'listApprovedEntities'
 >;
+
+const strongIdentityEvidenceTypes = new Set<EvidenceRecord['evidenceType']>([
+  'email',
+  'orcid',
+  'homepage',
+  'github',
+  'dblp',
+  'openreview',
+  'google_scholar',
+  'source_url',
+  'source_native_id',
+]);
 
 function buildCandidateGroupId(candidate: Pick<DedupCandidate, 'entityType' | 'sourceRecordIds'>): string {
   return stableHash(`dedup-group:${candidate.entityType}:${sortedUnique(candidate.sourceRecordIds).join(':')}`).slice(0, 32);
@@ -164,6 +178,39 @@ function suggestedSignalsFromRecord(record: SourceRecord): string[] {
 
 function collectSuggestedSignals(records: SourceRecord[]): string[] {
   return sortedUnique(records.flatMap((record) => suggestedSignalsFromRecord(record)));
+}
+
+function identityEvidenceHashesFromEvidence(evidence: EvidenceRecord[]): string[] {
+  return sortedUnique(
+    evidence
+      .filter((entry) => strongIdentityEvidenceTypes.has(entry.evidenceType))
+      .map((entry) => entry.valueHash),
+  );
+}
+
+function buildGlobalCandidateId(input: {
+  identityEvidenceHashes: string[];
+  sourceRecordIds: string[];
+}): string {
+  const stableParts = input.identityEvidenceHashes.length > 0
+    ? input.identityEvidenceHashes
+    : input.sourceRecordIds;
+  return `cand_${stableHash(`global-candidate:${stableParts.join(':')}`).slice(0, 24)}`;
+}
+
+function reviewLabelIdsForEntity(entity: ApprovedEntity | null, newReviewLabelId: string): string[] {
+  if (!entity) {
+    return [newReviewLabelId];
+  }
+  return sortedUnique([
+    ...(entity.reviewLabelIds ?? []),
+    entity.approvedByReviewLabelId,
+    newReviewLabelId,
+  ]);
+}
+
+function isUpdatableCandidateEntity(entity: ApprovedEntity): boolean {
+  return !entity.status || entity.status === 'active' || entity.status === 'approved';
 }
 
 function isSingletonCandidate(candidate: DedupCandidate): boolean {
@@ -446,16 +493,23 @@ export class SourcingService {
       createdAt: now,
       updatedAt: now,
     };
+    const shouldMaterialize = shouldMaterializeApprovedEntity({ candidate, identityLabel, candidateDecision });
+    const materializationTarget = shouldMaterialize
+      ? await this.resolveApprovedEntityForMaterialization({
+        sourceRecordIds: reviewLabel.sourceRecordIds,
+        identityEvidenceHashes: identityEvidenceHashesFromEvidence(evidence),
+      })
+      : null;
 
     await this.repository.createReviewLabel(reviewLabel);
     const reviewedStatus = statusForReview({ candidate, identityLabel, candidateDecision });
     await this.repository.markDedupCandidatesReviewed(rawCandidates, reviewedStatus, now);
 
-    if (!shouldMaterializeApprovedEntity({ candidate, identityLabel, candidateDecision })) {
+    if (!shouldMaterialize) {
       return { reviewLabel, approvedEntity: null };
     }
 
-    const approvedEntity = await this.materializeApprovedEntity(candidate, reviewLabel, now);
+    const approvedEntity = await this.materializeApprovedEntity(candidate, reviewLabel, now, materializationTarget);
     return { reviewLabel, approvedEntity };
   }
 
@@ -599,33 +653,87 @@ export class SourcingService {
     candidate: DedupCandidate,
     reviewLabel: ReviewLabelRecord,
     now: string,
+    resolvedEntity?: ApprovedEntity | null,
   ): Promise<ApprovedEntity> {
     const [sourceRecords, evidence] = await Promise.all([
       this.repository.getSourceRecordsByIds(candidate.sourceRecordIds),
       this.repository.listEvidenceBySourceRecordIds(candidate.sourceRecordIds),
     ]);
     const sourceRecordIds = sortedUnique(sourceRecords.map((record) => record.id));
-    const entityId = stableHash(`approved-person:${sourceRecordIds.join(':')}`).slice(0, 32);
+    const evidenceIds = sortedUnique(evidence.map((entry) => entry.id));
+    const identityEvidenceHashes = identityEvidenceHashesFromEvidence(evidence);
+    const existingEntity = resolvedEntity === undefined
+      ? await this.resolveApprovedEntityForMaterialization({
+        sourceRecordIds,
+        identityEvidenceHashes,
+      })
+      : resolvedEntity;
+    const entityId = existingEntity?.id ?? buildGlobalCandidateId({ identityEvidenceHashes, sourceRecordIds });
 
     const approvedEntity: ApprovedEntity = {
       id: entityId,
       entityType: candidate.entityType,
-      status: 'approved',
-      sourceRecordIds,
-      evidenceIds: sortedUnique(evidence.map((entry) => entry.id)),
+      status: 'active',
+      schemaVersion: 'global-candidate-v1',
+      sourceRecordIds: sortedUnique([...(existingEntity?.sourceRecordIds ?? []), ...sourceRecordIds]),
+      evidenceIds: sortedUnique([...(existingEntity?.evidenceIds ?? []), ...evidenceIds]),
+      sourceNames: sortedUnique([
+        ...(existingEntity?.sourceNames ?? []),
+        ...sourceRecords.map((record) => record.sourceName),
+      ]),
+      sourceDomains: sortedUnique([
+        ...(existingEntity?.sourceDomains ?? []),
+        ...sourceRecords.map((record) => record.sourceDomain),
+      ]),
+      reviewLabelIds: reviewLabelIdsForEntity(existingEntity, reviewLabel.id),
+      identityEvidenceHashes: sortedUnique([
+        ...(existingEntity?.identityEvidenceHashes ?? []),
+        ...identityEvidenceHashes,
+      ]),
       approvedByReviewLabelId: reviewLabel.id,
-      displayName: candidate.displayName ?? pickDisplayName(sourceRecords),
-      emails: valuesFromEvidence(evidence, 'email'),
-      homepages: valuesFromEvidence(evidence, 'homepage'),
-      githubUrls: valuesFromEvidence(evidence, 'github'),
-      orcids: valuesFromEvidence(evidence, 'orcid'),
-      institutions: valuesFromEvidence(evidence, 'institution'),
-      suggestedSignals: reviewLabel.suggestedSignals,
-      confirmedSignals: reviewLabel.confirmedSignals,
-      createdAt: now,
+      displayName: existingEntity?.displayName ?? candidate.displayName ?? pickDisplayName(sourceRecords),
+      emails: sortedUnique([...(existingEntity?.emails ?? []), ...valuesFromEvidence(evidence, 'email')]),
+      homepages: sortedUnique([...(existingEntity?.homepages ?? []), ...valuesFromEvidence(evidence, 'homepage')]),
+      githubUrls: sortedUnique([...(existingEntity?.githubUrls ?? []), ...valuesFromEvidence(evidence, 'github')]),
+      orcids: sortedUnique([...(existingEntity?.orcids ?? []), ...valuesFromEvidence(evidence, 'orcid')]),
+      institutions: sortedUnique([...(existingEntity?.institutions ?? []), ...valuesFromEvidence(evidence, 'institution')]),
+      suggestedSignals: sortedUnique([...(existingEntity?.suggestedSignals ?? []), ...reviewLabel.suggestedSignals]),
+      confirmedSignals: sortedUnique([...(existingEntity?.confirmedSignals ?? []), ...reviewLabel.confirmedSignals]),
+      needsEnrichment: true,
+      enrichmentStatus: existingEntity?.enrichmentStatus === 'enriched' ? 'needs_enrichment' : existingEntity?.enrichmentStatus ?? 'not_started',
+      mergedIntoCandidateId: existingEntity?.mergedIntoCandidateId ?? null,
+      mergedByReviewId: existingEntity?.mergedByReviewId ?? null,
+      mergedAt: existingEntity?.mergedAt ?? null,
+      createdAt: existingEntity?.createdAt ?? now,
       updatedAt: now,
     };
 
     return this.repository.upsertApprovedEntity(approvedEntity);
+  }
+
+  private async resolveApprovedEntityForMaterialization(input: {
+    sourceRecordIds: string[];
+    identityEvidenceHashes: string[];
+  }): Promise<ApprovedEntity | null> {
+    const [bySourceRecord, byIdentityEvidence] = await Promise.all([
+      this.repository.findApprovedEntitiesBySourceRecordIds(input.sourceRecordIds),
+      this.repository.findApprovedEntitiesByIdentityEvidenceHashes(input.identityEvidenceHashes),
+    ]);
+    const candidates = [...new Map(
+      [...bySourceRecord, ...byIdentityEvidence]
+        .filter(isUpdatableCandidateEntity)
+        .map((entity) => [entity.id, entity]),
+    ).values()].sort((left, right) => {
+      const createdDelta = left.createdAt.localeCompare(right.createdAt);
+      return createdDelta === 0 ? left.id.localeCompare(right.id) : createdDelta;
+    });
+
+    if (candidates.length > 1) {
+      throw new Error(
+        `Multiple active global candidates matched this approved evidence: ${candidates.map((entity) => entity.id).join(', ')}.`,
+      );
+    }
+
+    return candidates[0] ?? null;
   }
 }

@@ -50,6 +50,13 @@ export const sourcingReviewStatusSchema = z.enum([
   'suppressed',
   'same_person',
 ]);
+export const globalCandidateStatusSchema = z.enum(['active', 'held', 'merged', 'archived', 'approved']);
+export const candidateEnrichmentStatusSchema = z.enum([
+  'not_started',
+  'needs_enrichment',
+  'in_review',
+  'enriched',
+]);
 export const sourcingReviewSignalSchema = z
   .string()
   .trim()
@@ -206,9 +213,14 @@ export const reviewLabelRecordSchema = createReviewLabelSchema.extend({
 export const approvedEntitySchema = z.object({
   id: z.string().trim().min(1),
   entityType: sourcingEntityTypeSchema,
-  status: z.enum(['approved']),
+  status: globalCandidateStatusSchema.default('active'),
+  schemaVersion: z.string().trim().min(1).default('global-candidate-v1'),
   sourceRecordIds: z.array(z.string().trim().min(1)).min(1),
   evidenceIds: z.array(z.string().trim().min(1)),
+  sourceNames: z.array(z.string().trim().min(1)).default([]),
+  sourceDomains: z.array(z.string().trim().min(1)).default([]),
+  reviewLabelIds: z.array(z.string().trim().min(1)).default([]),
+  identityEvidenceHashes: z.array(z.string().trim().min(1)).default([]),
   approvedByReviewLabelId: z.string().trim().min(1),
   displayName: z.string().nullable(),
   emails: z.array(z.string()),
@@ -218,6 +230,11 @@ export const approvedEntitySchema = z.object({
   institutions: z.array(z.string()),
   suggestedSignals: z.array(sourcingReviewSignalSchema),
   confirmedSignals: z.array(sourcingReviewSignalSchema),
+  needsEnrichment: z.boolean().default(true),
+  enrichmentStatus: candidateEnrichmentStatusSchema.default('not_started'),
+  mergedIntoCandidateId: z.string().trim().min(1).nullable().default(null),
+  mergedByReviewId: z.string().trim().min(1).nullable().default(null),
+  mergedAt: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -230,6 +247,8 @@ export type SourcingReviewLabel = z.infer<typeof sourcingReviewLabelSchema>;
 export type SourcingIdentityLabel = z.infer<typeof sourcingIdentityLabelSchema>;
 export type SourcingCandidateDecision = z.infer<typeof sourcingCandidateDecisionSchema>;
 export type SourcingReviewStatus = z.infer<typeof sourcingReviewStatusSchema>;
+export type GlobalCandidateStatus = z.infer<typeof globalCandidateStatusSchema>;
+export type CandidateEnrichmentStatus = z.infer<typeof candidateEnrichmentStatusSchema>;
 export type CreateSourceRunInput = z.infer<typeof createSourceRunSchema>;
 export type SourceRunRecord = z.infer<typeof sourceRunRecordSchema>;
 export type SourceRecordUpsertInput = z.infer<typeof sourceRecordUpsertSchema>;

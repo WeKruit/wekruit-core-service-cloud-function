@@ -262,13 +262,13 @@ async function requestJson(path, options = {}) {
 }
 
 function statusVariant(status) {
-  if (status === "completed" || status === "approved" || status === "same_person" || status === "approved_candidate") {
+  if (status === "completed" || status === "approved" || status === "active" || status === "same_person" || status === "approved_candidate" || status === "enriched") {
     return "success";
   }
-  if (status === "pending_review" || status === "medium") {
+  if (status === "pending_review" || status === "medium" || status === "not_started" || status === "needs_enrichment" || status === "in_review") {
     return "warning";
   }
-  if (status === "failed" || status === "not_same_person" || status === "rejected_bad_record" || status === "rejected_not_relevant") {
+  if (status === "failed" || status === "archived" || status === "not_same_person" || status === "rejected_bad_record" || status === "rejected_not_relevant") {
     return "danger";
   }
   return "neutral";
@@ -1229,7 +1229,7 @@ function renderReviewDetail() {
 function renderApprovedTable() {
   const entities = filteredApprovedEntities();
   elements.navApprovedCount.textContent = String(state.approved.length);
-  elements.approvedMeta.textContent = entities.length ? `${entities.length} approved entities` : "No approved entities found";
+  elements.approvedMeta.textContent = entities.length ? `${entities.length} global candidates` : "No approved entities found";
 
   if (!entities.length) {
     elements.approvedTableBody.innerHTML = `<tr><td colspan="6" class="empty-row">No approved entities found.</td></tr>`;
@@ -1247,11 +1247,11 @@ function renderApprovedTable() {
               <span class="row-secondary mono">${escapeHtml(entity.id)}</span>
             </button>
           </td>
-          <td>${escapeHtml(arrayValue(entity.emails).slice(0, 2).join(", ") || "—")}</td>
-          <td class="mono">${escapeHtml(arrayValue(entity.orcids).slice(0, 1).join(", ") || "—")}</td>
-          <td>${escapeHtml(arrayValue(entity.institutions).slice(0, 2).join(", ") || "—")}</td>
-          <td>${escapeHtml(String(arrayValue(entity.sourceRecordIds).length))}</td>
-          <td>${escapeHtml(formatDateTime(entity.createdAt))}</td>
+          <td>${renderPill(displayLabel(entity.status || "active"), statusVariant(entity.status || "active"))}</td>
+          <td>${escapeHtml(arrayValue(entity.sourceNames).join(" + ") || String(arrayValue(entity.sourceRecordIds).length))}</td>
+          <td>${escapeHtml(String(arrayValue(entity.reviewLabelIds).length || (entity.approvedByReviewLabelId ? 1 : 0)))}</td>
+          <td>${escapeHtml(confirmedSignalsForApproved(entity).slice(0, 3).map(displayLabel).join(", ") || "—")}</td>
+          <td>${escapeHtml(formatDateTime(entity.updatedAt || entity.createdAt))}</td>
         </tr>
       `;
     })
@@ -1269,22 +1269,34 @@ function renderApprovedDetail() {
   }
 
   elements.approvedDetailTitle.textContent = entity.displayName || entity.id;
-  elements.approvedDetailSubtitle.textContent = `${arrayValue(entity.sourceRecordIds).length} source records survived`;
+  elements.approvedDetailSubtitle.textContent = `${arrayValue(entity.sourceRecordIds).length} source records · ${arrayValue(entity.reviewLabelIds).length || 1} review decisions`;
   elements.approvedDetailBody.innerHTML = `
     <section class="detail-section">
-      <h4>Surviving fields</h4>
+      <h4>Global candidate</h4>
       <div class="pill-row">
-        ${renderPill("Approved", "success")}
+        ${renderPill(displayLabel(entity.status || "active"), statusVariant(entity.status || "active"))}
+        ${renderPill(displayLabel(entity.enrichmentStatus || "not_started"), statusVariant(entity.enrichmentStatus || "not_started"))}
         ${renderPill(displayLabel(entity.entityType || "entity"), "neutral")}
       </div>
       <div class="fact-grid">
+        <div class="fact-row"><span class="fact-label">Sources</span><div class="fact-value">${escapeHtml(arrayValue(entity.sourceNames).join(", ") || "—")}</div></div>
+        <div class="fact-row"><span class="fact-label">Domains</span><div class="fact-value">${escapeHtml(arrayValue(entity.sourceDomains).join(", ") || "—")}</div></div>
         <div class="fact-row"><span class="fact-label">Emails</span><div class="fact-value">${renderMaybeLinks(arrayValue(entity.emails))}</div></div>
         <div class="fact-row"><span class="fact-label">Homepages</span><div class="fact-value">${renderMaybeLinks(arrayValue(entity.homepages))}</div></div>
         <div class="fact-row"><span class="fact-label">GitHub</span><div class="fact-value">${renderMaybeLinks(arrayValue(entity.githubUrls))}</div></div>
         <div class="fact-row"><span class="fact-label">ORCID</span><div class="fact-value mono">${escapeHtml(arrayValue(entity.orcids).join(", ") || "—")}</div></div>
         <div class="fact-row"><span class="fact-label">Institutions</span><div class="fact-value">${escapeHtml(arrayValue(entity.institutions).join(", ") || "—")}</div></div>
         <div class="fact-row"><span class="fact-label">Signals</span><div class="fact-value">${confirmedSignalsForApproved(entity).map((signal) => renderPill(displayLabel(signal), "accent")).join(" ") || "—"}</div></div>
+        <div class="fact-row"><span class="fact-label">Needs enrichment</span><div class="fact-value">${escapeHtml(entity.needsEnrichment === false ? "No" : "Yes")}</div></div>
         <div class="fact-row"><span class="fact-label">Created</span><div class="fact-value">${escapeHtml(formatDateTime(entity.createdAt))}</div></div>
+        <div class="fact-row"><span class="fact-label">Updated</span><div class="fact-value">${escapeHtml(formatDateTime(entity.updatedAt || entity.createdAt))}</div></div>
+      </div>
+    </section>
+
+    <section class="detail-section">
+      <h4>Review lineage</h4>
+      <div class="inline-list">
+        ${arrayValue(entity.reviewLabelIds).map((id) => renderPill(id, "neutral")).join("") || renderPill(entity.approvedByReviewLabelId || "No review labels", "warning")}
       </div>
     </section>
 
@@ -1292,6 +1304,13 @@ function renderApprovedDetail() {
       <h4>Source records</h4>
       <div class="inline-list">
         ${arrayValue(entity.sourceRecordIds).map((id) => renderPill(id, "neutral")).join("") || renderPill("No source record IDs", "warning")}
+      </div>
+    </section>
+
+    <section class="detail-section">
+      <h4>Identity evidence</h4>
+      <div class="inline-list">
+        ${arrayValue(entity.identityEvidenceHashes).map((id) => renderPill(id, "neutral")).join("") || renderPill("No strong identity hashes", "warning")}
       </div>
     </section>
 

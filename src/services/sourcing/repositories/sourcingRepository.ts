@@ -9,6 +9,18 @@ import type {
   SourceRunRecord,
 } from '../domain/records';
 
+function uniqueById<T extends { id: string }>(records: T[]): T[] {
+  return [...new Map(records.map((record) => [record.id, record])).values()];
+}
+
+function chunks<T>(values: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    result.push(values.slice(index, index + size));
+  }
+  return result;
+}
+
 export class SourcingRepository {
   private readonly db = getCoreFirestore();
   private readonly sourceRunCollection = this.db.collection(sourcingCollections.sourceRuns);
@@ -205,6 +217,30 @@ export class SourcingRepository {
   async upsertApprovedEntity(entity: ApprovedEntity): Promise<ApprovedEntity> {
     await this.approvedEntityCollection.doc(entity.id).set(entity);
     return entity;
+  }
+
+  async findApprovedEntitiesBySourceRecordIds(sourceRecordIds: string[]): Promise<ApprovedEntity[]> {
+    if (sourceRecordIds.length === 0) {
+      return [];
+    }
+    const snapshots = await Promise.all(
+      chunks(sourceRecordIds, 10).map((ids) =>
+        this.approvedEntityCollection.where('sourceRecordIds', 'array-contains-any', ids).get(),
+      ),
+    );
+    return uniqueById(snapshots.flatMap((snapshot) => snapshot.docs.map((doc) => doc.data() as ApprovedEntity)));
+  }
+
+  async findApprovedEntitiesByIdentityEvidenceHashes(identityEvidenceHashes: string[]): Promise<ApprovedEntity[]> {
+    if (identityEvidenceHashes.length === 0) {
+      return [];
+    }
+    const snapshots = await Promise.all(
+      chunks(identityEvidenceHashes, 10).map((hashes) =>
+        this.approvedEntityCollection.where('identityEvidenceHashes', 'array-contains-any', hashes).get(),
+      ),
+    );
+    return uniqueById(snapshots.flatMap((snapshot) => snapshot.docs.map((doc) => doc.data() as ApprovedEntity)));
   }
 
   async listApprovedEntities(): Promise<ApprovedEntity[]> {
