@@ -95,3 +95,29 @@ test('validateCandidateEnrichmentDraft drops optional no-evidence skills and tag
   assert.ok(warnings.some((warning) => warning.includes('Dropped skill "unknownother"')));
   assert.ok(warnings.some((warning) => warning.includes('Dropped proposed tag "unsupported_guess"')));
 });
+
+test('validateCandidateEnrichmentDraft repairs a missing primary track scored entry', () => {
+  const { draft, warnings } = validateCandidateEnrichmentDraft(
+    deriveDraftFieldEvidence(
+      buildDraft({
+        primaryTrack: 'academic_research',
+        scoredTracks: [
+          {
+            track: 'ai_research',
+            score: 0.7,
+            evidenceIds: ['evidence_orcid'],
+          },
+        ],
+        fieldEvidence: {
+          primaryTrack: ['evidence_orcid'],
+        },
+      }),
+    ),
+    ['evidence_orcid'],
+  );
+
+  const academicResearch = draft.scoredTracks.find((track) => track.track === 'academic_research');
+  assert.ok(academicResearch);
+  assert.deepEqual(academicResearch.evidenceIds, ['evidence_orcid']);
+  assert.ok(warnings.some((warning) => warning.includes('Added primary track "academic_research"')));
+});

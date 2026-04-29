@@ -229,6 +229,51 @@ function assertKnownEvidenceIds(field: string, evidenceIds: string[], availableE
   }
 }
 
+function checkedEvidenceIds(field: string, evidenceIds: string[], availableEvidenceIds: Set<string>): string[] {
+  const uniqueIds = sortedUnique(evidenceIds);
+  assertKnownEvidenceIds(field, uniqueIds, availableEvidenceIds);
+  return uniqueIds;
+}
+
+function firstEvidenceFallback(
+  draft: CandidateEnrichmentDraft,
+  availableEvidenceIds: Set<string>,
+  fields: string[],
+): string[] {
+  for (const field of fields) {
+    const evidenceIds = checkedEvidenceIds(
+      `fieldEvidence.${field}`,
+      draft.fieldEvidence[field] ?? [],
+      availableEvidenceIds,
+    );
+    if (evidenceIds.length > 0) {
+      return evidenceIds;
+    }
+  }
+  return [];
+}
+
+function primaryTrackEvidenceFallback(
+  draft: CandidateEnrichmentDraft,
+  availableEvidenceIds: Set<string>,
+): string[] {
+  const fieldEvidence = firstEvidenceFallback(draft, availableEvidenceIds, ['primaryTrack', 'scoredTracks']);
+  if (fieldEvidence.length > 0) {
+    return fieldEvidence;
+  }
+
+  const trackEvidence = checkedEvidenceIds(
+    'scoredTracks',
+    draft.scoredTracks.flatMap((track) => track.evidenceIds),
+    availableEvidenceIds,
+  );
+  if (trackEvidence.length > 0) {
+    return trackEvidence;
+  }
+
+  return [...availableEvidenceIds].sort((left, right) => left.localeCompare(right));
+}
+
 function requireEvidence(
   field: string,
   evidenceIds: string[],
@@ -247,8 +292,65 @@ export function validateCandidateEnrichmentDraft(input: unknown, approvedEvidenc
   const parsedDraft = candidateEnrichmentDraftSchema.parse(input);
   const availableEvidenceIds = new Set(approvedEvidenceIds);
   const warnings: string[] = [];
+  let scoredTracks = parsedDraft.scoredTracks.map((track) => ({
+    ...track,
+    evidenceIds: checkedEvidenceIds(`scoredTracks.${track.track}`, track.evidenceIds, availableEvidenceIds),
+  }));
+
+  scoredTracks = scoredTracks.map((track) => {
+    if (track.track !== parsedDraft.primaryTrack || track.track === 'unknown_other' || track.evidenceIds.length > 0) {
+      return track;
+    }
+    const evidenceIds = primaryTrackEvidenceFallback(parsedDraft, availableEvidenceIds);
+    if (evidenceIds.length > 0) {
+      warnings.push(`Attached fallback evidence to primary track "${track.track}" because scoredTracks omitted evidence.`);
+      return {
+        ...track,
+        evidenceIds,
+      };
+    }
+    return track;
+  });
+
+  if (!scoredTracks.some((track) => track.track === parsedDraft.primaryTrack)) {
+    const evidenceIds = parsedDraft.primaryTrack === 'unknown_other'
+      ? []
+      : primaryTrackEvidenceFallback(parsedDraft, availableEvidenceIds);
+    const score = Math.max(0.5, ...scoredTracks.map((track) => track.score));
+    scoredTracks = [
+      {
+        track: parsedDraft.primaryTrack,
+        score,
+        evidenceIds,
+      },
+      ...scoredTracks,
+    ].slice(0, 6);
+    warnings.push(`Added primary track "${parsedDraft.primaryTrack}" to scoredTracks because the model omitted it.`);
+  }
+
+  scoredTracks = scoredTracks.filter((track) => {
+    if (track.track === parsedDraft.primaryTrack || track.track === 'unknown_other' || track.evidenceIds.length > 0) {
+      return true;
+    }
+    warnings.push(`Dropped scored track "${track.track}" because it did not include approved evidence.`);
+    return false;
+  });
+
   const draft: CandidateEnrichmentDraft = {
     ...parsedDraft,
+    scoredTracks,
+    specializations: parsedDraft.specializations.filter((specialization) => {
+      assertKnownEvidenceIds(
+        `specializations.${specialization.specialization}`,
+        specialization.evidenceIds,
+        availableEvidenceIds,
+      );
+      if (specialization.specialization === 'unknown_other' || specialization.evidenceIds.length > 0) {
+        return true;
+      }
+      warnings.push(`Dropped specialization "${specialization.specialization}" because it did not include approved evidence.`);
+      return false;
+    }),
     skills: parsedDraft.skills.filter((skill) => {
       assertKnownEvidenceIds(`skills.${skill.skill}`, skill.evidenceIds, availableEvidenceIds);
       if (skill.evidenceIds.length > 0) {
@@ -257,6 +359,32 @@ export function validateCandidateEnrichmentDraft(input: unknown, approvedEvidenc
       warnings.push(`Dropped skill "${skill.skill}" because it did not include approved evidence.`);
       return false;
     }),
+    industryDomainInterests: parsedDraft.industryDomainInterests.filter((interest) => {
+      assertKnownEvidenceIds(
+        `industryDomainInterests.${interest.domain}`,
+        interest.evidenceIds,
+        availableEvidenceIds,
+      );
+      if (interest.domain === 'unknown_other' || interest.evidenceIds.length > 0) {
+        return true;
+      }
+      warnings.push(`Dropped industry/domain interest "${interest.domain}" because it did not include approved evidence.`);
+      return false;
+    }),
+    careerStage: parsedDraft.careerStage.value !== 'unknown' && parsedDraft.careerStage.evidenceIds.length === 0
+      ? {
+        value: 'unknown',
+        confidence: Math.min(parsedDraft.careerStage.confidence, 0.5),
+        evidenceIds: [],
+      }
+      : parsedDraft.careerStage,
+    contactability: parsedDraft.contactability.value !== 'unknown' && parsedDraft.contactability.evidenceIds.length === 0
+      ? {
+        value: 'unknown',
+        confidence: Math.min(parsedDraft.contactability.confidence, 0.5),
+        evidenceIds: [],
+      }
+      : parsedDraft.contactability,
     proposedTags: parsedDraft.proposedTags.filter((tag) => {
       assertKnownEvidenceIds(`proposedTags.${tag.tag}`, tag.evidenceIds, availableEvidenceIds);
       if (tag.evidenceIds.length > 0) {
@@ -266,6 +394,13 @@ export function validateCandidateEnrichmentDraft(input: unknown, approvedEvidenc
       return false;
     }),
   };
+
+  if (parsedDraft.careerStage.value !== 'unknown' && draft.careerStage.value === 'unknown') {
+    warnings.push(`Set careerStage to unknown because "${parsedDraft.careerStage.value}" did not include approved evidence.`);
+  }
+  if (parsedDraft.contactability.value !== 'unknown' && draft.contactability.value === 'unknown') {
+    warnings.push(`Set contactability to unknown because "${parsedDraft.contactability.value}" did not include approved evidence.`);
+  }
 
   if (!draft.scoredTracks.some((track) => track.track === draft.primaryTrack)) {
     throw new Error(`Primary track "${draft.primaryTrack}" must also appear in scoredTracks.`);
@@ -313,18 +448,24 @@ export function validateCandidateEnrichmentDraft(input: unknown, approvedEvidenc
   }
 
   return {
-    draft,
+    draft: deriveDraftFieldEvidence(draft),
     warnings: sortedUnique([...draft.warnings, ...warnings]),
   };
 }
 
 export function deriveDraftFieldEvidence(input: unknown): CandidateEnrichmentDraft {
   const draft = candidateEnrichmentDraftSchema.parse(input);
-  const trackEvidence = sortedUnique(draft.scoredTracks.flatMap((track) => track.evidenceIds));
+  const trackEvidence = sortedUnique([
+    ...(draft.fieldEvidence.scoredTracks ?? []),
+    ...draft.scoredTracks.flatMap((track) => track.evidenceIds),
+  ]);
   const primaryTrackEvidence = sortedUnique(
-    draft.scoredTracks
-      .filter((track) => track.track === draft.primaryTrack)
-      .flatMap((track) => track.evidenceIds),
+    [
+      ...(draft.fieldEvidence.primaryTrack ?? []),
+      ...draft.scoredTracks
+        .filter((track) => track.track === draft.primaryTrack)
+        .flatMap((track) => track.evidenceIds),
+    ],
   );
 
   return {
