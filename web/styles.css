@@ -71,6 +71,17 @@ button:hover {
   background: #3d2615;
 }
 
+button:disabled {
+  color: var(--ink-muted);
+  background: var(--surface-muted);
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  background: var(--surface-muted);
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -87,6 +98,14 @@ textarea:focus-visible {
 
 .button-muted:hover {
   background: rgba(255, 255, 255, 0.72);
+}
+
+.button-muted:disabled,
+.button-muted:disabled:hover {
+  color: var(--ink-muted);
+  background: rgba(255, 253, 250, 0.48);
+  border-color: rgba(43, 24, 10, 0.12);
+  cursor: not-allowed;
 }
 
 input,

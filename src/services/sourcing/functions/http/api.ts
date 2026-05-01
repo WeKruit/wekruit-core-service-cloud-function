@@ -14,7 +14,7 @@ import {
   candidateIndustryDomainSchema,
   candidateTrackSchema,
 } from '../../domain/records';
-import { SourcingService } from '../../application/service';
+import { PendingMergeReviewBlockError, SourcingService } from '../../application/service';
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -38,8 +38,9 @@ function jsonError(
   res: { status: (code: number) => { json: (payload: unknown) => unknown } },
   status: number,
   message: string,
+  details?: Record<string, unknown>,
 ) {
-  res.status(status).json({ error: { message } });
+  res.status(status).json({ error: details ? { message, ...details } : { message } });
 }
 
 function sendHealth(_req: express.Request, res: express.Response) {
@@ -224,6 +225,14 @@ app.post('/api/sourcing/approved-entities/:approvedEntityId/enrichment:generate'
     const data = await service.generateEnrichmentForApprovedEntity(req.params.approvedEntityId);
     res.status(201).json({ data });
   } catch (error) {
+    if (error instanceof PendingMergeReviewBlockError) {
+      jsonError(res, 409, error.message, {
+        code: error.code,
+        approvedEntityId: error.approvedEntityId,
+        blockers: error.blockers,
+      });
+      return;
+    }
     if (error instanceof Error) {
       jsonError(res, 422, error.message);
       return;

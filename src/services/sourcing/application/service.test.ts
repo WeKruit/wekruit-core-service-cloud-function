@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { SourcingService, type SourcingRepositoryPort } from './service';
+import {
+  PendingMergeReviewBlockError,
+  SourcingService,
+  type SourcingRepositoryPort,
+} from './service';
 import type {
   ApprovedEntity,
   CandidateEnrichmentDraft,
@@ -497,6 +501,65 @@ test('createReviewLabel updates an existing global candidate when approved evide
   assert.equal(result.approvedEntity.needsEnrichment, true);
 });
 
+test('listApprovedEntities surfaces pending merge blockers for approved candidates', async () => {
+  const approvedEntity = buildApprovedEntity();
+  const blocker = buildCandidate({
+    id: 'dedup_pending_devpost_merge',
+    sourceRecordIds: ['src_github_person_alex', 'src_devpost_person_alex'],
+    valueHashes: ['github-hash'],
+    displayName: 'Alex Rivera',
+  });
+  const unrelated = buildCandidate({
+    id: 'dedup_pending_unrelated',
+    sourceRecordIds: ['src_other_person_a', 'src_other_person_b'],
+    valueHashes: ['other-hash'],
+    displayName: 'Other Person',
+  });
+
+  const repository = {
+    listApprovedEntities: async () => [approvedEntity],
+    listDedupCandidates: async () => [blocker, unrelated],
+  } as Partial<SourcingRepositoryPort> as SourcingRepositoryPort;
+
+  const service = new SourcingService(repository);
+  const [result] = await service.listApprovedEntities();
+
+  assert.equal(result.pendingMergeReviewCount, 1);
+  assert.deepEqual(result.pendingMergeReviewIds, ['dedup_pending_devpost_merge']);
+  assert.equal(result.pendingMergeReviewBlockers[0]?.displayName, 'Alex Rivera');
+});
+
+test('generateEnrichmentForApprovedEntity blocks when a pending merge overlaps the approved candidate', async () => {
+  const approvedEntity = buildApprovedEntity();
+  const blocker = buildCandidate({
+    id: 'dedup_pending_devpost_merge',
+    sourceRecordIds: ['src_github_person_alex', 'src_devpost_person_alex'],
+    valueHashes: ['github-hash'],
+  });
+  let inferenceCalled = false;
+
+  const repository = {
+    getApprovedEntity: async (id: string) => id === approvedEntity.id ? approvedEntity : null,
+    listDedupCandidates: async () => [blocker],
+  } as Partial<SourcingRepositoryPort> as SourcingRepositoryPort;
+
+  const service = new SourcingService(repository, {
+    inferCandidateProfile: async () => {
+      inferenceCalled = true;
+      return buildEnrichmentDraft();
+    },
+  });
+
+  await assert.rejects(
+    service.generateEnrichmentForApprovedEntity(approvedEntity.id),
+    (error: unknown) =>
+      error instanceof PendingMergeReviewBlockError &&
+      error.approvedEntityId === approvedEntity.id &&
+      error.blockers[0]?.id === blocker.id,
+  );
+  assert.equal(inferenceCalled, false);
+});
+
 test('generateEnrichmentForApprovedEntity creates review item and approval materializes profile', async () => {
   const approvedEntity = buildApprovedEntity();
   const sourceRecord = buildSourceRecord();
@@ -510,6 +573,7 @@ test('generateEnrichmentForApprovedEntity creates review item and approval mater
 
   const repository = {
     getApprovedEntity: async (id: string) => approvedEntitiesById.get(id) ?? null,
+    listDedupCandidates: async () => [],
     getSourceRecordsByIds: async (ids: string[]) => [sourceRecord].filter((record) => ids.includes(record.id)),
     getEvidenceByIds: async (ids: string[]) => [evidence].filter((entry) => ids.includes(entry.id)),
     getReviewLabelsByIds: async (ids: string[]) => [reviewLabel].filter((label) => ids.includes(label.id)),

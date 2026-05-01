@@ -355,7 +355,7 @@ async function requestJson(path, options = {}) {
   const payload = text ? safeJsonParse(text) : null;
 
   if (!response.ok) {
-    const errorText = typeof payload === "string" ? payload : JSON.stringify(payload);
+    const errorText = payload?.error?.message || (typeof payload === "string" ? payload : JSON.stringify(payload));
     throw new Error(`HTTP ${response.status}: ${errorText}`);
   }
 
@@ -1480,8 +1480,17 @@ function renderApprovedDetail() {
     return;
   }
 
-  const canGenerate = entity.status === "active" && !state.approvedSubmitting && entity.enrichmentStatus !== "in_review";
+  const pendingMergeCount = Number(entity.pendingMergeReviewCount || 0);
+  const pendingMergeBlockers = arrayValue(entity.pendingMergeReviewBlockers);
+  const hasPendingMergeBlockers = pendingMergeCount > 0;
+  const canGenerate = entity.status === "active" &&
+    !state.approvedSubmitting &&
+    entity.enrichmentStatus !== "in_review" &&
+    !hasPendingMergeBlockers;
   const generateLabel = entity.enrichmentStatus === "enriched" && entity.needsEnrichment === false ? "Regenerate enrichment" : "Generate enrichment";
+  const pendingMergeMessage = hasPendingMergeBlockers
+    ? `Resolve ${pendingMergeCount} pending merge ${pendingMergeCount === 1 ? "review" : "reviews"} before enrichment.`
+    : "";
 
   elements.approvedDetailTitle.textContent = entity.displayName || entity.id;
   elements.approvedDetailSubtitle.textContent = `${arrayValue(entity.sourceRecordIds).length} source records · ${arrayValue(entity.reviewLabelIds).length || 1} review decisions`;
@@ -1491,6 +1500,7 @@ function renderApprovedDetail() {
       <div class="pill-row">
         ${renderPill(displayLabel(entity.status || "active"), statusVariant(entity.status || "active"))}
         ${renderPill(displayLabel(entity.enrichmentStatus || "not_started"), statusVariant(entity.enrichmentStatus || "not_started"))}
+        ${hasPendingMergeBlockers ? renderPill(`${pendingMergeCount} pending merge`, "warning") : ""}
         ${renderPill(displayLabel(entity.entityType || "entity"), "neutral")}
       </div>
       <div class="fact-grid">
@@ -1510,8 +1520,22 @@ function renderApprovedDetail() {
 
     <section class="detail-section">
       <h4>Enrichment</h4>
+      ${hasPendingMergeBlockers ? `
+        <div class="subtle-callout">
+          <strong>${escapeHtml(pendingMergeMessage)}</strong>
+          <div class="inline-list">
+            ${pendingMergeBlockers.map((blocker) => renderPill(blocker.displayName || blocker.id, "warning")).join("")}
+          </div>
+        </div>
+      ` : ""}
       <div class="action-row">
-        <button type="button" data-generate-enrichment="${escapeHtml(entity.id)}" ${canGenerate ? "" : "disabled"}>${escapeHtml(generateLabel)}</button>
+        <button
+          type="button"
+          class="${canGenerate ? "" : "button-muted"}"
+          data-generate-enrichment="${escapeHtml(entity.id)}"
+          aria-disabled="${canGenerate ? "false" : "true"}"
+          ${canGenerate ? "" : "disabled"}
+        >${escapeHtml(generateLabel)}</button>
       </div>
       <p class="detail-result" data-status="${escapeHtml(state.approvedMessageStatus)}">${escapeHtml(state.approvedMessage)}</p>
     </section>

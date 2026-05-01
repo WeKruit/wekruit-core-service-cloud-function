@@ -236,6 +236,30 @@ export type CandidateProfileDetails = {
   };
 };
 
+export type PendingMergeReviewBlockerSummary = Pick<
+  DedupCandidate,
+  'id' | 'displayName' | 'strength' | 'reasonCodes' | 'sourceRecordIds' | 'valueHashes' | 'updatedAt'
+>;
+
+export type ApprovedEntityWithReviewState = ApprovedEntity & {
+  pendingMergeReviewCount: number;
+  pendingMergeReviewIds: string[];
+  pendingMergeReviewBlockers: PendingMergeReviewBlockerSummary[];
+};
+
+export class PendingMergeReviewBlockError extends Error {
+  readonly code = 'PENDING_MERGE_REVIEW';
+
+  constructor(
+    readonly approvedEntityId: string,
+    readonly blockers: PendingMergeReviewBlockerSummary[],
+  ) {
+    const label = blockers.length === 1 ? 'merge review' : 'merge reviews';
+    super(`Resolve ${blockers.length} pending ${label} before generating enrichment.`);
+    this.name = 'PendingMergeReviewBlockError';
+  }
+}
+
 const strongIdentityEvidenceTypes = new Set<EvidenceRecord['evidenceType']>([
   'email',
   'orcid',
@@ -297,6 +321,42 @@ function identityEvidenceHashesFromEvidence(evidence: EvidenceRecord[]): string[
       .filter((entry) => strongIdentityEvidenceTypes.has(entry.evidenceType))
       .map((entry) => entry.valueHash),
   );
+}
+
+function summarizePendingMergeBlocker(candidate: DedupCandidate): PendingMergeReviewBlockerSummary {
+  return {
+    id: candidate.id,
+    displayName: candidate.displayName,
+    strength: candidate.strength,
+    reasonCodes: candidate.reasonCodes,
+    sourceRecordIds: candidate.sourceRecordIds,
+    valueHashes: candidate.valueHashes,
+    updatedAt: candidate.updatedAt,
+  };
+}
+
+function isPendingMergeCandidate(candidate: DedupCandidate): boolean {
+  return (
+    candidate.status === 'pending_review' &&
+    candidate.sourceRecordIds.length > 1 &&
+    !candidate.reasonCodes.includes('singleton_review')
+  );
+}
+
+function findPendingMergeBlockersForEntity(
+  approvedEntity: ApprovedEntity,
+  pendingCandidates: DedupCandidate[],
+): PendingMergeReviewBlockerSummary[] {
+  const sourceRecordIds = new Set(approvedEntity.sourceRecordIds);
+  const identityEvidenceHashes = new Set(approvedEntity.identityEvidenceHashes);
+
+  return pendingCandidates
+    .filter(isPendingMergeCandidate)
+    .filter((candidate) =>
+      candidate.sourceRecordIds.some((sourceRecordId) => sourceRecordIds.has(sourceRecordId)) ||
+      candidate.valueHashes.some((valueHash) => identityEvidenceHashes.has(valueHash)),
+    )
+    .map((candidate) => summarizePendingMergeBlocker(candidate));
 }
 
 function buildGlobalCandidateId(input: {
@@ -705,8 +765,21 @@ export class SourcingService {
     return { reviewLabel, approvedEntity };
   }
 
-  async listApprovedEntities(): Promise<ApprovedEntity[]> {
-    return this.repository.listApprovedEntities();
+  async listApprovedEntities(): Promise<ApprovedEntityWithReviewState[]> {
+    const [approvedEntities, pendingCandidates] = await Promise.all([
+      this.repository.listApprovedEntities(),
+      this.repository.listDedupCandidates('pending_review'),
+    ]);
+
+    return approvedEntities.map((entity) => {
+      const blockers = findPendingMergeBlockersForEntity(entity, pendingCandidates);
+      return {
+        ...entity,
+        pendingMergeReviewCount: blockers.length,
+        pendingMergeReviewIds: blockers.map((blocker) => blocker.id),
+        pendingMergeReviewBlockers: blockers,
+      };
+    });
   }
 
   async listCandidateProfiles(options: CandidateProfileListOptions = {}): Promise<CandidateProfile[]> {
@@ -790,6 +863,13 @@ export class SourcingService {
     }
     if (!isUpdatableCandidateEntity(approvedEntity)) {
       throw new Error(`Approved entity "${approvedEntityId}" is not active.`);
+    }
+    const pendingMergeBlockers = findPendingMergeBlockersForEntity(
+      approvedEntity,
+      await this.repository.listDedupCandidates('pending_review'),
+    );
+    if (pendingMergeBlockers.length > 0) {
+      throw new PendingMergeReviewBlockError(approvedEntity.id, pendingMergeBlockers);
     }
 
     const [sourceRecords, evidence, reviewLabels] = await Promise.all([
