@@ -59,3 +59,43 @@ test('extractEvidenceFromSourceRecord emits normalized identity evidence with pr
   assert.equal(byType.get('github')?.extractedFrom.sourceUrl, 'https://github.com/ada-dev');
   assert.ok(evidence.every((entry) => entry.sourceRecordId === 'src_github_person_ada'));
 });
+
+test('extractEvidenceFromSourceRecord ignores shared project links as person identity evidence', () => {
+  const evidence = extractEvidenceFromSourceRecord(
+    buildSourceRecord({
+      id: 'src_devpost_person_ada',
+      sourceName: 'devpost',
+      sourceDomain: 'hackathon',
+      sourceNativeId: 'https://devpost.com/ada-dev',
+      sourceUrl: 'https://devpost.com/ada-dev',
+      display: {
+        github: 'https://github.com/ada-dev',
+        website: 'https://ada.example.com',
+      },
+      rawSummary: {
+        projectUrls: ['https://devpost.com/software/shared-project'],
+        projectGithubRepos: ['https://github.com/team/shared-project'],
+        demoLinks: ['https://shared-demo.example.com'],
+        allLinks: ['https://github.com/team/shared-project', 'https://shared-demo.example.com'],
+      },
+      raw: {
+        projects: [
+          {
+            projectUrl: 'https://devpost.com/software/shared-project',
+            projectGithubRepos: ['https://github.com/team/shared-project'],
+            demoLinks: ['https://shared-demo.example.com'],
+          },
+        ],
+      },
+    }),
+    '2026-04-28T00:00:00.000Z',
+  );
+
+  const values = evidence.map((entry) => entry.normalizedValue);
+
+  assert.ok(values.includes('https://github.com/ada-dev'));
+  assert.ok(values.includes('https://ada.example.com'));
+  assert.ok(!values.includes('https://github.com/team/shared-project'));
+  assert.ok(!values.includes('https://devpost.com/software/shared-project'));
+  assert.ok(!values.includes('https://shared-demo.example.com'));
+});

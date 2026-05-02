@@ -104,9 +104,32 @@ function collectCandidateValues(input: unknown, path = 'raw'): Array<{ path: str
   return [];
 }
 
+function isSharedProjectContextPath(lowerPath: string): boolean {
+  return [
+    '.projects[',
+    'projecturl',
+    'project_url',
+    'projecturls',
+    'project_urls',
+    'projectgithub',
+    'project_github',
+    'projectrepos',
+    'project_repos',
+    'projectrepository',
+    'project_repository',
+    'demolinks',
+    'demo_links',
+    'alllinks',
+    'all_links',
+    'videourl',
+    'video_url',
+  ].some((marker) => lowerPath.includes(marker));
+}
+
 function detectTypedValues(path: string, value: string): Array<{ type: SourcingEvidenceType; rawValue: string; path: string }> {
   const lowerPath = path.toLowerCase();
   const values: Array<{ type: SourcingEvidenceType; rawValue: string; path: string }> = [];
+  const sharedProjectContext = isSharedProjectContextPath(lowerPath);
 
   for (const email of value.match(emailRegex) ?? []) {
     values.push({ type: 'email', rawValue: email, path });
@@ -119,12 +142,12 @@ function detectTypedValues(path: string, value: string): Array<{ type: SourcingE
   }
 
   const trimmed = value.trim();
-  if (lowerPath.includes('homepage') || lowerPath.includes('website') || lowerPath.includes('url')) {
+  if (!sharedProjectContext && (lowerPath.includes('homepage') || lowerPath.includes('website') || lowerPath.includes('url'))) {
     for (const url of trimmed.match(urlRegex) ?? []) {
       values.push({ type: 'homepage', rawValue: url, path });
     }
   }
-  if (lowerPath.includes('github') || /github\.com\//i.test(trimmed)) {
+  if (!sharedProjectContext && (lowerPath.includes('github') || /github\.com\//i.test(trimmed))) {
     for (const url of trimmed.match(urlRegex) ?? []) {
       values.push({ type: 'github', rawValue: url, path });
     }
