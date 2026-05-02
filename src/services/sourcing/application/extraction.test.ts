@@ -86,6 +86,12 @@ test('extractEvidenceFromSourceRecord ignores shared project links as person ide
             demoLinks: ['https://shared-demo.example.com'],
           },
         ],
+        sourceRows: [
+          {
+            github_repos: 'https://github.com/team/shared-project',
+            all_links: 'https://github.com/team/shared-project; https://shared-demo.example.com',
+          },
+        ],
       },
     }),
     '2026-04-28T00:00:00.000Z',

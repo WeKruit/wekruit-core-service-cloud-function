@@ -117,6 +117,8 @@ function isSharedProjectContextPath(lowerPath: string): boolean {
     'project_repos',
     'projectrepository',
     'project_repository',
+    'githubrepos',
+    'github_repos',
     'demolinks',
     'demo_links',
     'alllinks',
