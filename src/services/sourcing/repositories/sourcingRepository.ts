@@ -88,8 +88,8 @@ export class SourcingRepository {
   }
 
   async countSourceRecordsForRun(runId: string): Promise<number> {
-    const snapshot = await this.sourceRecordCollection.where('sourceRunId', '==', runId).get();
-    return snapshot.size;
+    const snapshot = await this.sourceRecordCollection.where('sourceRunId', '==', runId).count().get();
+    return snapshot.data().count;
   }
 
   async upsertEvidence(records: EvidenceRecord[]): Promise<void> {
@@ -131,8 +131,8 @@ export class SourcingRepository {
   }
 
   async countEvidenceForRun(runId: string): Promise<number> {
-    const snapshot = await this.evidenceCollection.where('sourceRunId', '==', runId).get();
-    return snapshot.size;
+    const snapshot = await this.evidenceCollection.where('sourceRunId', '==', runId).count().get();
+    return snapshot.data().count;
   }
 
   async upsertDedupCandidate(candidate: DedupCandidate): Promise<DedupCandidate> {
@@ -169,8 +169,8 @@ export class SourcingRepository {
   }
 
   async countDedupCandidatesForRun(runId: string): Promise<number> {
-    const snapshot = await this.dedupCandidateCollection.where('createdFromSourceRunId', '==', runId).get();
-    return snapshot.size;
+    const snapshot = await this.dedupCandidateCollection.where('createdFromSourceRunId', '==', runId).count().get();
+    return snapshot.data().count;
   }
 
   async listRecordsByNameInstitutionKey(nameInstitutionKey: string): Promise<SourceRecord[]> {

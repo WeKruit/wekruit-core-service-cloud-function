@@ -278,6 +278,8 @@ export const sourcingApi = onRequest(
   {
     region: 'us-central1',
     invoker: 'public',
+    memory: '1GiB',
+    timeoutSeconds: 300,
     secrets: [sourcingOpenAiApiKey],
   },
   app,
