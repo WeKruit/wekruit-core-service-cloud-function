@@ -29,6 +29,17 @@
       "**/node_modules/**",
       "**/*.md"
     ],
+    "headers": [
+      {
+        "source": "/app.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ],
     "cleanUrls": true,
     "rewrites": [
       {
