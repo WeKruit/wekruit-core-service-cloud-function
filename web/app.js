@@ -231,6 +231,10 @@ function numberValue(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function formatCount(value) {
+  return new Intl.NumberFormat("en-US").format(numberValue(value));
+}
+
 function arrayValue(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
@@ -435,6 +439,25 @@ function runReviewStats(runId) {
   return reviewStatsByRun().get(runId) || { total: 0, pending: 0, reviewed: 0 };
 }
 
+function reviewCandidateTotalForRun(runId) {
+  const run = state.runs.find((item) => item.id === runId);
+  return Math.max(numberValue(run?.dedupCandidateCount), runReviewStats(runId).total);
+}
+
+function reviewCandidateTotalAllRuns() {
+  const runTotal = state.runs.reduce((total, run) => total + numberValue(run.dedupCandidateCount), 0);
+  return Math.max(runTotal, state.candidates.length);
+}
+
+function loadedCountSummary(loaded, total, noun) {
+  const loadedCount = numberValue(loaded);
+  const totalCount = Math.max(numberValue(total), loadedCount);
+  if (totalCount > loadedCount) {
+    return `Showing ${formatCount(loadedCount)} of ${formatCount(totalCount)} ${noun}`;
+  }
+  return `${formatCount(loadedCount)} ${noun}`;
+}
+
 function sourceKeysForItem(item) {
   return uniqueList(
     arrayValue(item?.sourceRecords)
@@ -578,7 +601,7 @@ function chooseDefaultRunId() {
     return "";
   }
 
-  const withPending = state.runs.find((run) => runReviewStats(run.id).pending > 0);
+  const withPending = state.runs.find((run) => reviewCandidateTotalForRun(run.id) > 0);
   return withPending?.id || state.runs[0].id;
 }
 
@@ -1180,9 +1203,12 @@ function renderEvidenceList(item) {
 }
 
 function renderJobsTable() {
-  const pendingCount = pendingCandidatesAll().length;
+  const loadedPendingCount = pendingCandidatesAll().length;
+  const reviewCandidateTotal = reviewCandidateTotalAllRuns();
   elements.navJobsCount.textContent = String(state.runs.length);
-  elements.jobsMeta.textContent = state.runs.length ? `${state.runs.length} runs loaded · ${pendingCount} pending review` : "No source runs found";
+  elements.jobsMeta.textContent = state.runs.length
+    ? `${state.runs.length} runs loaded · ${loadedCountSummary(loadedPendingCount, reviewCandidateTotal, "review candidates")}`
+    : "No source runs found";
 
   if (!state.runs.length) {
     elements.jobsTableBody.innerHTML = `<tr><td colspan="7" class="empty-row">No source runs found.</td></tr>`;
@@ -1192,7 +1218,7 @@ function renderJobsTable() {
   elements.jobsTableBody.innerHTML = state.runs
     .map((run) => {
       const selectedClass = run.id === state.selectedJobRunId ? "is-selected" : "";
-      const stats = runReviewStats(run.id);
+      const reviewCandidateTotalForSelectedRun = reviewCandidateTotalForRun(run.id);
       return `
         <tr class="${selectedClass}">
           <td>
@@ -1203,9 +1229,9 @@ function renderJobsTable() {
           </td>
           <td>${escapeHtml(`${run.sourceName || "source"} · ${run.sourceDomain || "domain"}`)}</td>
           <td>${renderPill(displayLabel(run.status || "unknown"), statusVariant(run.status || "unknown"))}</td>
-          <td>${escapeHtml(String(numberValue(run.sourceRecordCount)))}</td>
-          <td>${escapeHtml(String(stats.pending))}</td>
-          <td>${escapeHtml(String(numberValue(run.evidenceCount)))}</td>
+          <td>${escapeHtml(formatCount(run.sourceRecordCount))}</td>
+          <td>${escapeHtml(formatCount(reviewCandidateTotalForSelectedRun))}</td>
+          <td>${escapeHtml(formatCount(run.evidenceCount))}</td>
           <td>${escapeHtml(formatDateTime(run.createdAt))}</td>
         </tr>
       `;
@@ -1225,8 +1251,9 @@ function renderJobsDetail() {
   }
 
   const stats = runReviewStats(run.id);
+  const reviewCandidateTotal = reviewCandidateTotalForRun(run.id);
   elements.jobsDetailTitle.textContent = run.id;
-  elements.jobsDetailSubtitle.textContent = `${numberValue(run.sourceRecordCount)} records · ${stats.pending} pending review`;
+  elements.jobsDetailSubtitle.textContent = `${formatCount(run.sourceRecordCount)} records · ${formatCount(reviewCandidateTotal)} review candidates`;
   elements.jobsDetailBody.innerHTML = `
     <div class="subtle-callout">
       ${renderPill(displayLabel(run.status || "unknown"), statusVariant(run.status || "unknown"))}
@@ -1240,10 +1267,11 @@ function renderJobsDetail() {
       <h4>Run detail</h4>
       <div class="fact-grid">
         <div class="fact-row"><span class="fact-label">Trigger</span><div class="fact-value">${escapeHtml(run.trigger || "—")}</div></div>
-        <div class="fact-row"><span class="fact-label">Records</span><div class="fact-value">${escapeHtml(String(numberValue(run.sourceRecordCount)))}</div></div>
-        <div class="fact-row"><span class="fact-label">Pending review</span><div class="fact-value">${escapeHtml(String(stats.pending))}</div></div>
-        <div class="fact-row"><span class="fact-label">Reviewed</span><div class="fact-value">${escapeHtml(String(stats.reviewed))}</div></div>
-        <div class="fact-row"><span class="fact-label">Evidence</span><div class="fact-value">${escapeHtml(String(numberValue(run.evidenceCount)))}</div></div>
+        <div class="fact-row"><span class="fact-label">Records</span><div class="fact-value">${escapeHtml(formatCount(run.sourceRecordCount))}</div></div>
+        <div class="fact-row"><span class="fact-label">Review candidates</span><div class="fact-value">${escapeHtml(formatCount(reviewCandidateTotal))}</div></div>
+        <div class="fact-row"><span class="fact-label">Loaded pending</span><div class="fact-value">${escapeHtml(formatCount(stats.pending))}</div></div>
+        <div class="fact-row"><span class="fact-label">Loaded reviewed</span><div class="fact-value">${escapeHtml(formatCount(stats.reviewed))}</div></div>
+        <div class="fact-row"><span class="fact-label">Evidence</span><div class="fact-value">${escapeHtml(formatCount(run.evidenceCount))}</div></div>
         <div class="fact-row"><span class="fact-label">Started</span><div class="fact-value">${escapeHtml(formatDateTime(run.startedAt))}</div></div>
         <div class="fact-row"><span class="fact-label">Completed</span><div class="fact-value">${escapeHtml(formatDateTime(run.completedAt))}</div></div>
       </div>
@@ -1266,8 +1294,8 @@ function renderReviewRunFilter() {
   const options = [
     `<option value="">All runs</option>`,
     ...state.runs.map((run) => {
-      const stats = runReviewStats(run.id);
-      const suffix = stats.pending ? ` · ${stats.pending} pending` : stats.reviewed ? ` · ${stats.reviewed} reviewed` : "";
+      const reviewCandidateTotal = reviewCandidateTotalForRun(run.id);
+      const suffix = reviewCandidateTotal ? ` · ${formatCount(reviewCandidateTotal)} candidates` : "";
       return `<option value="${escapeHtml(run.id)}">${escapeHtml(`${run.id}${suffix}`)}</option>`;
     }),
   ];
@@ -1307,10 +1335,12 @@ function renderReviewRunFilter() {
 
 function renderReviewTable() {
   const items = filteredReviewCandidates();
-  elements.navReviewCount.textContent = String(pendingCandidatesAll().length);
+  const loadedPendingCount = pendingCandidatesAll().length;
+  const reviewCandidateTotal = state.reviewRunId ? reviewCandidateTotalForRun(state.reviewRunId) : reviewCandidateTotalAllRuns();
+  elements.navReviewCount.textContent = formatCount(reviewCandidateTotal || loadedPendingCount);
   elements.reviewMeta.textContent = state.reviewRunId
-    ? `${items.length} candidates in ${state.reviewRunId}`
-    : `${items.length} candidates across all runs`;
+    ? `${loadedCountSummary(items.length, reviewCandidateTotal, "review candidates")} in ${state.reviewRunId}`
+    : `${loadedCountSummary(items.length, reviewCandidateTotal, "review candidates")} across all runs`;
 
   if (!items.length) {
     elements.reviewTableBody.innerHTML = `<tr><td colspan="4" class="empty-row">No review candidates for the current filter.</td></tr>`;
