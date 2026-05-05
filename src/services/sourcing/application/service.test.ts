@@ -503,6 +503,7 @@ test('createReviewLabel updates an existing global candidate when approved evide
 
 test('listApprovedEntities surfaces pending merge blockers for approved candidates', async () => {
   const approvedEntity = buildApprovedEntity();
+  const sourceRecord = buildSourceRecord();
   const blocker = buildCandidate({
     id: 'dedup_pending_devpost_merge',
     sourceRecordIds: ['src_github_person_alex', 'src_devpost_person_alex'],
@@ -519,6 +520,7 @@ test('listApprovedEntities surfaces pending merge blockers for approved candidat
   const repository = {
     listApprovedEntities: async () => [approvedEntity],
     listDedupCandidates: async () => [blocker, unrelated],
+    getSourceRecordsByIds: async (ids: string[]) => [sourceRecord].filter((record) => ids.includes(record.id)),
   } as Partial<SourcingRepositoryPort> as SourcingRepositoryPort;
 
   const service = new SourcingService(repository);
@@ -527,6 +529,11 @@ test('listApprovedEntities surfaces pending merge blockers for approved candidat
   assert.equal(result.pendingMergeReviewCount, 1);
   assert.deepEqual(result.pendingMergeReviewIds, ['dedup_pending_devpost_merge']);
   assert.equal(result.pendingMergeReviewBlockers[0]?.displayName, 'Alex Rivera');
+  assert.equal(result.sourceRecordSummaries[0]?.id, 'src_github_person_alex');
+  assert.deepEqual(result.sourceRecordSummaries[0]?.linkGroups[0], {
+    label: 'Source',
+    urls: ['https://github.com/alex'],
+  });
 });
 
 test('generateEnrichmentForApprovedEntity blocks when a pending merge overlaps the approved candidate', async () => {

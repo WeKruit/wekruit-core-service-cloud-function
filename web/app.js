@@ -329,6 +329,185 @@ function collectNonEmpty(...values) {
   return uniqueList(values.flatMap((value) => flattenStrings(value)));
 }
 
+const URL_PATTERN = /https?:\/\/[^\s"'<>]+/gi;
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function cleanUrlToken(value) {
+  return value.replace(/[),.;\]]+$/g, "");
+}
+
+function extractUrlsFromValue(value) {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return [...String(value).matchAll(URL_PATTERN)].map((match) => cleanUrlToken(match[0])).filter(Boolean);
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => extractUrlsFromValue(entry));
+  }
+  if (isPlainObject(value)) {
+    return Object.values(value).flatMap((entry) => extractUrlsFromValue(entry));
+  }
+  return [];
+}
+
+function valueAtPath(input, path) {
+  return path.split(".").reduce((current, segment) => {
+    if (current === null || current === undefined) {
+      return undefined;
+    }
+    if (Array.isArray(current)) {
+      return current.flatMap((entry) => {
+        const value = valueAtPath(entry, segment);
+        return Array.isArray(value) ? value : [value];
+      });
+    }
+    if (isPlainObject(current)) {
+      return current[segment];
+    }
+    return undefined;
+  }, input);
+}
+
+function valuesAtPaths(record, paths) {
+  return paths.map((path) => valueAtPath(record, path));
+}
+
+function linkGroupsFromRecord(record) {
+  const existingGroups = arrayValue(record?.linkGroups)
+    .map((group) => ({
+      label: stringValue(group?.label) || "Links",
+      urls: uniqueList(arrayValue(group?.urls).flatMap((url) => extractUrlsFromValue(url))).slice(0, 12),
+    }))
+    .filter((group) => group.urls.length);
+
+  if (existingGroups.length) {
+    return existingGroups;
+  }
+
+  const groupInputs = [
+    {
+      label: "Source",
+      values: [record?.sourceUrl],
+    },
+    {
+      label: "GitHub",
+      values: valuesAtPaths(record, [
+        "display.github",
+        "display.githubUrl",
+        "rawSummary.github",
+        "rawSummary.githubUrl",
+        "rawSummary.projectGithubRepos",
+        "raw.github",
+        "raw.githubUrl",
+        "raw.github_url",
+        "raw.member.github",
+        "raw.profile.github_url",
+        "raw.profile.html_url",
+        "raw.projects.projectGithubRepos",
+        "raw.projects.github_repos",
+        "raw.projects.githubLinks",
+      ]),
+    },
+    {
+      label: "Devpost",
+      values: valuesAtPaths(record, [
+        "display.devpost",
+        "rawSummary.devpost",
+        "rawSummary.projectUrl",
+        "raw.member.devpost",
+        "raw.member.devpost_profile",
+        "raw.projects.projectUrl",
+        "raw.projects.project_url",
+      ]),
+    },
+    {
+      label: "LinkedIn",
+      values: valuesAtPaths(record, [
+        "display.linkedin",
+        "rawSummary.linkedin",
+        "raw.linkedin",
+        "raw.linkedinUrl",
+        "raw.linkedin_url",
+        "raw.member.linkedin",
+        "raw.profile.linkedin",
+      ]),
+    },
+    {
+      label: "Twitter/X",
+      values: valuesAtPaths(record, [
+        "display.twitter",
+        "rawSummary.twitter",
+        "raw.twitter",
+        "raw.twitterUrl",
+        "raw.twitter_url",
+        "raw.member.twitter",
+        "raw.profile.twitter",
+      ]),
+    },
+    {
+      label: "Website",
+      values: valuesAtPaths(record, [
+        "display.homepage",
+        "rawSummary.homepage",
+        "raw.homepage",
+        "raw.homepages",
+        "raw.website",
+        "raw.websites",
+        "raw.urls",
+        "raw.blog",
+        "raw.profile.blog",
+      ]),
+    },
+    {
+      label: "Projects",
+      values: valuesAtPaths(record, [
+        "rawSummary.demo",
+        "rawSummary.video",
+        "rawSummary.allLinks",
+        "rawSummary.projectUrl",
+        "raw.projects.demo",
+        "raw.projects.video",
+        "raw.projects.allLinks",
+        "raw.projects.links",
+        "raw.projects.projectUrl",
+      ]),
+    },
+  ];
+
+  return groupInputs
+    .map((group) => ({
+      label: group.label,
+      urls: uniqueList(group.values.flatMap((value) => extractUrlsFromValue(value))).slice(0, 12),
+    }))
+    .filter((group) => group.urls.length);
+}
+
+function renderTextWithLinks(value, isMeta = false) {
+  const text = stringValue(value);
+  if (!text) {
+    return "—";
+  }
+  const regex = /https?:\/\/[^\s"'<>]+/gi;
+  let output = "";
+  let cursor = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const rawMatch = match[0];
+    const href = cleanUrlToken(rawMatch);
+    const trailing = rawMatch.slice(href.length);
+    output += escapeHtml(text.slice(cursor, match.index));
+    output += `<a class="inline-link ${isMeta ? "mono" : ""}" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(href)}</a>${escapeHtml(trailing)}`;
+    cursor = match.index + rawMatch.length;
+  }
+  output += escapeHtml(text.slice(cursor));
+  return output || escapeHtml(text);
+}
+
 function normalizeSignal(value) {
   const normalized = stringValue(value)
     .toLowerCase()
@@ -383,6 +562,156 @@ function renderPill(text, variant = "neutral") {
   return `<span class="pill pill--${escapeHtml(variant)}">${escapeHtml(text)}</span>`;
 }
 
+function reviewLifecycleState(candidate, item) {
+  const status = stringValue(candidate?.status) || "pending_review";
+  const singleton = isSingletonCandidate(candidate, item);
+  if (status === "pending_review" && singleton) {
+    return {
+      label: "Identity review pending",
+      detail: "Single-source candidate needs a reviewer to approve, reject, or hold before enrichment.",
+      variant: "warning",
+    };
+  }
+  if (status === "pending_review") {
+    return {
+      label: "Merge review pending",
+      detail: "Multiple source records may describe the same person. Resolve the merge before enrichment.",
+      variant: "warning",
+    };
+  }
+  if (status === "approved_candidate" || status === "same_person") {
+    return {
+      label: "Identity approved",
+      detail: "Reviewer accepted this candidate or merge into the approved candidate pool.",
+      variant: "success",
+    };
+  }
+  if (status === "not_same_person") {
+    return {
+      label: "Kept separate",
+      detail: "Reviewer decided these records should not merge.",
+      variant: "neutral",
+    };
+  }
+  if (status === "rejected_bad_record") {
+    return {
+      label: "Bad record rejected",
+      detail: "Reviewer rejected this as broken, spammy, or not a usable person record.",
+      variant: "danger",
+    };
+  }
+  if (status === "rejected_not_relevant") {
+    return {
+      label: "Not relevant",
+      detail: "Reviewer confirmed the person exists but is not relevant for sourcing.",
+      variant: "danger",
+    };
+  }
+  if (status === "unsure") {
+    return {
+      label: "Held for later",
+      detail: "Reviewer deferred the identity decision.",
+      variant: "warning",
+    };
+  }
+  if (status === "suppressed") {
+    return {
+      label: "Suppressed by stronger match",
+      detail: "This singleton was hidden because a stronger multi-source candidate covers the same source record.",
+      variant: "neutral",
+    };
+  }
+  return {
+    label: displayLabel(status),
+    detail: "Candidate is outside the default pending identity-review path.",
+    variant: statusVariant(status),
+  };
+}
+
+function approvedLifecycleState(entity) {
+  const pendingMergeCount = Number(entity?.pendingMergeReviewCount || 0);
+  const enrichmentStatus = stringValue(entity?.enrichmentStatus) || "not_started";
+  if (pendingMergeCount > 0) {
+    return {
+      label: "Enrichment blocked by merge",
+      detail: `Resolve ${pendingMergeCount} pending merge ${pendingMergeCount === 1 ? "review" : "reviews"} before generating enrichment.`,
+      variant: "warning",
+    };
+  }
+  if (enrichmentStatus === "in_review") {
+    return {
+      label: "Enrichment review pending",
+      detail: "An enrichment draft exists and needs human approval before a final profile is materialized.",
+      variant: "warning",
+    };
+  }
+  if (enrichmentStatus === "enriched" && entity?.needsEnrichment === false) {
+    return {
+      label: "Profile materialized",
+      detail: "Identity and enrichment were approved; this candidate has a final matching-ready profile.",
+      variant: "success",
+    };
+  }
+  if (enrichmentStatus === "needs_enrichment") {
+    return {
+      label: "Needs re-enrichment",
+      detail: "New approved evidence changed this candidate; generate a fresh enrichment draft.",
+      variant: "warning",
+    };
+  }
+  return {
+    label: "Enrichment ready",
+    detail: "Identity is approved and no merge blockers remain. This candidate can generate enrichment.",
+    variant: "success",
+  };
+}
+
+function enrichmentLifecycleState(item) {
+  const status = stringValue(item?.status) || "pending_review";
+  if (status === "pending_review") {
+    return {
+      label: "Enrichment review pending",
+      detail: "Suggested labels need human approval or editing before this becomes a final profile.",
+      variant: "warning",
+    };
+  }
+  if (status === "approved") {
+    return {
+      label: "Profile materialized",
+      detail: "Reviewer approved this enrichment draft and materialized the final profile.",
+      variant: "success",
+    };
+  }
+  if (status === "held") {
+    return {
+      label: "Enrichment held",
+      detail: "Reviewer deferred the enrichment decision.",
+      variant: "warning",
+    };
+  }
+  if (status === "rejected") {
+    return {
+      label: "Draft rejected",
+      detail: "Reviewer rejected this enrichment draft; the candidate still needs enrichment.",
+      variant: "danger",
+    };
+  }
+  return {
+    label: displayLabel(status),
+    detail: "Enrichment item is outside the default pending-review path.",
+    variant: statusVariant(status),
+  };
+}
+
+function renderLifecycleCallout(lifecycle) {
+  return `
+    <div class="lifecycle-callout">
+      ${renderPill(lifecycle.label, lifecycle.variant)}
+      <span>${escapeHtml(lifecycle.detail)}</span>
+    </div>
+  `;
+}
+
 function setConnectionStatus(text, status) {
   elements.connectionStatus.textContent = text;
   elements.connectionStatus.dataset.status = status;
@@ -403,7 +732,7 @@ function runIdForCandidate(item) {
     return directRunId;
   }
 
-  const sourceRunId = arrayValue(item?.sourceRecords)
+  const sourceRunId = sourceRecordsForItem(item)
     .map((record) => stringValue(record?.sourceRunId) || stringValue(record?.runId))
     .find(Boolean);
 
@@ -460,16 +789,21 @@ function loadedCountSummary(loaded, total, noun) {
 
 function sourceKeysForItem(item) {
   return uniqueList(
-    arrayValue(item?.sourceRecords)
+    sourceRecordsForItem(item)
       .flatMap((record) => [record.source, record.sourceName])
       .map((source) => stringValue(source).toLowerCase())
       .filter(Boolean),
   );
 }
 
+function sourceRecordsForItem(item) {
+  const sourceRecords = arrayValue(item?.sourceRecords);
+  return sourceRecords.length ? sourceRecords : arrayValue(item?.sourceRecordSummaries);
+}
+
 function suggestedSignalsForItem(item) {
   return uniqueList(
-    arrayValue(item?.sourceRecords).flatMap((record) =>
+    sourceRecordsForItem(item).flatMap((record) =>
       signalValues(
         record?.rawSummary?.suggestedSignals,
         record?.raw?.suggestedSignals,
@@ -571,7 +905,7 @@ function selectedSignalsForItem(item) {
 }
 
 function isSingletonCandidate(candidate, item) {
-  return arrayValue(candidate?.reasonCodes).includes("singleton_review") || arrayValue(item?.sourceRecords).length <= 1;
+  return arrayValue(candidate?.reasonCodes).includes("singleton_review") || sourceRecordsForItem(item).length <= 1;
 }
 
 function sortRuns(runs) {
@@ -635,7 +969,7 @@ function filteredReviewCandidates() {
         stringValue(candidate.displayName),
         ...matchedFieldsForCandidate(candidate),
         ...suggestedSignalsForItem(item),
-        ...arrayValue(item.sourceRecords).flatMap((record) => {
+        ...sourceRecordsForItem(item).flatMap((record) => {
           const recordInfo = recordData(record);
           return [
             recordInfo.name,
@@ -644,6 +978,7 @@ function filteredReviewCandidates() {
             ...recordInfo.emails,
             ...recordInfo.homepages,
             ...recordInfo.githubs,
+            ...recordInfo.linkGroups.flatMap((group) => group.urls),
           ];
         }),
       ]
@@ -850,14 +1185,15 @@ function sharedValueSummary(item) {
 }
 
 function sourceSummary(item) {
-  const sources = uniqueList(arrayValue(item?.sourceRecords).map((record) => displayLabel(record.source || "source")));
+  const records = sourceRecordsForItem(item);
+  const sources = uniqueList(records.map((record) => displayLabel(record.source || record.sourceName || "source")));
   if (!sources.length) {
     return "No source records";
   }
   if (sources.length === 1) {
     return `${sources[0]} · 1 record`;
   }
-  return `${sources.join(" + ")} · ${arrayValue(item.sourceRecords).length} records`;
+  return `${sources.join(" + ")} · ${records.length} records`;
 }
 
 function tableSourceMeta(candidate) {
@@ -890,6 +1226,7 @@ function recordData(record) {
     storagePath: firstNonEmpty(record.rawStoragePath, record.storagePath),
     observedAt: firstNonEmpty(record.observedAt, record.updatedAt, record.createdAt),
     paperCount: firstNonEmpty(rawSummary.paperCountInBatch),
+    linkGroups: linkGroupsFromRecord(record),
   };
 }
 
@@ -898,15 +1235,67 @@ function renderMaybeLinks(values) {
   if (!entries.length) {
     return "—";
   }
-  return entries
-    .map((value) => {
-      const text = escapeHtml(value);
-      if (/^https?:\/\//.test(value)) {
-        return `<a class="inline-link" href="${text}" target="_blank" rel="noreferrer">${text}</a>`;
-      }
-      return text;
-    })
-    .join("<br />");
+  return entries.map((value) => renderTextWithLinks(value)).join("<br />");
+}
+
+function renderSourceLinkGroups(linkGroups) {
+  const groups = arrayValue(linkGroups).filter((group) => arrayValue(group?.urls).length);
+  if (!groups.length) {
+    return "";
+  }
+  return `
+    <div class="source-link-groups">
+      ${groups
+        .map((group) => `
+          <div class="source-link-group">
+            <div class="source-link-group__label">${escapeHtml(displayLabel(group.label || "links"))}</div>
+            <div class="source-link-list">${renderMaybeLinks(group.urls)}</div>
+          </div>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
+function renderSourceRecordSummaryCards(records, emptyText = "No source record summaries are attached.") {
+  const rows = arrayValue(records);
+  if (!rows.length) {
+    return `<p class="empty-detail">${escapeHtml(emptyText)}</p>`;
+  }
+
+  return `
+    <div class="source-grid">
+      ${rows
+        .map((record) => {
+          const info = recordData(record);
+          const title = record.displayName || info.name || record.id || "Source record";
+          const sourceName = displayLabel(record.sourceName || record.source || info.source || "source");
+          const sourceDomain = displayLabel(record.sourceDomain || record.domain || info.domain || "domain");
+          return `
+            <article class="source-card">
+              <div class="source-card__head">
+                <div class="source-card__title">${escapeHtml(title)}</div>
+                <div class="source-card__meta">${escapeHtml(`${sourceName} · ${sourceDomain}`)}</div>
+              </div>
+              <div class="source-card__body">
+                ${renderSourceLinkGroups(info.linkGroups)}
+                <div class="source-field">
+                  <div class="source-field__label">Native ID</div>
+                  <div class="source-field__values">${renderSourceFieldValues(info.sourceId ? [info.sourceId] : [], true)}</div>
+                  <span></span>
+                </div>
+                <div class="source-field">
+                  <div class="source-field__label">Run</div>
+                  <div class="source-field__values">${renderSourceFieldValues(info.runId ? [info.runId] : [], true)}</div>
+                  <span></span>
+                </div>
+              </div>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
 }
 
 function compareFieldValue(recordInfo, field) {
@@ -928,7 +1317,7 @@ function compareFieldValue(recordInfo, field) {
 }
 
 function comparisonRows(item) {
-  const records = arrayValue(item?.sourceRecords);
+  const records = sourceRecordsForItem(item);
   const left = recordData(records[0] || {});
   const right = recordData(records[1] || {});
   const matchedFields = new Set(arrayValue(item?.evidence).map((entry) => entry.evidenceType));
@@ -951,12 +1340,12 @@ function renderComparisonValue(values, isMeta = false) {
 
   return `
     <div class="compare-value">
-      <span class="compare-value__main ${isMeta ? "mono" : ""}">${escapeHtml(values[0])}</span>
+      <span class="compare-value__main ${isMeta ? "mono" : ""}">${renderTextWithLinks(values[0], isMeta)}</span>
       ${
         values.length > 1
           ? values
               .slice(1)
-              .map((value) => `<span class="compare-value__sub ${isMeta ? "mono" : ""}">${escapeHtml(value)}</span>`)
+              .map((value) => `<span class="compare-value__sub ${isMeta ? "mono" : ""}">${renderTextWithLinks(value, isMeta)}</span>`)
               .join("")
           : ""
       }
@@ -965,7 +1354,7 @@ function renderComparisonValue(values, isMeta = false) {
 }
 
 function renderComparisonTable(item) {
-  const records = arrayValue(item?.sourceRecords);
+  const records = sourceRecordsForItem(item);
   const left = recordData(records[0] || {});
   const right = recordData(records[1] || {});
   const rows = comparisonRows(item);
@@ -1052,7 +1441,7 @@ function renderSignalList(item, candidate) {
           return `
             <div class="signal-row">
               <div class="signal-label">${escapeHtml(evidenceTypeLabel(entry.evidenceType))}</div>
-              <div class="signal-value ${entry.evidenceType === "orcid" || entry.evidenceType === "source_native_id" ? "mono" : ""}">${escapeHtml(valueLabel)}</div>
+              <div class="signal-value ${entry.evidenceType === "orcid" || entry.evidenceType === "source_native_id" ? "mono" : ""}">${renderTextWithLinks(valueLabel, entry.evidenceType === "orcid" || entry.evidenceType === "source_native_id")}</div>
               <div class="signal-note">${escapeHtml(signalSummary(entry))}</div>
             </div>
           `;
@@ -1103,7 +1492,7 @@ function renderSourceFieldValues(values, isMeta = false) {
   return values
     .map(
       (value, index) =>
-        `<span class="source-field__value ${index > 0 ? "source-field__value--sub" : ""} ${isMeta ? "mono" : ""}">${escapeHtml(value)}</span>`,
+        `<span class="source-field__value ${index > 0 ? "source-field__value--sub" : ""} ${isMeta ? "mono" : ""}">${renderTextWithLinks(value, isMeta)}</span>`,
     )
     .join("");
 }
@@ -1128,6 +1517,7 @@ function renderSourceCard(title, recordInfo, rows, side) {
         <div class="source-card__meta">${escapeHtml(metaParts.join(" · ") || "Source record")}</div>
       </div>
       <div class="source-card__body">
+        ${renderSourceLinkGroups(recordInfo.linkGroups)}
         ${rows
           .map((row) => {
             const values = side === "left" ? row.left : row.right;
@@ -1147,7 +1537,7 @@ function renderSourceCard(title, recordInfo, rows, side) {
 }
 
 function renderSourceCards(item) {
-  const records = arrayValue(item?.sourceRecords);
+  const records = sourceRecordsForItem(item);
   const left = records[0] ? recordData(records[0]) : null;
   const right = records[1] ? recordData(records[1]) : null;
   const rows = comparisonRows(item);
@@ -1181,17 +1571,19 @@ function renderEvidenceList(item) {
     <div class="evidence-list">
       ${evidenceRows
         .map((entry) => {
-          const record = arrayValue(item.sourceRecords).find((sourceRecord) => sourceRecord.id === entry.sourceRecordId || sourceRecord.sourceRecordId === entry.sourceRecordId);
+          const record = sourceRecordsForItem(item).find((sourceRecord) => sourceRecord.id === entry.sourceRecordId || sourceRecord.sourceRecordId === entry.sourceRecordId);
           const normalized = stringValue(entry.normalizedValue);
           const raw = stringValue(entry.rawValue);
           const valueLabel = normalized || raw || "—";
           const sourceLabel = recordData(record || {}).source || displayLabel(entry.sourceName || "source");
+          const sourcePath = stringValue(entry.extractedFrom?.sourcePath) || "—";
+          const sourceUrl = stringValue(entry.extractedFrom?.sourceUrl);
           return `
             <div class="evidence-row">
               <div class="evidence-field">${escapeHtml(evidenceTypeLabel(entry.evidenceType))}</div>
               <div class="row-stack">
-                <span class="row-primary">${escapeHtml(valueLabel)}</span>
-                <span class="cell-subtle">${escapeHtml(sourceLabel)} · ${escapeHtml(entry.extractedFrom?.sourcePath || "—")}</span>
+                <span class="row-primary">${renderTextWithLinks(valueLabel)}</span>
+                <span class="cell-subtle">${escapeHtml(sourceLabel)} · ${renderTextWithLinks(sourceUrl || sourcePath)}</span>
               </div>
               <div class="cell-subtle">${escapeHtml(displayLabel(entry.quality || "low"))}</div>
             </div>
@@ -1309,7 +1701,7 @@ function renderReviewRunFilter() {
 
   const sourceOptions = uniqueList(
     state.candidates.flatMap((item) =>
-      arrayValue(item?.sourceRecords).map((record) => stringValue(record.source || record.sourceName).toLowerCase()).filter(Boolean),
+      sourceRecordsForItem(item).map((record) => stringValue(record.source || record.sourceName).toLowerCase()).filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right));
   if (state.reviewSourceFilter && !sourceOptions.includes(state.reviewSourceFilter)) {
@@ -1406,7 +1798,7 @@ function renderReviewDetail() {
     return;
   }
 
-  const sourceRecords = arrayValue(item.sourceRecords);
+  const sourceRecords = sourceRecordsForItem(item);
   const primaryEvidence = bestEvidence(item);
   const leftRecord = recordData(sourceRecords[0] || {});
   const rightRecord = recordData(sourceRecords[1] || {});
@@ -1424,6 +1816,7 @@ function renderReviewDetail() {
     <section class="detail-section">
       <p class="detail-kicker">Why this is in review</p>
       <p class="detail-lead">${escapeHtml(explanation)}</p>
+      ${renderLifecycleCallout(reviewLifecycleState(candidate, item))}
       <div class="pill-row">
         ${renderPill(displayLabel(candidate.status || "pending_review"), statusVariant(candidate.status || "pending_review"))}
         ${renderPill(displayLabel(candidate.strength || "weak"), statusVariant(candidate.strength || "weak"))}
@@ -1431,7 +1824,7 @@ function renderReviewDetail() {
       <div class="meta-strip">
         <span><strong>Matched on</strong> ${escapeHtml(matchedFieldsText)}</span>
         <span><strong>Sources</strong> ${escapeHtml(sourcePairText)}</span>
-        <span><strong>Shared value</strong> ${escapeHtml(sharedValue)}</span>
+        <span><strong>Shared value</strong> ${renderTextWithLinks(sharedValue)}</span>
       </div>
     </section>
 
@@ -1513,6 +1906,7 @@ function renderApprovedDetail() {
   const pendingMergeCount = Number(entity.pendingMergeReviewCount || 0);
   const pendingMergeBlockers = arrayValue(entity.pendingMergeReviewBlockers);
   const hasPendingMergeBlockers = pendingMergeCount > 0;
+  const lifecycle = approvedLifecycleState(entity);
   const canGenerate = entity.status === "active" &&
     !state.approvedSubmitting &&
     entity.enrichmentStatus !== "in_review" &&
@@ -1527,6 +1921,7 @@ function renderApprovedDetail() {
   elements.approvedDetailBody.innerHTML = `
     <section class="detail-section">
       <h4>Global candidate</h4>
+      ${renderLifecycleCallout(lifecycle)}
       <div class="pill-row">
         ${renderPill(displayLabel(entity.status || "active"), statusVariant(entity.status || "active"))}
         ${renderPill(displayLabel(entity.enrichmentStatus || "not_started"), statusVariant(entity.enrichmentStatus || "not_started"))}
@@ -1579,9 +1974,15 @@ function renderApprovedDetail() {
 
     <section class="detail-section">
       <h4>Source records</h4>
-      <div class="inline-list">
-        ${arrayValue(entity.sourceRecordIds).map((id) => renderPill(id, "neutral")).join("") || renderPill("No source record IDs", "warning")}
-      </div>
+      ${renderSourceRecordSummaryCards(
+        arrayValue(entity.sourceRecordSummaries),
+        arrayValue(entity.sourceRecordIds).length ? "Source record summaries were not loaded for this entity." : "No source records are attached.",
+      )}
+      ${
+        arrayValue(entity.sourceRecordSummaries).length
+          ? ""
+          : `<div class="inline-list">${arrayValue(entity.sourceRecordIds).map((id) => renderPill(id, "neutral")).join("") || renderPill("No source record IDs", "warning")}</div>`
+      }
     </section>
 
     <section class="detail-section">
@@ -1681,13 +2082,16 @@ function renderEnrichmentDetail() {
   const selectedSpecializations = uniqueList(arrayValue(draft.specializations).map((entry) => entry.specialization));
   const selectedDomains = uniqueList(arrayValue(draft.industryDomainInterests).map((entry) => entry.domain));
   const selectedSkills = arrayValue(draft.skills).map((entry) => entry.skill).join(", ");
+  const lifecycle = enrichmentLifecycleState(item);
+  const evidenceCount = arrayValue(item.evidence).length || arrayValue(item.evidenceIds).length;
 
   elements.enrichmentDetailTitle.textContent = item.displayName || item.approvedEntityId;
-  elements.enrichmentDetailSubtitle.textContent = `${arrayValue(item.evidenceIds).length} evidence records · ${displayLabel(item.status || "pending_review")}`;
+  elements.enrichmentDetailSubtitle.textContent = `${evidenceCount} evidence records · ${displayLabel(item.status || "pending_review")}`;
   elements.enrichmentDetailBody.innerHTML = `
     <section class="detail-section">
       <h4>Suggested summary</h4>
       <p class="detail-lead">${escapeHtml(draft.matchingSummary || "No summary generated.")}</p>
+      ${renderLifecycleCallout(lifecycle)}
       <div class="pill-row">
         ${renderPill(displayLabel(draft.primaryTrack || "unknown_other"), "accent")}
         ${renderPill(displayLabel(draft.contactability?.value || "unknown"), statusVariant(draft.contactability?.value || "unknown"))}
@@ -1753,10 +2157,18 @@ function renderEnrichmentDetail() {
     </section>
 
     <section class="detail-section">
-      <h4>Evidence IDs</h4>
-      <div class="inline-list">
-        ${arrayValue(item.evidenceIds).map((id) => renderPill(id, "neutral")).join("") || renderPill("No evidence IDs", "warning")}
-      </div>
+      <h4>Supporting evidence</h4>
+      ${renderEvidenceList({ ...item, sourceRecords: sourceRecordsForItem(item) })}
+      ${
+        arrayValue(item.evidence).length
+          ? ""
+          : `<div class="inline-list">${arrayValue(item.evidenceIds).map((id) => renderPill(id, "neutral")).join("") || renderPill("No evidence IDs", "warning")}</div>`
+      }
+    </section>
+
+    <section class="detail-section">
+      <h4>Source records</h4>
+      ${renderSourceRecordSummaryCards(sourceRecordsForItem(item))}
     </section>
 
     <details class="payload">
@@ -1879,15 +2291,15 @@ function renderProfileSkillItems(items) {
 
 function renderProfileEvidenceValue(entry) {
   const value = stringValue(entry.normalizedValue) || stringValue(entry.rawValue) || "—";
-  const text = escapeHtml(value);
-  if (/^https?:\/\//.test(value)) {
-    return `<a class="inline-link" href="${text}" target="_blank" rel="noreferrer">${text}</a>`;
+  const valueWithLinks = renderTextWithLinks(value);
+  if (extractUrlsFromValue(value).length) {
+    return valueWithLinks;
   }
   const sourceUrl = stringValue(entry.extractedFrom?.sourceUrl);
   if (sourceUrl) {
-    return `<a class="inline-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">${text}</a>`;
+    return `<a class="inline-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(value)}</a>`;
   }
-  return text;
+  return valueWithLinks;
 }
 
 function sourceLabelForEvidence(details, entry) {
@@ -1908,16 +2320,20 @@ function renderProfileFieldEvidence(details) {
             <div class="profile-evidence-group__field">${escapeHtml(displayLabel(row.field))}</div>
             <div class="profile-evidence-group__items">
               ${arrayValue(row.evidence)
-                .map((entry) => `
-                  <div class="evidence-row evidence-row--profile">
-                    <div class="evidence-field">${escapeHtml(evidenceTypeLabel(entry.evidenceType))}</div>
-                    <div class="row-stack">
-                      <span class="row-primary">${renderProfileEvidenceValue(entry)}</span>
-                      <span class="cell-subtle">${escapeHtml(sourceLabelForEvidence(details, entry))} · ${escapeHtml(entry.extractedFrom?.sourcePath || entry.sourceRecordId || "—")}</span>
+                .map((entry) => {
+                  const sourcePath = stringValue(entry.extractedFrom?.sourcePath) || stringValue(entry.sourceRecordId) || "—";
+                  const sourceUrl = stringValue(entry.extractedFrom?.sourceUrl);
+                  return `
+                    <div class="evidence-row evidence-row--profile">
+                      <div class="evidence-field">${escapeHtml(evidenceTypeLabel(entry.evidenceType))}</div>
+                      <div class="row-stack">
+                        <span class="row-primary">${renderProfileEvidenceValue(entry)}</span>
+                        <span class="cell-subtle">${escapeHtml(sourceLabelForEvidence(details, entry))} · ${renderTextWithLinks(sourceUrl || sourcePath)}</span>
+                      </div>
+                      <div class="cell-subtle">${escapeHtml(displayLabel(entry.quality || "low"))}</div>
                     </div>
-                    <div class="cell-subtle">${escapeHtml(displayLabel(entry.quality || "low"))}</div>
-                  </div>
-                `)
+                  `;
+                })
                 .join("")}
             </div>
           </div>
@@ -1928,41 +2344,7 @@ function renderProfileFieldEvidence(details) {
 }
 
 function renderProfileSourceLineage(details) {
-  const rows = arrayValue(details.sourceRecords);
-  if (!rows.length) {
-    return `<p class="empty-detail">No source record summaries are attached.</p>`;
-  }
-  return `
-    <div class="source-grid">
-      ${rows
-        .map((record) => `
-          <article class="source-card">
-            <div class="source-card__head">
-              <div class="source-card__title">${escapeHtml(record.displayName || record.id)}</div>
-              <div class="source-card__meta">${escapeHtml(`${displayLabel(record.sourceName)} · ${displayLabel(record.sourceDomain)}`)}</div>
-            </div>
-            <div class="source-card__body">
-              <div class="source-field">
-                <div class="source-field__label">Source URL</div>
-                <div class="source-field__values">${renderMaybeLinks(record.sourceUrl ? [record.sourceUrl] : [])}</div>
-                <span></span>
-              </div>
-              <div class="source-field">
-                <div class="source-field__label">Native ID</div>
-                <div class="source-field__values">${renderSourceFieldValues(record.sourceNativeId ? [record.sourceNativeId] : [], true)}</div>
-                <span></span>
-              </div>
-              <div class="source-field">
-                <div class="source-field__label">Run</div>
-                <div class="source-field__values">${renderSourceFieldValues([record.sourceRunId], true)}</div>
-                <span></span>
-              </div>
-            </div>
-          </article>
-        `)
-        .join("")}
-    </div>
-  `;
+  return renderSourceRecordSummaryCards(details.sourceRecords);
 }
 
 function renderProfileReviewLineage(details) {

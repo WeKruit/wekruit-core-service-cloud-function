@@ -590,6 +590,23 @@ textarea {
   color: var(--danger);
 }
 
+.lifecycle-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.58rem 0.68rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 253, 250, 0.58);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  line-height: 1.42;
+}
+
+.lifecycle-callout .pill {
+  flex: 0 0 auto;
+}
+
 .detail-list {
   margin: 0;
   padding-left: 1.1rem;
@@ -769,6 +786,37 @@ textarea {
 .source-card__body {
   display: grid;
   gap: 0.05rem;
+}
+
+.source-link-groups {
+  display: grid;
+  gap: 0.42rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.source-link-group {
+  display: grid;
+  grid-template-columns: 4.9rem minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: start;
+}
+
+.source-link-group__label {
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  font-weight: 560;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.source-link-list {
+  min-width: 0;
+  display: grid;
+  gap: 0.18rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .source-field {
@@ -999,6 +1047,7 @@ textarea {
 .inline-link {
   color: var(--accent);
   text-decoration: none;
+  overflow-wrap: anywhere;
 }
 
 .inline-link:hover {
@@ -1118,6 +1167,11 @@ details.payload pre {
   .profile-evidence-group {
     grid-template-columns: 1fr;
     gap: 0.25rem;
+  }
+
+  .source-link-group {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
   }
 
   .fact-row {

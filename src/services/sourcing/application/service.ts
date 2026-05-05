@@ -90,12 +90,160 @@ function pickDisplayName(records: SourceRecord[]): string | null {
   return records.find((record) => Boolean(record.displayName))?.displayName ?? null;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 function valuesFromEvidence(evidence: EvidenceRecord[], type: EvidenceRecord['evidenceType']): string[] {
   return sortedUnique(
     evidence
       .filter((entry) => entry.evidenceType === type)
       .map((entry) => entry.normalizedValue),
   );
+}
+
+const urlRegex = /https?:\/\/[^\s"'<>]+/gi;
+
+function cleanUrlToken(value: string): string {
+  return value.replace(/[),.;\]]+$/g, '');
+}
+
+function urlsFromUnknown(value: unknown): string[] {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return [...String(value).matchAll(urlRegex)]
+      .map((match) => cleanUrlToken(match[0]))
+      .filter(Boolean);
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => urlsFromUnknown(entry));
+  }
+  if (isPlainRecord(value)) {
+    return Object.values(value).flatMap((entry) => urlsFromUnknown(entry));
+  }
+  return [];
+}
+
+function valueAtPath(input: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((current, segment) => {
+    if (current === null || current === undefined) {
+      return undefined;
+    }
+    if (Array.isArray(current)) {
+      return current.flatMap((entry) => valueAtPath(entry, segment));
+    }
+    if (isPlainRecord(current)) {
+      return current[segment];
+    }
+    return undefined;
+  }, input);
+}
+
+function valuesAtPaths(record: SourceRecord, paths: string[]): unknown[] {
+  return paths.map((path) => valueAtPath(record, path));
+}
+
+function buildSourceRecordLinkGroups(record: SourceRecord): SourceRecordLinkGroup[] {
+  const groupInputs: Array<{ label: string; values: unknown[] }> = [
+    {
+      label: 'Source',
+      values: [record.sourceUrl],
+    },
+    {
+      label: 'GitHub',
+      values: valuesAtPaths(record, [
+        'display.github',
+        'display.githubUrl',
+        'rawSummary.github',
+        'rawSummary.githubUrl',
+        'rawSummary.projectGithubRepos',
+        'raw.github',
+        'raw.githubUrl',
+        'raw.github_url',
+        'raw.member.github',
+        'raw.profile.github_url',
+        'raw.profile.html_url',
+        'raw.projects.projectGithubRepos',
+        'raw.projects.github_repos',
+        'raw.projects.githubLinks',
+      ]),
+    },
+    {
+      label: 'Devpost',
+      values: valuesAtPaths(record, [
+        'display.devpost',
+        'rawSummary.devpost',
+        'rawSummary.projectUrl',
+        'raw.member.devpost',
+        'raw.member.devpost_profile',
+        'raw.projects.projectUrl',
+        'raw.projects.project_url',
+      ]),
+    },
+    {
+      label: 'LinkedIn',
+      values: valuesAtPaths(record, [
+        'display.linkedin',
+        'rawSummary.linkedin',
+        'raw.linkedin',
+        'raw.linkedinUrl',
+        'raw.member.linkedin',
+        'raw.member.linkedin_url',
+      ]),
+    },
+    {
+      label: 'Twitter/X',
+      values: valuesAtPaths(record, [
+        'display.twitter',
+        'rawSummary.twitter',
+        'raw.twitter',
+        'raw.twitterUrl',
+        'raw.member.twitter',
+        'raw.member.twitter_url',
+        'raw.profile.twitter_username',
+      ]),
+    },
+    {
+      label: 'Website',
+      values: valuesAtPaths(record, [
+        'display.homepage',
+        'display.website',
+        'rawSummary.homepage',
+        'rawSummary.website',
+        'raw.homepage',
+        'raw.website',
+        'raw.blog',
+        'raw.member.website',
+        'raw.profile.blog',
+      ]),
+    },
+    {
+      label: 'Projects/demos',
+      values: valuesAtPaths(record, [
+        'rawSummary.demo',
+        'rawSummary.video',
+        'rawSummary.allLinks',
+        'rawSummary.projectUrl',
+        'raw.projects.projectUrl',
+        'raw.projects.project_url',
+        'raw.projects.videoUrl',
+        'raw.projects.video_url',
+        'raw.projects.demoLinks',
+        'raw.projects.demo_links',
+        'raw.projects.allLinks',
+        'raw.projects.all_links',
+      ]),
+    },
+  ];
+
+  return groupInputs
+    .map(({ label, values }) => ({
+      label,
+      urls: sortedUnique(values.flatMap((value) => urlsFromUnknown(value))).slice(0, 12),
+    }))
+    .filter((group) => group.urls.length > 0);
 }
 
 const dedupStrengthRank: Record<DedupCandidate['strength'], number> = {
@@ -165,6 +313,11 @@ export type CandidateProfileListOptions = {
   q?: string;
 };
 
+export type SourceRecordLinkGroup = {
+  label: string;
+  urls: string[];
+};
+
 export type CandidateProfileSourceSummary = Pick<
   SourceRecord,
   | 'id'
@@ -180,7 +333,9 @@ export type CandidateProfileSourceSummary = Pick<
   | 'observedAt'
   | 'createdAt'
   | 'updatedAt'
->;
+> & {
+  linkGroups: SourceRecordLinkGroup[];
+};
 
 export type CandidateProfileReviewSummary = Pick<
   ReviewLabelRecord,
@@ -245,6 +400,12 @@ export type ApprovedEntityWithReviewState = ApprovedEntity & {
   pendingMergeReviewCount: number;
   pendingMergeReviewIds: string[];
   pendingMergeReviewBlockers: PendingMergeReviewBlockerSummary[];
+  sourceRecordSummaries: CandidateProfileSourceSummary[];
+};
+
+export type CandidateEnrichmentReviewItemWithEvidence = CandidateEnrichmentReviewItem & {
+  sourceRecordSummaries: CandidateProfileSourceSummary[];
+  evidence: EvidenceRecord[];
 };
 
 export class PendingMergeReviewBlockError extends Error {
@@ -429,6 +590,7 @@ function summarizeSourceRecord(record: SourceRecord): CandidateProfileSourceSumm
     observedAt: record.observedAt,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    linkGroups: buildSourceRecordLinkGroups(record),
   };
 }
 
@@ -770,6 +932,9 @@ export class SourcingService {
       this.repository.listApprovedEntities(),
       this.repository.listDedupCandidates('pending_review'),
     ]);
+    const sourceRecordIds = sortedUnique(approvedEntities.flatMap((entity) => entity.sourceRecordIds));
+    const sourceRecords = await this.repository.getSourceRecordsByIds(sourceRecordIds);
+    const sourceRecordsById = new Map(sourceRecords.map((record) => [record.id, record]));
 
     return approvedEntities.map((entity) => {
       const blockers = findPendingMergeBlockersForEntity(entity, pendingCandidates);
@@ -778,6 +943,10 @@ export class SourcingService {
         pendingMergeReviewCount: blockers.length,
         pendingMergeReviewIds: blockers.map((blocker) => blocker.id),
         pendingMergeReviewBlockers: blockers,
+        sourceRecordSummaries: entity.sourceRecordIds
+          .map((sourceRecordId) => sourceRecordsById.get(sourceRecordId))
+          .filter((record): record is SourceRecord => Boolean(record))
+          .map((record) => summarizeSourceRecord(record)),
       };
     });
   }
@@ -978,8 +1147,27 @@ export class SourcingService {
 
   async listEnrichmentReviewItems(
     status?: CandidateEnrichmentReviewStatus,
-  ): Promise<CandidateEnrichmentReviewItem[]> {
-    return this.repository.listEnrichmentReviewItems(status);
+  ): Promise<CandidateEnrichmentReviewItemWithEvidence[]> {
+    const items = await this.repository.listEnrichmentReviewItems(status);
+    const sourceRecordIds = sortedUnique(items.flatMap((item) => item.sourceRecordIds));
+    const evidenceIds = sortedUnique(items.flatMap((item) => item.evidenceIds));
+    const [sourceRecords, evidence] = await Promise.all([
+      this.repository.getSourceRecordsByIds(sourceRecordIds),
+      this.repository.getEvidenceByIds(evidenceIds),
+    ]);
+    const sourceRecordsById = new Map(sourceRecords.map((record) => [record.id, record]));
+    const evidenceById = new Map(evidence.map((entry) => [entry.id, entry]));
+
+    return items.map((item) => ({
+      ...item,
+      sourceRecordSummaries: item.sourceRecordIds
+        .map((sourceRecordId) => sourceRecordsById.get(sourceRecordId))
+        .filter((record): record is SourceRecord => Boolean(record))
+        .map((record) => summarizeSourceRecord(record)),
+      evidence: item.evidenceIds
+        .map((evidenceId) => evidenceById.get(evidenceId))
+        .filter((entry): entry is EvidenceRecord => Boolean(entry)),
+    }));
   }
 
   async submitEnrichmentReviewDecision(
