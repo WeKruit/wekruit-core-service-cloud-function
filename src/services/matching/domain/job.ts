@@ -1,5 +1,11 @@
 export type MatchingJobStatus = 'active' | 'inactive';
-export type MatchingJobType = 'intern' | 'new_grad' | 'other';
+export type MatchingJobType =
+  | 'intern'
+  | 'new_grad'
+  | 'full_time'
+  | 'contract'
+  | 'part_time'
+  | 'other';
 
 export interface MatchingJobRecord {
   id: string;

@@ -82,17 +82,40 @@ function normalizeBoolean(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
 }
 
-function inferJobType(sourceRepo: string | null): MatchingJobType {
+function inferJobType(sourceRepo: string | null, roleTitle: string | null): MatchingJobType {
   if (!sourceRepo) {
     return 'other';
   }
 
+  // SimplifyJobs (intern/new-grad mirrors)
   if (sourceRepo === 'Summer2026-Internships' || sourceRepo === 'jobright-intern') {
     return 'intern';
   }
 
   if (sourceRepo === 'New-Grad-Positions' || sourceRepo === 'jobright-newgrad') {
     return 'new_grad';
+  }
+
+  // v1.8 — career-ops direct API sources (Phase 73). All full_time unless
+  // role title indicates otherwise. Without this, V16 hard-filter
+  // `targetJobType=full_time` drops every greenhouse/lever/ashby doc
+  // (silent regression for 6500+ jobs).
+  if (
+    sourceRepo.startsWith('greenhouse:') ||
+    sourceRepo.startsWith('lever:') ||
+    sourceRepo.startsWith('ashby:') ||
+    sourceRepo.startsWith('wellfound:') ||
+    sourceRepo.startsWith('linkedin:') ||
+    sourceRepo.startsWith('otta:')
+  ) {
+    const t = (roleTitle ?? '').toLowerCase();
+    if (t.includes('intern') || /\bco-?op\b/.test(t)) return 'intern';
+    if (t.includes('new grad') || t.includes('new-grad') || t.includes('graduate program')) {
+      return 'new_grad';
+    }
+    if (t.includes('contract')) return 'contract';
+    if (t.includes('part-time') || t.includes('part time')) return 'part_time';
+    return 'full_time';
   }
 
   return 'other';
@@ -144,6 +167,27 @@ function normalizeStatus(value: unknown): MatchingJobStatus {
   throw new Error('Matching job status must be "active" or "inactive".');
 }
 
+/**
+ * Builds the Firestore matching-jobs doc from a macmini sync row.
+ *
+ * Note on tag derivation (v1.8): roleFunction / industrySector /
+ * relevantTags / requiredSkills(canonical) are NOT computed here. They are
+ * filled async by the wekruit-pa side trigger `paMatchingJobsAutoEnrich`
+ * (Firestore onDocumentWritten on matching-jobs/{jobId}) which calls the
+ * unified `@pa/job-tag-enricher` LLM service. We do this async because:
+ *   1. Sync is HTTP batch up to 50 jobs — calling LLM inline (~3s/job)
+ *      would push batch latency past timeout.
+ *   2. The trigger is loop-safe via enricherVersion + enricherContentHash
+ *      idempotency so re-syncs don't double-enrich.
+ *   3. Failed LLM calls don't block the doc landing — recoverable later.
+ *
+ * What this builder still must get right:
+ *   - jobType (used by V16 hard-filter `targetJobType`). Don't default to
+ *     "other" silently for career-ops sources or you drop 6500+ jobs.
+ *   - sourceRepo, contentHash, embedding, atsApplyUrl: bridge identity.
+ *   - locationBuckets: canonical from raw location_raw via getLocationBuckets.
+ *   - status: throws if not in {active, inactive}.
+ */
 export function buildMatchingJobRecord(input: {
   raw: Record<string, unknown>;
   syncedAt: string;
@@ -162,12 +206,13 @@ export function buildMatchingJobRecord(input: {
   const salaryRange = normalizeString(raw.salary_range);
   const { salaryMin, salaryMax } = parseSalaryRange(salaryRange);
 
+  const roleTitle = normalizeString(raw.role_title);
   return {
     id,
     sourceRepo,
-    jobType: inferJobType(sourceRepo),
+    jobType: inferJobType(sourceRepo, roleTitle),
     companyName: normalizeString(raw.company_name),
-    roleTitle: normalizeString(raw.role_title),
+    roleTitle,
     primaryUrl: normalizeString(raw.primary_url),
     atsApplyUrl: normalizeString(raw.ats_apply_url),
     locationRaw: normalizeString(raw.location_raw),
