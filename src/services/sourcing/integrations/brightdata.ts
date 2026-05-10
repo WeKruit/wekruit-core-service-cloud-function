@@ -15,6 +15,13 @@ export const brightDataLinkedInProfilesDatasetId = 'gd_l1viktl72bvl7bjuj0';
 
 const defaultBrightDataBaseUrl = 'https://api.brightdata.com';
 const lookupType: VendorProfileLookupType = 'linkedin_profile_by_url';
+const headlineMaxLength = 280;
+const currentCompanyMaxLength = 260;
+const educationSummaryMaxLength = 420;
+const experienceSummaryMaxLength = 900;
+const skillMaxLength = 100;
+const aboutSummaryMaxLength = 2500;
+const projectSummaryMaxLength = 800;
 
 export type ProfessionalProfileLookupStatus = 'completed' | 'no_match' | 'async_snapshot_pending';
 
@@ -118,8 +125,52 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function decodeHtmlEntities(value: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    apos: "'",
+    bull: '-',
+    gt: '>',
+    hellip: '...',
+    ldquo: '"',
+    lsquo: "'",
+    lt: '<',
+    mdash: '-',
+    middot: '-',
+    nbsp: ' ',
+    ndash: '-',
+    quot: '"',
+    rdquo: '"',
+    rsquo: "'",
+  };
+  return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
+    const lower = entity.toLowerCase();
+    if (lower.startsWith('#x')) {
+      const codePoint = Number.parseInt(lower.slice(2), 16);
+      return Number.isFinite(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+        ? String.fromCodePoint(codePoint)
+        : match;
+    }
+    if (lower.startsWith('#')) {
+      const codePoint = Number.parseInt(lower.slice(1), 10);
+      return Number.isFinite(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+        ? String.fromCodePoint(codePoint)
+        : match;
+    }
+    return namedEntities[lower] ?? match;
+  });
+}
+
+function textFromHtml(value: string): string {
+  const withBreaks = value
+    .replace(/<\s*br\s*\/?\s*>/gi, ' ')
+    .replace(/<\/\s*(p|div|li|tr|td|h[1-6])\s*>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ');
+  return decodeHtmlEntities(withBreaks).replace(/<[^>]*>/g, ' ');
+}
+
 function cleanText(value: string, maxLength: number): string | null {
-  const normalized = value.replace(/\s+/g, ' ').trim();
+  const normalized = textFromHtml(value).replace(/\s+/g, ' ').trim();
   if (!normalized) {
     return null;
   }
@@ -143,16 +194,85 @@ function firstString(record: Record<string, unknown>, keys: string[], maxLength:
   return null;
 }
 
+function firstUrl(record: Record<string, unknown>, keys: string[], maxLength = 300): string | null {
+  for (const key of keys) {
+    const direct = stringFromUnknown(record[key], maxLength);
+    if (direct && /^https?:\/\//i.test(direct)) {
+      return direct;
+    }
+  }
+  return null;
+}
+
 function compactList(values: Array<string | null>, maxItems: number): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))]
     .slice(0, maxItems);
 }
 
-function summarizeCompany(value: unknown): string | null {
-  if (isPlainRecord(value)) {
-    return firstString(value, ['name', 'company_name', 'title'], 160);
+function sameText(left: string | null, right: string | null): boolean {
+  return Boolean(left && right && left.toLowerCase() === right.toLowerCase());
+}
+
+function compactSummaryParts(parts: Array<string | null>, maxLength: number): string | null {
+  const seen = new Set<string>();
+  const uniqueParts = parts
+    .map((part) => part ? cleanText(part, maxLength) : null)
+    .filter((part): part is string => Boolean(part))
+    .filter((part) => {
+      const key = part.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  return cleanText(uniqueParts.join(' | '), maxLength);
+}
+
+function labeledPart(label: string, value: string | null): string | null {
+  return value ? `${label}: ${value}` : null;
+}
+
+function summarizeDate(value: unknown): string | null {
+  const direct = stringFromUnknown(value, 80);
+  if (direct) {
+    return direct;
   }
-  return stringFromUnknown(value, 160);
+  if (!isPlainRecord(value)) {
+    return null;
+  }
+  const month = firstString(value, ['month'], 20);
+  const year = firstString(value, ['year'], 20);
+  const day = firstString(value, ['day'], 20);
+  return compactSummaryParts([year, month, day], 80)?.replace(/ \| /g, '-') ?? null;
+}
+
+function summarizeDateRange(record: Record<string, unknown>): string | null {
+  const start = firstString(record, ['start_date', 'startDate', 'date_from', 'dateFrom', 'from', 'start'], 80)
+    ?? summarizeDate(record.starts_at ?? record.start_at ?? record.start);
+  const end = firstString(record, ['end_date', 'endDate', 'date_to', 'dateTo', 'to', 'end'], 80)
+    ?? summarizeDate(record.ends_at ?? record.end_at ?? record.end);
+  if (start || end) {
+    return cleanText([start, end ?? 'Present'].filter(Boolean).join(' - '), 160);
+  }
+  return firstString(record, ['date_range', 'dateRange', 'duration', 'period'], 160);
+}
+
+function summarizeCompany(value: unknown, maxLength = currentCompanyMaxLength): string | null {
+  if (isPlainRecord(value)) {
+    const name = firstString(value, ['name', 'company_name', 'current_company_name', 'title'], 180);
+    const location = firstString(value, ['location', 'company_location', 'address'], 120);
+    const link = firstUrl(value, ['link', 'url', 'company_url', 'companyUrl', 'profile_url', 'linkedin_url']);
+    if (name && !location && !link) {
+      return cleanText(name, maxLength);
+    }
+    return compactSummaryParts([
+      labeledPart('Name', name),
+      labeledPart('Location', location),
+      labeledPart('URL', link),
+    ], maxLength);
+  }
+  return stringFromUnknown(value, maxLength);
 }
 
 function summarizeLocation(record: Record<string, unknown>): string | null {
@@ -170,56 +290,143 @@ function summarizeLocation(record: Record<string, unknown>): string | null {
   );
 }
 
+function nestedRecordValue(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = record[key];
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function expandExperienceEntry(value: unknown): unknown[] {
+  if (!isPlainRecord(value)) {
+    return [value];
+  }
+  for (const key of ['positions', 'position_groups', 'roles', 'jobs']) {
+    const nested = value[key];
+    if (!Array.isArray(nested)) {
+      continue;
+    }
+    return nested.map((entry) => {
+      if (!isPlainRecord(entry)) {
+        return entry;
+      }
+      return {
+        ...value,
+        ...entry,
+        company: entry.company ?? value.company ?? value.company_name ?? value.current_company,
+        company_name: entry.company_name ?? value.company_name,
+        company_linkedin_url: entry.company_linkedin_url ?? value.company_linkedin_url ?? value.company_url,
+      };
+    });
+  }
+  return [value];
+}
+
 function summarizeExperienceItem(value: unknown): string | null {
   if (!isPlainRecord(value)) {
-    return stringFromUnknown(value, 280);
+    return stringFromUnknown(value, experienceSummaryMaxLength);
   }
-  const title = firstString(value, ['title', 'position', 'role'], 120);
-  const company = summarizeCompany(value.company ?? value.company_name ?? value.current_company);
-  const dateRange = cleanText(
-    [
-      firstString(value, ['start_date', 'startDate'], 80),
-      firstString(value, ['end_date', 'endDate'], 80),
-    ].filter(Boolean).join(' - '),
-    120,
-  );
-  const core = title && company ? `${title} at ${company}` : title ?? company;
-  return cleanText([core, dateRange].filter(Boolean).join(' | '), 280);
+  const companyValue = nestedRecordValue(value, ['company', 'company_name', 'current_company', 'organization']);
+  const company = summarizeCompany(companyValue, 260);
+  const title = firstString(value, ['title', 'position', 'role', 'name'], 180);
+  const subtitle = firstString(value, ['subtitle', 'sub_title', 'headline'], 220);
+  const dateRange = summarizeDateRange(value);
+  const location = firstString(value, ['location', 'company_location', 'geo_location'], 160);
+  const description = firstString(value, ['description', 'description_html', 'summary', 'about', 'details'], 520);
+  const companyLink = firstUrl(value, [
+    'company_linkedin_url',
+    'company_url',
+    'companyUrl',
+    'company_profile_url',
+    'companyProfileUrl',
+    'link',
+    'url',
+  ]);
+  const role = sameText(title, company) ? null : title;
+  const fallback = role && company ? `${role} at ${company}` : role ?? company;
+  return compactSummaryParts([
+    fallback && !subtitle && !dateRange && !location && !description && !companyLink ? fallback : null,
+    labeledPart('Title', role),
+    labeledPart('Company', company),
+    labeledPart('Dates', dateRange),
+    labeledPart('Location', location),
+    labeledPart('Summary', sameText(subtitle, description) ? null : subtitle),
+    labeledPart('Description', description),
+    labeledPart('URL', companyLink),
+  ], experienceSummaryMaxLength);
 }
 
 function summarizeEducationItem(value: unknown): string | null {
   if (!isPlainRecord(value)) {
-    return stringFromUnknown(value, 240);
+    return stringFromUnknown(value, educationSummaryMaxLength);
   }
-  const school = firstString(value, ['school', 'school_name', 'title', 'name'], 120);
-  const degree = firstString(value, ['degree', 'degree_name', 'field'], 120);
-  return cleanText([school, degree].filter(Boolean).join(' | '), 240);
+  const school = firstString(value, ['school', 'school_name', 'title', 'name'], 160);
+  const degree = firstString(value, ['degree', 'degree_name'], 140);
+  const field = firstString(value, ['field', 'field_of_study', 'fieldOfStudy', 'major'], 140);
+  const dateRange = summarizeDateRange(value);
+  const description = firstString(value, ['description', 'activities', 'summary', 'details'], 220);
+  if (school && degree && !field && !dateRange && !description) {
+    return cleanText([school, degree].filter(Boolean).join(' | '), educationSummaryMaxLength);
+  }
+  return compactSummaryParts([
+    labeledPart('School', school),
+    labeledPart('Degree', degree),
+    labeledPart('Field', field),
+    labeledPart('Dates', dateRange),
+    labeledPart('Details', description),
+  ], educationSummaryMaxLength);
 }
 
 function summarizeProjectItem(value: unknown): string | null {
   if (!isPlainRecord(value)) {
-    return stringFromUnknown(value, 240);
+    return stringFromUnknown(value, projectSummaryMaxLength);
   }
-  return firstString(value, ['title', 'name', 'publication_title', 'description'], 240);
+  const title = firstString(value, ['title', 'name', 'publication_title', 'project_name', 'patent_title'], 180);
+  const description = firstString(value, ['description', 'description_html', 'summary', 'about', 'details'], 420);
+  const dateRange = summarizeDateRange(value);
+  const publisher = firstString(value, ['publisher', 'publication', 'organization', 'company'], 160);
+  const url = firstUrl(value, [
+    'url',
+    'link',
+    'project_url',
+    'projectUrl',
+    'publication_url',
+    'publicationUrl',
+    'patent_url',
+    'patentUrl',
+  ]);
+  if (title && !description && !dateRange && !publisher && !url) {
+    return cleanText(title, projectSummaryMaxLength);
+  }
+  return compactSummaryParts([
+    labeledPart('Title', title),
+    labeledPart('Description', description),
+    labeledPart('Dates', dateRange),
+    labeledPart('Source', publisher),
+    labeledPart('URL', url),
+  ], projectSummaryMaxLength);
 }
 
 function summarizeSkillItem(value: unknown): string | null {
   if (isPlainRecord(value)) {
-    return firstString(value, ['name', 'skill', 'title'], 80);
+    return firstString(value, ['name', 'skill', 'title'], skillMaxLength);
   }
-  return stringFromUnknown(value, 80);
+  return stringFromUnknown(value, skillMaxLength);
 }
 
 function listFromUnknown(
   value: unknown,
   summarizer: (entry: unknown) => string | null,
   maxItems: number,
+  expandEntry?: (entry: unknown) => unknown[],
 ): string[] {
   if (Array.isArray(value)) {
-    return compactList(value.map((entry) => summarizer(entry)), maxItems);
+    return compactList(value.flatMap((entry) => (expandEntry ? expandEntry(entry) : [entry])).map((entry) => summarizer(entry)), maxItems);
   }
-  const single = summarizer(value);
-  return single ? [single] : [];
+  return compactList((expandEntry ? expandEntry(value) : [value]).map((entry) => summarizer(entry)), maxItems);
 }
 
 function parseJsonText(text: string): unknown {
@@ -287,19 +494,20 @@ export function normalizeBrightDataLinkedInProfile(
   return normalizedProfessionalProfileSummarySchema.parse({
     profileUrl,
     name,
-    headline: firstString(record, ['headline', 'position', 'title'], 240),
+    headline: firstString(record, ['headline', 'position', 'title'], headlineMaxLength),
     currentCompany,
     location: summarizeLocation(record),
-    educationSummary: listFromUnknown(record.education, summarizeEducationItem, 8),
-    experienceSummary: listFromUnknown(record.experience, summarizeExperienceItem, 8),
-    skills: listFromUnknown(record.skills, summarizeSkillItem, 20),
-    aboutSummary: firstString(record, ['about', 'summary', 'description'], 900),
+    educationSummary: listFromUnknown(record.education, summarizeEducationItem, 10),
+    experienceSummary: listFromUnknown(record.experience, summarizeExperienceItem, 10, expandExperienceEntry),
+    skills: listFromUnknown(record.skills, summarizeSkillItem, 40),
+    aboutSummary: firstString(record, ['about', 'summary', 'description'], aboutSummaryMaxLength),
     projectsPublications: compactList(
       [
-        ...listFromUnknown(record.projects, summarizeProjectItem, 8),
-        ...listFromUnknown(record.publications, summarizeProjectItem, 8),
+        ...listFromUnknown(record.projects, summarizeProjectItem, 12),
+        ...listFromUnknown(record.publications, summarizeProjectItem, 12),
+        ...listFromUnknown(record.patents, summarizeProjectItem, 12),
       ],
-      8,
+      12,
     ),
   });
 }
@@ -311,26 +519,44 @@ const defaultFakeLinkedInProfileFixtures: Record<string, Record<string, unknown>
     position: 'Synthetic product and engineering candidate fixture',
     current_company: {
       name: 'WeKruit Test Fixture',
+      link: 'https://www.linkedin.com/company/wekruit-test-fixture',
+      location: 'Los Angeles',
     },
     city: 'San Francisco Bay Area',
     country_code: 'US',
-    about: 'Synthetic local fixture for validating the Bright Data enrichment workflow.',
+    about: [
+      'Synthetic local fixture for validating the Bright Data enrichment workflow.',
+      'Builds evidence-grounded sourcing systems, candidate review tools, and professional profile enrichment loops.',
+      'This public fixture text is intentionally rich enough to prove downstream enrichment receives more than labels.',
+    ].join(' '),
     experience: [
       {
-        title: 'Builder',
+        title: 'Founder and builder',
         company_name: 'Synthetic Labs',
+        start_date: '2024',
+        end_date: 'Present',
+        location: 'Los Angeles',
+        description_html:
+          '<p>Built a sourcing pipeline that combines approved candidate evidence, Bright Data profile context, and OpenAI enrichment review.</p>',
+        company_linkedin_url: 'https://www.linkedin.com/company/synthetic-labs',
       },
     ],
     education: [
       {
         school: 'Synthetic University',
         degree: 'Computer Science',
+        field: 'Software systems',
+        start_date: '2021',
+        end_date: '2025',
+        description: 'Focused on full-stack engineering, data systems, and human-in-the-loop review products.',
       },
     ],
     skills: ['software engineering', 'product systems', 'candidate sourcing'],
     projects: [
       {
         title: 'Synthetic sourcing pipeline validation',
+        description: 'End-to-end validation project for vendor profile lookup, review approval, and evidence-backed enrichment.',
+        url: 'https://example.test/synthetic-sourcing-pipeline',
       },
     ],
     email: 'not-stored@example.com',

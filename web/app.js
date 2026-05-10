@@ -2045,7 +2045,7 @@ function renderVendorProfileField(label, value, isList = false) {
   return `
     <div class="fact-row">
       <span class="fact-label">${escapeHtml(label)}</span>
-      <div class="fact-value">${isList ? values.map((entry) => escapeHtml(entry)).join("<br />") : renderTextWithLinks(values[0])}</div>
+      <div class="fact-value">${isList ? values.map((entry) => renderTextWithLinks(entry)).join("<br />") : renderTextWithLinks(values[0])}</div>
     </div>
   `;
 }

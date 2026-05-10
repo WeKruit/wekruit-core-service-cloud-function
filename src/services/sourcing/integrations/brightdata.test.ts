@@ -5,6 +5,7 @@ import {
   BrightDataLinkedInProvider,
   FakeProfessionalProfileLookupProvider,
   brightDataLinkedInProfilesDatasetId,
+  normalizeBrightDataLinkedInProfile,
 } from './brightdata';
 
 test('FakeProfessionalProfileLookupProvider returns only normalized allowed profile fields', async () => {
@@ -64,14 +65,132 @@ test('FakeProfessionalProfileLookupProvider returns only normalized allowed prof
     'skills',
   ]);
   assert.equal(profile.profileUrl, 'https://www.linkedin.com/in/spencerwang1');
-  assert.equal(profile.experienceSummary.length, 8);
-  assert.equal(profile.educationSummary.length, 8);
-  assert.equal(profile.skills.length, 20);
-  assert.equal(profile.projectsPublications.length, 8);
-  assert.ok((profile.headline?.length ?? 0) <= 240);
-  assert.ok((profile.aboutSummary?.length ?? 0) <= 900);
+  assert.equal(profile.experienceSummary.length, 10);
+  assert.equal(profile.educationSummary.length, 10);
+  assert.equal(profile.skills.length, 25);
+  assert.equal(profile.projectsPublications.length, 10);
+  assert.ok((profile.headline?.length ?? 0) <= 280);
+  assert.ok((profile.aboutSummary?.length ?? 0) <= 2500);
   assert.equal('email' in profile, false);
   assert.equal(JSON.stringify(profile).includes('do-not-store@example.com'), false);
+});
+
+test('normalizeBrightDataLinkedInProfile preserves rich allowed public context', () => {
+  const profile = normalizeBrightDataLinkedInProfile(
+    {
+      id: 'provider-row-rich',
+      url: 'https://www.linkedin.com/in/spencerwang1?trk=public_profile',
+      name: 'Spencer &amp; Wang',
+      position: 'Founder &amp; builder',
+      current_company: {
+        name: 'WeKruit &amp; Co',
+        link: 'https://www.linkedin.com/company/wekruit',
+        location: 'Los Angeles',
+      },
+      city: 'Los Angeles',
+      country_code: 'US',
+      about: 'Builds sourcing systems &amp; enrichment workflows. '.repeat(35),
+      experience: [
+        {
+          title: 'Founding Engineer',
+          company: 'WeKruit',
+          start_date: '2024',
+          end_date: 'Present',
+          location: 'Los Angeles',
+          description_html:
+            '<p>Built <strong>candidate enrichment</strong>, reviewer workflows, and project matching using Bright Data &amp; OpenAI.</p>',
+          company_linkedin_url: 'https://www.linkedin.com/company/wekruit',
+        },
+        {
+          title: 'Researcher',
+          company_name: 'UCLA AI Lab',
+          starts_at: { year: 2022, month: 9 },
+          ends_at: { year: 2024, month: 6 },
+          subtitle: 'Human-in-the-loop systems',
+          description: 'Worked on retrieval systems for evidence-grounded review.',
+        },
+      ],
+      education: [
+        {
+          school: 'UCLA Henry Samueli School of Engineering and Applied Science',
+          degree: 'BS',
+          field: 'Computer Science',
+          start_date: '2021',
+          end_date: '2025',
+          description: 'Coursework in systems, databases, and product engineering.',
+        },
+      ],
+      skills: [{ name: 'TypeScript' }, 'Product systems'],
+      projects: [
+        {
+          name: 'Tempo',
+          description: 'Hackathon-winning scheduling assistant with real-time collaboration.',
+          url: 'https://tempo.example.test',
+        },
+        {
+          title: 'MindForce',
+          description_html: '<div>BCI project &amp; accessibility tooling for hands-free workflows.</div>',
+          project_url: 'https://mindforce.example.test',
+        },
+      ],
+      publications: [
+        {
+          publication_title: 'Evidence-Grounded Candidate Enrichment',
+          description: 'A paper about using approved professional evidence in profile enrichment.',
+          url: 'https://papers.example.test/enrichment',
+        },
+      ],
+      patents: [
+        {
+          patent_title: 'Workflow Review Assistant',
+          description: 'Public patent-like fixture for professional context.',
+          patent_url: 'https://patents.example.test/review-assistant',
+        },
+      ],
+      email: 'do-not-store@example.com',
+      phone: '+1-555-000-0000',
+      contact_info: {
+        email: 'also-do-not-store@example.com',
+      },
+      people_also_viewed: [
+        {
+          name: 'Do Not Store',
+          profile_link: 'https://www.linkedin.com/in/do-not-store',
+        },
+      ],
+      avatar: 'https://media.example.test/avatar.png',
+      followers: 100000,
+    },
+    'https://www.linkedin.com/in/spencerwang1',
+  );
+
+  const serialized = JSON.stringify(profile);
+  assert.equal(profile.profileUrl, 'https://www.linkedin.com/in/spencerwang1');
+  assert.equal(profile.name, 'Spencer & Wang');
+  assert.equal(profile.headline, 'Founder & builder');
+  assert.ok(profile.currentCompany?.includes('WeKruit & Co'));
+  assert.ok(profile.currentCompany?.includes('https://www.linkedin.com/company/wekruit'));
+  assert.ok((profile.aboutSummary?.length ?? 0) > 900);
+  assert.equal(profile.aboutSummary?.includes('&amp;'), false);
+  assert.ok(profile.experienceSummary[0]?.includes('Founding Engineer'));
+  assert.ok(profile.experienceSummary[0]?.includes('candidate enrichment'));
+  assert.ok(profile.experienceSummary[0]?.includes('Bright Data & OpenAI'));
+  assert.ok(profile.experienceSummary[0]?.includes('https://www.linkedin.com/company/wekruit'));
+  assert.ok(profile.experienceSummary[1]?.includes('2022-9 - 2024-6'));
+  assert.ok(profile.educationSummary[0]?.includes('Coursework in systems'));
+  assert.ok(profile.projectsPublications.some((entry) =>
+    entry.includes('Tempo') && entry.includes('real-time collaboration') && entry.includes('https://tempo.example.test'),
+  ));
+  assert.ok(profile.projectsPublications.some((entry) =>
+    entry.includes('MindForce') && entry.includes('accessibility tooling') && entry.includes('https://mindforce.example.test'),
+  ));
+  assert.ok(profile.projectsPublications.some((entry) => entry.includes('Evidence-Grounded Candidate Enrichment')));
+  assert.ok(profile.projectsPublications.some((entry) => entry.includes('Workflow Review Assistant')));
+  assert.equal(serialized.includes('do-not-store@example.com'), false);
+  assert.equal(serialized.includes('+1-555-000-0000'), false);
+  assert.equal(serialized.includes('people_also_viewed'), false);
+  assert.equal(serialized.includes('avatar.png'), false);
+  assert.equal(serialized.includes('100000'), false);
 });
 
 test('BrightDataLinkedInProvider builds the sync LinkedIn scraper request safely', async () => {

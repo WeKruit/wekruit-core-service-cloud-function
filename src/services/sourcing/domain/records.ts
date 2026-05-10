@@ -443,14 +443,14 @@ export const candidateEnrichmentRunSchema = z.object({
 export const normalizedProfessionalProfileSummarySchema = z.object({
   profileUrl: z.string().trim().url(),
   name: nullableBoundedVendorTextSchema(160),
-  headline: nullableBoundedVendorTextSchema(240),
-  currentCompany: nullableBoundedVendorTextSchema(160),
+  headline: nullableBoundedVendorTextSchema(280),
+  currentCompany: nullableBoundedVendorTextSchema(260),
   location: nullableBoundedVendorTextSchema(160),
-  educationSummary: boundedVendorTextListSchema(8, 240),
-  experienceSummary: boundedVendorTextListSchema(8, 280),
-  skills: boundedVendorTextListSchema(20, 80),
-  aboutSummary: nullableBoundedVendorTextSchema(900),
-  projectsPublications: boundedVendorTextListSchema(8, 240),
+  educationSummary: boundedVendorTextListSchema(10, 420),
+  experienceSummary: boundedVendorTextListSchema(10, 900),
+  skills: boundedVendorTextListSchema(40, 100),
+  aboutSummary: nullableBoundedVendorTextSchema(2500),
+  projectsPublications: boundedVendorTextListSchema(12, 800),
 });
 
 export const vendorEnrichmentRunSchema = z.object({

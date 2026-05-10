@@ -2952,7 +2952,7 @@ Phase 6.5I execution findings from 2026-05-10 01:10 PDT:
 
 ##### Phase 6.5J: Rich Bright Data Normalization Patch
 
-Status as of 2026-05-10 11:45 PDT: planned only. No implementation greenlight yet. Do not edit production code for this phase until the user explicitly approves.
+Status as of 2026-05-10 12:05 PDT: implementation greenlit and automated code-level verification slice completed. Local emulator/browser verification and fresh synthetic Spencer staging verification are still pending.
 
 Problem statement:
 
@@ -3073,6 +3073,38 @@ Open questions / human input before implementation:
 
 - Recommendation is to proceed without expanding the field allowlist: richer normalized summaries should still use only the existing approved professional fields. If the team wants company links/project links treated as outside the current allowlist, clarify before implementation; otherwise treat public links embedded in allowed company/project/experience fields as allowed professional context.
 - Recommendation is to keep raw payload retention unchanged. If the team wants a temporary raw-payload capture for debugging, that needs explicit approval and a storage/retention policy. The default Phase 6.5J plan does not store raw payloads.
+
+Phase 6.5J automated implementation slice from 2026-05-10 12:05 PDT:
+
+- User explicitly greenlit the Phase 6.5J recommendation, including treating public company/project links embedded in allowed professional fields as allowed context. Raw payload retention remains unchanged.
+- Files changed so far in `wekruit-core-service-cloud-function`:
+  - `src/services/sourcing/domain/records.ts`
+    - Increased bounds for the existing normalized professional profile fields without adding new stored raw fields: headline `280`, current company `260`, education summaries `10 x 420`, experience summaries `10 x 900`, skills `40 x 100`, about summary `2500`, projects/publications `12 x 800`.
+  - `src/services/sourcing/integrations/brightdata.ts`
+    - Added deterministic HTML/entity cleanup for vendor text such as `description_html` and `&amp;`.
+    - Made current-company normalization preserve name, location, and public company URL when returned.
+    - Made experience normalization preserve title, company, dates, location, subtitle/summary, description text, and public company URL when returned.
+    - Made education normalization preserve school, degree, field, dates, and details.
+    - Made project/publication/patent normalization preserve title, description, dates, source/publisher, and public URL instead of stopping at the first name/title field.
+    - Kept the normalized output limited to the existing allowlisted `normalizedProfile` keys. No raw Bright Data payload is stored.
+    - Expanded the fake Spencer provider fixture so local emulator verification can prove the UI/enrichment path receives richer professional context.
+  - `src/services/sourcing/integrations/brightdata.test.ts`
+    - Added a rich Bright Data fixture test with HTML descriptions, encoded entities, company/project/publication/patent URLs, nested date objects, and excluded contact/social/media fields.
+    - Asserted rich allowed context survives normalization and excluded fields remain absent.
+  - `web/app.js`
+    - Updated vendor profile list-field rendering so URLs inside richer experience/project summaries are linkified while still escaped through `renderTextWithLinks`.
+- Automated verification completed:
+  - `npm run build` passed.
+  - `node --test lib/services/sourcing/integrations/brightdata.test.js` passed: `6` tests, `6` pass.
+  - `node --test lib/services/sourcing/application/enrichment.test.js lib/services/sourcing/application/service.test.js` passed: `23` tests, `23` pass.
+  - `find lib/services/sourcing -name '*.test.js' -print0 | xargs -0 node --test` passed: `44` tests, `44` pass.
+  - `node --check web/app.js` passed.
+  - `git diff --check` passed.
+- Remaining Phase 6.5J verification:
+  - Run local emulator with fake provider and verify the richer fake Spencer match card in the dashboard.
+  - Verify approved vendor evidence reaches enrichment/profile lineage locally.
+  - Commit and push the verified code/docs slice.
+  - Deploy to staging and verify only with a fresh isolated synthetic fake Spencer candidate using `https://www.linkedin.com/in/spencerwang1`; do not use TreeHacks source data.
 
 #### Immediate Blockers Before Full Live Completion
 
