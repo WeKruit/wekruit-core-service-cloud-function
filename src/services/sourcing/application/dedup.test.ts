@@ -93,6 +93,49 @@ test('buildEvidenceDedupCandidate creates strong exact-match candidates from sha
   assert.deepEqual(candidate.sourceRecordIds, ['src_contact_person_a1', 'src_openalex_person_a1']);
 });
 
+test('buildEvidenceDedupCandidate does not use LinkedIn evidence as dedup evidence', () => {
+  const first = buildPersonRecord({
+    id: 'src_devpost_person_spencer',
+    sourceName: 'devpost',
+    sourceNativeId: 'https://devpost.com/spencer',
+    sourceUrl: 'https://devpost.com/spencer',
+    displayName: 'Spencer Wang',
+    rawSummary: {
+      linkedin: 'https://www.linkedin.com/in/spencerwang1',
+    },
+  });
+  const second = buildPersonRecord({
+    id: 'src_research_person_spencer',
+    sourceName: 'research',
+    sourceNativeId: 'research-spencer',
+    sourceUrl: undefined,
+    displayName: 'Spencer Wang',
+    rawSummary: {
+      linkedin: 'https://www.linkedin.com/in/spencerwang1/',
+    },
+  });
+  const allEvidence = [
+    ...extractEvidenceFromSourceRecord(first, '2026-04-28T00:00:00.000Z'),
+    ...extractEvidenceFromSourceRecord(second, '2026-04-28T00:00:00.000Z'),
+  ];
+  const seed = allEvidence.find(
+    (entry) => entry.sourceRecordId === first.id && entry.evidenceType === 'linkedin',
+  );
+  assert.ok(seed);
+
+  const candidate = buildEvidenceDedupCandidate({
+    seed,
+    matchingEvidence: allEvidence.filter((entry) => entry.valueHash === seed.valueHash),
+    recordsById: new Map([
+      [first.id, first],
+      [second.id, second],
+    ]),
+    now: '2026-04-28T00:00:00.000Z',
+  });
+
+  assert.equal(candidate, null);
+});
+
 test('buildEvidenceDedupCandidate excludes non-person records from person dedup groups', () => {
   const githubRecord = buildPersonRecord({
     id: 'src_github_person_alex',

@@ -20,6 +20,7 @@ export const sourcingEvidenceTypeSchema = z.enum([
   'orcid',
   'homepage',
   'github',
+  'linkedin',
   'dblp',
   'openreview',
   'google_scholar',
@@ -316,9 +317,28 @@ export const candidateEnrichmentReviewStatusSchema = z.enum([
   'rejected',
 ]);
 export const candidateEnrichmentRunStatusSchema = z.enum(['completed', 'failed']);
+export const vendorProfileProviderSchema = z.enum(['brightdata', 'fake']);
+export const vendorProfileLookupTypeSchema = z.enum(['linkedin_profile_by_url']);
+export const vendorEnrichmentRunStatusSchema = z.enum([
+  'running',
+  'completed',
+  'no_match',
+  'failed',
+  'async_snapshot_pending',
+]);
+export const vendorProfileMatchReviewStatusSchema = z.enum([
+  'pending_review',
+  'approved',
+  'rejected',
+  'ignored',
+]);
 
 const enrichmentConfidenceSchema = z.number().min(0).max(1);
 const evidenceIdListSchema = z.array(z.string().trim().min(1)).default([]);
+const nullableBoundedVendorTextSchema = (maxLength: number) =>
+  z.string().trim().min(1).max(maxLength).nullable().default(null);
+const boundedVendorTextListSchema = (maxItems: number, maxLength: number) =>
+  z.array(z.string().trim().min(1).max(maxLength)).max(maxItems).default([]);
 const normalizedSkillSchema = z
   .string()
   .trim()
@@ -420,6 +440,57 @@ export const candidateEnrichmentRunSchema = z.object({
   updatedAt: z.string(),
 });
 
+export const normalizedProfessionalProfileSummarySchema = z.object({
+  profileUrl: z.string().trim().url(),
+  name: nullableBoundedVendorTextSchema(160),
+  headline: nullableBoundedVendorTextSchema(240),
+  currentCompany: nullableBoundedVendorTextSchema(160),
+  location: nullableBoundedVendorTextSchema(160),
+  educationSummary: boundedVendorTextListSchema(8, 240),
+  experienceSummary: boundedVendorTextListSchema(8, 280),
+  skills: boundedVendorTextListSchema(20, 80),
+  aboutSummary: nullableBoundedVendorTextSchema(900),
+  projectsPublications: boundedVendorTextListSchema(8, 240),
+});
+
+export const vendorEnrichmentRunSchema = z.object({
+  id: z.string().trim().min(1),
+  approvedEntityId: z.string().trim().min(1),
+  provider: vendorProfileProviderSchema,
+  lookupType: vendorProfileLookupTypeSchema,
+  inputUrlHash: z.string().trim().min(1),
+  selectedLinkedInUrl: z.string().trim().url(),
+  selectedLinkedInUrlLineage: rawObjectSchema,
+  datasetId: z.string().trim().min(1),
+  status: vendorEnrichmentRunStatusSchema,
+  snapshotId: z.string().trim().min(1).nullable().default(null),
+  matchIds: z.array(z.string().trim().min(1)).default([]),
+  error: z.string().trim().min(1).nullable().default(null),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const vendorProfileMatchSchema = z.object({
+  id: z.string().trim().min(1),
+  approvedEntityId: z.string().trim().min(1),
+  vendorRunId: z.string().trim().min(1),
+  provider: vendorProfileProviderSchema,
+  lookupType: vendorProfileLookupTypeSchema,
+  inputUrlHash: z.string().trim().min(1),
+  selectedLinkedInUrl: z.string().trim().url(),
+  selectedLinkedInUrlLineage: rawObjectSchema,
+  providerRecordId: z.string().trim().min(1).nullable().default(null),
+  providerProfileUrl: z.string().trim().url().nullable().default(null),
+  normalizedProfile: normalizedProfessionalProfileSummarySchema,
+  reviewStatus: vendorProfileMatchReviewStatusSchema,
+  reviewerId: z.string().trim().min(1).nullable().default(null),
+  reviewNote: z.string().trim().default(''),
+  reviewedAt: z.string().nullable().default(null),
+  approvedEvidenceId: z.string().trim().min(1).nullable().default(null),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 export const candidateEnrichmentReviewItemSchema = z.object({
   id: z.string().trim().min(1),
   approvedEntityId: z.string().trim().min(1),
@@ -502,8 +573,15 @@ export type CandidateCareerStage = z.infer<typeof candidateCareerStageSchema>;
 export type CandidateContactability = z.infer<typeof candidateContactabilitySchema>;
 export type CandidateEnrichmentReviewStatus = z.infer<typeof candidateEnrichmentReviewStatusSchema>;
 export type CandidateEnrichmentRunStatus = z.infer<typeof candidateEnrichmentRunStatusSchema>;
+export type VendorProfileProvider = z.infer<typeof vendorProfileProviderSchema>;
+export type VendorProfileLookupType = z.infer<typeof vendorProfileLookupTypeSchema>;
+export type VendorEnrichmentRunStatus = z.infer<typeof vendorEnrichmentRunStatusSchema>;
+export type VendorProfileMatchReviewStatus = z.infer<typeof vendorProfileMatchReviewStatusSchema>;
 export type CandidateEnrichmentDraft = z.infer<typeof candidateEnrichmentDraftSchema>;
 export type CandidateEnrichmentRun = z.infer<typeof candidateEnrichmentRunSchema>;
+export type NormalizedProfessionalProfileSummary = z.infer<typeof normalizedProfessionalProfileSummarySchema>;
+export type VendorEnrichmentRun = z.infer<typeof vendorEnrichmentRunSchema>;
+export type VendorProfileMatch = z.infer<typeof vendorProfileMatchSchema>;
 export type CandidateEnrichmentReviewItem = z.infer<typeof candidateEnrichmentReviewItemSchema>;
 export type CandidateProfile = z.infer<typeof candidateProfileSchema>;
 export type CreateEnrichmentReviewDecisionInput = z.infer<typeof createEnrichmentReviewDecisionSchema>;

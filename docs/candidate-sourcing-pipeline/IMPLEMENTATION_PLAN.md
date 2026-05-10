@@ -68,6 +68,7 @@ Last updated: 2026-05-09.
 - [x] Current active planning branch is `codex/brightdata-integration-plan` in both active implementation repos, branched from `codex/clickable-evidence-lifecycle` through the prior Coresignal planning branch.
 - [x] Coresignal integration planning is preserved in this document as a paused archive. No Coresignal implementation has started.
 - [x] Bright Data is now the active vendor direction for professional LinkedIn profile enrichment planning.
+- [x] Phase 6.5B added the Bright Data LinkedIn evidence/provider foundation: `linkedin` evidence normalization, vendor profile schemas/types, `ProfessionalProfileLookupPort`, deterministic fake provider fixtures, and a real Bright Data provider contract behind tests. No live Bright Data call, Firestore mutation, route wiring, UI wiring, deploy, approval, enrichment, or profile materialization was performed in Phase 6.5B.
 
 ## Current Open Decisions And Waiting State
 
@@ -115,10 +116,10 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active planning on `codex/brightdata-integration-plan`; no implementation yet.
+   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight and Phase 6.5B domain/provider-contract work are complete.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
-   - Implementation should start with an emulator fake/provider contract before any live Bright Data call.
+   - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
    - Team input required: Bright Data API key, account access to the LinkedIn Profiles scraper, allowed fields, lookup policy, budget expectations, and retention policy.
 
 2. **Unified tag package migration.**
@@ -2060,7 +2061,7 @@ This section is the greenlight-ready execution plan. If context compacts during 
 
 - Official docs still identify LinkedIn Profiles dataset ID `gd_l1viktl72bvl7bjuj0`.
 - Official docs still recommend synchronous `/datasets/v3/scrape` for real-time single/manual lookups and asynchronous `/datasets/v3/trigger` for batch, 20+ URL, discovery, webhook, or large production flows.
-- Synchronous requests use bearer authentication and JSON input containing LinkedIn profile URLs. The docs show both a direct array body and an API-reference `input` wrapper. Implementation should isolate this in `BrightDataLinkedInProvider` and cover the exact request payload with provider tests before any live call.
+- Synchronous requests use bearer authentication and JSON input containing LinkedIn profile URLs. The docs show both a direct array body and an API-reference `input` wrapper. Phase 6.5B rechecked this before implementation and pinned the provider to the LinkedIn-specific direct-array shape because the LinkedIn scraper guide and Scrapers overview both show `[{ "url": "https://www.linkedin.com/in/..." }]` for `/datasets/v3/scrape`. This is isolated in `BrightDataLinkedInProvider` and covered by a request-shape unit test before any live call.
 - Sync calls can return a `snapshot_id` if the request exceeds the sync timeout. V1 should store that run as `async_snapshot_pending` and support a bounded manual refresh/check action for that run rather than silently polling indefinitely.
 
 #### Evidence And Lineage Design
@@ -2182,6 +2183,55 @@ Plan update required before Phase 6.5C:
 - Record exact files changed.
 - Record focused test command and result.
 - Record whether provider request-body shape followed direct-array or `input` wrapper after test implementation.
+
+Phase 6.5B execution findings from 2026-05-09 23:54 PDT:
+
+- Phase status: completed after user greenlight. This phase implemented only the domain/provider contract foundation; it did not add API routes, Firestore repository methods, dashboard UI, deployed Firebase changes, Firestore data mutations, or live Bright Data calls.
+- Files changed in `wekruit-core-service-cloud-function`:
+  - `src/services/sourcing/domain/records.ts`
+    - Added `linkedin` to `sourcingEvidenceTypeSchema`.
+    - Added vendor provider/lookup/run/match/review status schemas and TypeScript types.
+    - Added `normalizedProfessionalProfileSummarySchema` with the v1 safe field allowlist only: profile URL, name, headline, current company, location, education summary, experience summary, skills, about summary, and projects/publications.
+    - Added `vendorEnrichmentRunSchema` and `vendorProfileMatchSchema` for the later Firestore/repository phase.
+  - `src/services/sourcing/application/linkedin.ts`
+    - Added LinkedIn profile URL canonicalization and extraction helpers.
+    - Accepts only `linkedin.com/in/{slug}` profile URLs and rejects company, jobs, posts, search, feed, and non-LinkedIn URLs.
+  - `src/services/sourcing/application/extraction.ts`
+    - Extracts canonical LinkedIn profile URLs as first-class `linkedin` evidence.
+    - Skips LinkedIn profile URLs as `homepage` evidence.
+    - Skips shared project-context LinkedIn URLs so project/team links do not become person evidence.
+  - `src/services/sourcing/application/service.ts`
+    - Keeps LinkedIn-shaped `source_url` and `homepage` evidence out of approved-entity `identityEvidenceHashes`.
+    - Does not add `linkedin` to strong identity evidence.
+  - `src/services/sourcing/integrations/brightdata.ts`
+    - Added `ProfessionalProfileLookupPort`.
+    - Added deterministic `FakeProfessionalProfileLookupProvider`.
+    - Added `BrightDataLinkedInProvider` behind the port.
+    - Added normalized field allowlist parsing that drops contact/private/disallowed fields and bounds long strings/arrays.
+    - Added safe local/env config lookup for `BRIGHTDATA_API_KEY` without logging the value.
+  - Tests changed/added:
+    - `src/services/sourcing/application/extraction.test.ts`
+    - `src/services/sourcing/application/dedup.test.ts`
+    - `src/services/sourcing/application/service.test.ts`
+    - `src/services/sourcing/integrations/brightdata.test.ts`
+- Provider request-body decision:
+  - Phase 6.5B uses the Bright Data LinkedIn-specific direct-array sync request body: `[{ "url": canonicalLinkedInProfileUrl }]`.
+  - Reason: the current LinkedIn scraper guide and Scrapers overview show direct arrays for the Profiles scraper. The generic API reference also shows an `input` wrapper, but the implementation is isolated behind `BrightDataLinkedInProvider`, and the exact request shape is pinned by unit test before any live call.
+- Verification evidence:
+  - `npm run build` passed.
+  - `node --test lib/services/sourcing/application/extraction.test.js lib/services/sourcing/application/dedup.test.js lib/services/sourcing/application/service.test.js lib/services/sourcing/application/enrichment.test.js lib/services/sourcing/integrations/brightdata.test.js` passed: `26` tests, `26` pass, `0` fail.
+  - `git diff --check` passed.
+- Behavior verified by tests:
+  - LinkedIn profile URL canonicalization accepts `/in/...` profile URLs and rejects company/jobs/posts/search/feed/non-LinkedIn URLs.
+  - Source records with LinkedIn profile URLs emit one canonical `linkedin` evidence record and do not also emit a `homepage` record for the same URL.
+  - Matching `linkedin` evidence on two records does not create a dedup candidate.
+  - LinkedIn-shaped `source_url`, `homepage`, and `linkedin` evidence do not create approved-entity identity hashes.
+  - Fake provider returns only normalized allowlisted fields, truncates/bounds long values and arrays, and drops contact/private fields such as email/phone.
+  - Bright Data provider builds the expected sync endpoint, dataset ID `gd_l1viktl72bvl7bjuj0`, bearer auth header, content type, direct-array request body, and does not return the API key in result objects.
+  - Bright Data provider preserves `snapshot_id` as `async_snapshot_pending` and returns `no_match` for an empty JSON array.
+- Phase 6.5B conclusion:
+  - Preconditions are good for Phase 6.5C.
+  - Phase 6.5C should add Firestore collection names/repository methods and service methods for eligible LinkedIn URL derivation, duplicate-spend protection, pending-merge gating, vendor run/match persistence, and vendor decision persistence using these already-tested schemas/provider contracts.
 
 ##### Phase 6.5C: Firestore Repository And Backend Service Flow
 

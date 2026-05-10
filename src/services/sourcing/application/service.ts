@@ -10,6 +10,7 @@ import {
   extractEvidenceFromSourceRecord,
   stableHash,
 } from './extraction';
+import { isLinkedInProfileUrl } from './linkedin';
 import {
   buildEnrichmentEvidencePack,
   buildEvidencePackHash,
@@ -480,6 +481,13 @@ function identityEvidenceHashesFromEvidence(evidence: EvidenceRecord[]): string[
   return sortedUnique(
     evidence
       .filter((entry) => strongIdentityEvidenceTypes.has(entry.evidenceType))
+      .filter(
+        (entry) =>
+          !(
+            (entry.evidenceType === 'homepage' || entry.evidenceType === 'source_url') &&
+            isLinkedInProfileUrl(entry.normalizedValue)
+          ),
+      )
       .map((entry) => entry.valueHash),
   );
 }

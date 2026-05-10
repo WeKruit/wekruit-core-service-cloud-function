@@ -6,6 +6,10 @@ import type {
   SourcingEvidenceQuality,
   SourcingEvidenceType,
 } from '../domain/records';
+import {
+  extractLinkedInProfileUrls,
+  normalizeLinkedInProfileUrl,
+} from './linkedin';
 
 export const sourcingEvidenceExtractorVersion = 'sourcing-evidence-v1';
 
@@ -60,6 +64,9 @@ function normalizeEvidenceValue(type: SourcingEvidenceType, value: string): stri
   if (type === 'homepage' || type === 'github' || type === 'source_url') {
     return normalizeUrl(trimmed);
   }
+  if (type === 'linkedin') {
+    return normalizeLinkedInProfileUrl(trimmed) ?? '';
+  }
   if (type === 'orcid') {
     return trimmed.toUpperCase();
   }
@@ -76,7 +83,7 @@ function evidenceQuality(type: SourcingEvidenceType): SourcingEvidenceQuality {
   if (['email', 'orcid', 'github', 'dblp', 'openreview', 'google_scholar', 'source_native_id'].includes(type)) {
     return 'high';
   }
-  if (['homepage', 'paper_doi', 'source_url'].includes(type)) {
+  if (['homepage', 'linkedin', 'paper_doi', 'source_url'].includes(type)) {
     return 'medium';
   }
   return 'low';
@@ -144,8 +151,17 @@ function detectTypedValues(path: string, value: string): Array<{ type: SourcingE
   }
 
   const trimmed = value.trim();
+  if (!sharedProjectContext) {
+    const linkedInProfileUrls = extractLinkedInProfileUrls(trimmed);
+    for (const url of linkedInProfileUrls) {
+      values.push({ type: 'linkedin', rawValue: url, path });
+    }
+  }
   if (!sharedProjectContext && (lowerPath.includes('homepage') || lowerPath.includes('website') || lowerPath.includes('url'))) {
     for (const url of trimmed.match(urlRegex) ?? []) {
+      if (normalizeLinkedInProfileUrl(url)) {
+        continue;
+      }
       values.push({ type: 'homepage', rawValue: url, path });
     }
   }

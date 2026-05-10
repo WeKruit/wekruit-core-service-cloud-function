@@ -360,6 +360,82 @@ test('createReviewLabel materializes a singleton only when reviewer approves can
   assert.deepEqual(result.approvedEntity.confirmedSignals, ['technical_project']);
 });
 
+test('createReviewLabel excludes LinkedIn-shaped evidence from approved identity hashes', async () => {
+  const sourceRecord = buildSourceRecord({
+    id: 'src_synthetic_person_spencer',
+    sourceName: 'synthetic_test',
+    sourceDomain: 'manual_test',
+    sourceNativeId: 'synthetic-spencer',
+    sourceUrl: 'https://www.linkedin.com/in/spencerwang1',
+    displayName: 'Spencer Wang',
+    institution: undefined,
+    rawSummary: {},
+    display: {},
+    nameInstitutionKey: null,
+  });
+  const evidence = [
+    buildEvidence({
+      id: 'evidence_spencer_source_url',
+      sourceRecordId: sourceRecord.id,
+      sourceName: sourceRecord.sourceName,
+      sourceDomain: sourceRecord.sourceDomain,
+      evidenceType: 'source_url',
+      rawValue: 'https://www.linkedin.com/in/spencerwang1',
+      normalizedValue: 'https://www.linkedin.com/in/spencerwang1',
+      valueHash: 'linkedin-source-url-hash',
+      quality: 'medium',
+    }),
+    buildEvidence({
+      id: 'evidence_spencer_homepage',
+      sourceRecordId: sourceRecord.id,
+      sourceName: sourceRecord.sourceName,
+      sourceDomain: sourceRecord.sourceDomain,
+      evidenceType: 'homepage',
+      rawValue: 'https://www.linkedin.com/in/spencerwang1',
+      normalizedValue: 'https://www.linkedin.com/in/spencerwang1',
+      valueHash: 'linkedin-homepage-hash',
+      quality: 'medium',
+    }),
+    buildEvidence({
+      id: 'evidence_spencer_linkedin',
+      sourceRecordId: sourceRecord.id,
+      sourceName: sourceRecord.sourceName,
+      sourceDomain: sourceRecord.sourceDomain,
+      evidenceType: 'linkedin',
+      rawValue: 'https://www.linkedin.com/in/spencerwang1',
+      normalizedValue: 'https://www.linkedin.com/in/spencerwang1',
+      valueHash: 'linkedin-evidence-hash',
+      quality: 'medium',
+    }),
+  ];
+  const candidate = buildCandidate({
+    id: 'dedup_synthetic_spencer',
+    reasonCodes: ['singleton_review'],
+    sourceRecordIds: [sourceRecord.id],
+    evidenceIds: evidence.map((entry) => entry.id),
+    valueHashes: ['singleton-spencer-hash'],
+    strength: 'weak',
+    displayName: 'Spencer Wang',
+  });
+  const harness = buildReviewHarness({
+    candidate,
+    sourceRecords: [sourceRecord],
+    evidence,
+  });
+
+  const result = await harness.service.createReviewLabel({
+    dedupCandidateId: candidate.id,
+    candidateDecision: 'approve_candidate',
+    reviewerId: 'phase6-5b-test',
+    notes: 'Synthetic candidate with LinkedIn-only evidence.',
+    confirmedSignals: [],
+  });
+
+  assert.ok(result.approvedEntity);
+  assert.equal(result.approvedEntity.id.startsWith('cand_'), true);
+  assert.deepEqual(result.approvedEntity.identityEvidenceHashes, []);
+});
+
 test('createReviewLabel stores same-person but not-relevant merge without materializing an entity', async () => {
   const githubRecord = buildSourceRecord();
   const devpostRecord = buildSourceRecord({

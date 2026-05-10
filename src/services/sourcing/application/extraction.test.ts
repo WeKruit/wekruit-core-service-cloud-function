@@ -6,6 +6,7 @@ import {
   extractEvidenceFromSourceRecord,
   normalizeUrl,
 } from './extraction';
+import { normalizeLinkedInProfileUrl } from './linkedin';
 import type { SourceRecord } from '../domain/records';
 
 function buildSourceRecord(overrides: Partial<SourceRecord> = {}): SourceRecord {
@@ -58,6 +59,60 @@ test('extractEvidenceFromSourceRecord emits normalized identity evidence with pr
   assert.equal(byType.get('name')?.normalizedValue, 'ada dev');
   assert.equal(byType.get('github')?.extractedFrom.sourceUrl, 'https://github.com/ada-dev');
   assert.ok(evidence.every((entry) => entry.sourceRecordId === 'src_github_person_ada'));
+});
+
+test('normalizeLinkedInProfileUrl accepts only canonical profile URLs', () => {
+  assert.equal(
+    normalizeLinkedInProfileUrl('https://www.linkedin.com/in/SpencerWang1/?trk=profile#about'),
+    'https://www.linkedin.com/in/spencerwang1',
+  );
+  assert.equal(
+    normalizeLinkedInProfileUrl('linkedin.com/in/spencerwang1'),
+    'https://www.linkedin.com/in/spencerwang1',
+  );
+  assert.equal(normalizeLinkedInProfileUrl('https://www.linkedin.com/company/openai'), null);
+  assert.equal(normalizeLinkedInProfileUrl('https://www.linkedin.com/jobs/view/123'), null);
+  assert.equal(normalizeLinkedInProfileUrl('https://www.linkedin.com/posts/spencerwang1_activity-1'), null);
+  assert.equal(normalizeLinkedInProfileUrl('https://www.linkedin.com/search/results/people/'), null);
+  assert.equal(normalizeLinkedInProfileUrl('https://www.linkedin.com/feed/'), null);
+  assert.equal(normalizeLinkedInProfileUrl('https://github.com/spencerwang1'), null);
+});
+
+test('extractEvidenceFromSourceRecord emits LinkedIn evidence without treating it as a homepage', () => {
+  const evidence = extractEvidenceFromSourceRecord(
+    buildSourceRecord({
+      id: 'src_devpost_person_spencer',
+      sourceName: 'devpost',
+      sourceDomain: 'hackathon',
+      sourceNativeId: 'https://devpost.com/spencer',
+      sourceUrl: 'https://devpost.com/spencer',
+      displayName: 'Spencer Wang',
+      rawSummary: {
+        linkedin: 'www.linkedin.com/in/SpencerWang1?trk=public_profile',
+      },
+      display: {
+        linkedin: 'https://www.linkedin.com/in/spencerwang1/',
+      },
+      raw: {
+        member: {
+          linkedin_url: 'https://www.linkedin.com/in/spencerwang1).',
+        },
+      },
+    }),
+    '2026-04-28T00:00:00.000Z',
+  );
+
+  const linkedInEvidence = evidence.filter((entry) => entry.evidenceType === 'linkedin');
+
+  assert.equal(linkedInEvidence.length, 1);
+  assert.equal(linkedInEvidence[0]?.normalizedValue, 'https://www.linkedin.com/in/spencerwang1');
+  assert.ok(
+    !evidence.some(
+      (entry) =>
+        entry.evidenceType === 'homepage' &&
+        entry.normalizedValue === 'https://www.linkedin.com/in/spencerwang1',
+    ),
+  );
 });
 
 test('extractEvidenceFromSourceRecord ignores shared project links as person identity evidence', () => {
