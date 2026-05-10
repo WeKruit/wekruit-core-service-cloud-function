@@ -76,7 +76,7 @@ Last updated: 2026-05-10.
 - [x] Phase 6.5G completed local emulator end-to-end verification: API-seeded synthetic candidates, API approval, dashboard fake Bright Data lookup, dashboard vendor approval, OpenAI enrichment generation, dashboard enrichment approval, final profile materialization with vendor lineage, no-LinkedIn negative gate, and stale enrichment approval blocking after vendor evidence changed. No deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5G.
 - [x] Phase 6.5H set Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env`, ran scoped build/dry-run/deploy, deployed only `functions:core-service:sourcing.api` and Hosting site `wekruit-sourcing`, and verified deployed read-only endpoints plus the Approved tab UI on `https://wekruit-sourcing.web.app`. No live Bright Data lookup was performed in Phase 6.5H.
 - [x] Phase 6.5I completed the isolated live staging smoke test on `https://wekruit-sourcing.web.app`: created one synthetic Spencer source run/candidate, fixed and redeployed exact-ID review candidate resolution for live capped review queues, approved only that synthetic candidate, clicked the deployed dashboard Bright Data fetch button exactly once, approved the Bright Data match, generated and approved enrichment, and verified the final profile with Bright Data vendor evidence lineage. Broader Bright Data use remains blocked until explicit access/spend-control decisions.
-- [x] Phase 6.5J implementation and local fake-provider full-chain verification are complete: Bright Data normalization now preserves richer public professional context for enrichment, not only thin labels such as project names. Staging deploy and fresh synthetic Spencer live verification are still pending.
+- [x] Phase 6.5J implementation, local fake-provider full-chain verification, scoped staging deploy, and fresh synthetic Spencer live verification are complete. Bright Data normalization now preserves richer public professional context for enrichment when the provider returns it. The live Spencer LinkedIn profile returned only thin public data, so the synthetic live enrichment review was intentionally left pending and no final profile was materialized from that thin evidence.
 
 ## Current Open Decisions And Waiting State
 
@@ -103,8 +103,8 @@ This is the current single source of truth after the successful Phase 3.5 live s
   - Bright Data lookup must be hard-gated on eligible LinkedIn source/evidence lineage. If an approved candidate has no LinkedIn profile URL in its approved source/evidence records or source summaries, the dashboard must not show an active lookup button and the backend must reject lookup attempts. V1 must not provide a freeform/reviewer-supplied URL input or discover LinkedIn profiles from name/company fields.
   - Final readiness audit on 2026-05-09 added implementation guardrails for edge cases: canonical LinkedIn `/in/...` URL validation, backend-owned eligible URL derivation, exclusion of LinkedIn URLs from strong identity hashes even when they appear as `source_url` or `homepage`, deterministic duplicate-spend/concurrency protection, bounded manual async refresh if Bright Data sync returns `snapshot_id`, stale enrichment review protection after vendor evidence changes, sanitized vendor errors/logging, and an explicit access/spend-control check before a paid live route is broadly usable.
   - Live Bright Data smoke on 2026-05-10 created exactly one isolated synthetic approved Spencer candidate in staging, then materialized one final profile from that candidate. TreeHacks candidates remain unapproved/unmerged/unenriched by this work.
-  - Bright Data quality issue discovered after Phase 6.5I: a user-run real LinkedIn lookup showed the deployed flow is technically wired but the current normalized profile can be too thin for enrichment value. The observed card had current company and location, an `aboutSummary` that was only an 89-character public excerpt with an encoded `&amp;`, zero experience rows, zero skills, and project rows that were only names. This means the integration can succeed while still failing the product goal of giving OpenAI materially richer professional context.
-  - Root cause is in WeKruit's normalization/display layer, not the vendor approval/enrichment plumbing: `normalizeBrightDataLinkedInProfile` currently stores summary strings only; `summarizeExperienceItem` mostly keeps title/company/date; `summarizeProjectItem` returns the first title/name/publication/description field and therefore drops description/URL detail when a name exists; `aboutSummary` is not HTML/entity decoded; and the dashboard list renderer escapes list entries without linkifying URLs.
+  - Bright Data quality issue discovered after Phase 6.5I: a user-run real LinkedIn lookup showed the deployed flow was technically wired but the normalized profile could be too thin for enrichment value. The observed card had current company and location, an `aboutSummary` that was only an 89-character public excerpt with an encoded `&amp;`, zero experience rows, zero skills, and project rows that were only names. This meant the integration could succeed while still failing the product goal of giving OpenAI materially richer professional context.
+  - Phase 6.5J fixed the WeKruit normalization/display portion of that issue: richer allowed fields are now preserved when Bright Data returns them, HTML/entity cleanup is deterministic, public URLs embedded in allowed professional fields can be rendered/cited, and the dashboard linkifies richer list entries. The live Spencer verification still returned a thin Bright Data payload with no experience/project/skills rows, so the remaining limitation is provider output/public-profile availability rather than the local normalization path.
   - Bright Data's public docs for LinkedIn profile-by-URL scraping show structured profile output can include profile details, `about`, `current_company`, `experience`, `education`, `projects`, `publications`, certifications, organizations, honors/awards, activity/posts, and media/ID fields. V1 should still keep only the approved professional-context subset and exclude contact/private/sensitive/social-graph/media fields.
   - Bright Data is public-data limited. If Bright Data returns only a public excerpt or an already-truncated value for a restricted LinkedIn profile, WeKruit must not try to reconstruct hidden data through unofficial scraping. The target for Phase 6.5J is to preserve the full public professional text that Bright Data returns within bounded normalized fields, and to clearly document provider limitations when the returned payload itself is thin.
   - Manual-only v1 mode from the Approved detail panel is confirmed.
@@ -128,10 +128,10 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, Phase 6.5H scoped deploy/read-only staging verification, Phase 6.5I isolated live staging smoke, and Phase 6.5J implementation/local fake-provider verification are complete. Phase 6.5J staging deploy and fresh synthetic Spencer live verification are pending.
+   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, Phase 6.5H scoped deploy/read-only staging verification, Phase 6.5I isolated live staging smoke, and Phase 6.5J rich-normalization implementation/local/staging verification are complete.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
-   - Current issue to fix next: the deployed integration can store/display too little detail for enrichment. The next patch must preserve rich normalized public professional context from Bright Data's allowed fields: full returned about text within a bound, richer experience rows with descriptions/dates/company/location/link context, and richer project/publication rows with descriptions/URLs when present.
+   - Phase 6.5J resolved the known normalization/display issue: the deployed integration now preserves richer normalized public professional context from Bright Data's allowed fields when returned. Remaining quality risk: Bright Data may still return a thin public payload for some LinkedIn profiles, as happened with the fresh synthetic Spencer live verification.
    - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
    - Team input required: Bright Data API key, account access to the LinkedIn Profiles scraper, allowed fields, lookup policy, budget expectations, and retention policy.
 
@@ -2952,7 +2952,7 @@ Phase 6.5I execution findings from 2026-05-10 01:10 PDT:
 
 ##### Phase 6.5J: Rich Bright Data Normalization Patch
 
-Status as of 2026-05-10 after local verification: implementation, automated code-level verification, and local emulator/browser full-chain verification are complete. Fresh synthetic Spencer staging verification is still pending.
+Status as of 2026-05-10 after staging verification: implementation, automated code-level verification, local emulator/browser full-chain verification, scoped staging deploy, and fresh synthetic Spencer live Bright Data verification are complete. The live enrichment review for the synthetic Spencer run is intentionally still `pending_review` because Bright Data returned thin public data for `https://www.linkedin.com/in/spencerwang1`.
 
 Problem statement:
 
@@ -3159,9 +3159,91 @@ Phase 6.5J automated implementation slice from 2026-05-10 12:05 PDT:
     - Final profile evidence IDs include `vendor_profile_match:vendor_match_554a633834d7325bbc117a0d`.
     - Resolved profile lineage includes the rich vendor experience/project/about text.
     - Excluded fake email/phone/contact-like fields were not present.
-- Remaining Phase 6.5J verification:
-  - Commit and push the local verification plan-doc slice.
-  - Deploy to staging and verify only with a fresh isolated synthetic fake Spencer candidate using `https://www.linkedin.com/in/spencerwang1`; do not use TreeHacks source data.
+- Phase 6.5J staging deploy and live verification slice from 2026-05-10:
+  - Re-ran pre-deploy verification from the current tree:
+    - `npm run build` passed.
+    - `node --test lib/services/sourcing/integrations/brightdata.test.js` passed: `6` tests, `6` pass.
+    - `node --test lib/services/sourcing/application/enrichment.test.js lib/services/sourcing/application/service.test.js` passed: `23` tests, `23` pass.
+    - `find lib/services/sourcing -name '*.test.js' -print0 | xargs -0 node --test` passed: `44` tests, `44` pass.
+    - `node --check web/app.js && git diff --check` passed.
+    - `npm run build:sourcing-bundle` passed.
+  - Scoped Firebase dry run passed:
+    - `npx -y firebase-tools deploy --config firebase.sourcing.json --project wekruit-dev-env --only functions:core-service:sourcing.api,hosting:wekruit-sourcing --dry-run`
+  - Scoped Firebase deploy passed:
+    - `npx -y firebase-tools deploy --config firebase.sourcing.json --project wekruit-dev-env --only functions:core-service:sourcing.api,hosting:wekruit-sourcing`
+    - Function URL reported by Firebase: `https://sourcing-api-s4zwoc37yq-uc.a.run.app`.
+    - Hosting URL: `https://wekruit-sourcing.web.app`.
+  - Post-deploy read-only checks:
+    - `GET https://wekruit-sourcing.web.app/api/sourcing/health` returned `{"ok":true,"service":"sourcing","runtime":"firebase-functions"}`.
+    - `GET https://wekruit-sourcing.web.app/app.js` returned `200`, `131611` bytes, and contained `renderTextWithLinks(entry)`, `vendor-profile-lookup:run`, `projectsPublications`, and `experienceSummary`.
+    - `GET https://wekruit-sourcing.web.app/api/sourcing/approved-entities` returned `200` with `4` approved entities before the new synthetic run.
+  - Fresh isolated synthetic live source run:
+    - Source run ID: `phase65j-rich-live-spencer-20260510T185913150Z`.
+    - Source record ID: `phase65j-rich-live-spencer-20260510T185913150Z-spencer`.
+    - Source native ID: `spencer-wang-phase65j-rich-live-20260510T185913150Z`.
+    - Source URL: `https://example.test/phase65j-rich-live/spencer-20260510T185913150Z`.
+    - Display name: `Spencer Wang Rich BrightData Smoke`.
+    - LinkedIn URL: `https://www.linkedin.com/in/spencerwang1`.
+    - Source run status after completion: `completed`.
+    - Source run counts: `1` source record, `6` evidence records, `1` dedup candidate.
+    - Dedup candidate ID: `d08d20a3b7a40fb60c2eed9fc0a8332d`.
+    - Review label ID shown in dashboard lineage: `f93d7e17-952b-4688-b103-6d7d5fbc88a0`.
+    - Approved entity ID: `cand_2eef60785b010df078cb8cec`.
+    - The vendor-match endpoint confirmed one eligible LinkedIn URL for this exact synthetic approved entity, with evidence ID `aadc7aeb74ba731663f6c10072d9fae0` and source record lineage `phase65j-rich-live-spencer-20260510T185913150Z-spencer`.
+  - Browser/Ruflo live dashboard verification:
+    - Opened `https://wekruit-sourcing.web.app/#approved`.
+    - Verified the Approved tab selected `Spencer Wang Rich BrightData Smoke` and showed the eligible LinkedIn URL from the synthetic source record.
+    - Clicked the deployed `Fetch LinkedIn profile` button from the Approved detail. The Bright Data lookup was not run by direct API call.
+    - Lookup run ID: `vendor_run_5f426bd0c5192424aed9d46c`.
+    - Lookup run status: `completed`.
+    - Dataset ID: `gd_l1viktl72bvl7bjuj0`.
+    - Match ID: `vendor_match_2ec44fc517ca281fdd854def`.
+    - Provider: `brightdata`.
+    - Provider record ID: `spencerwang1`.
+    - Browser/Ruflo verified the Approved detail card showed the Bright Data result and then clicked `Approve profile` from the dashboard.
+    - Approved vendor evidence ID: `vendor_profile_match:vendor_match_2ec44fc517ca281fdd854def`.
+  - Live Bright Data returned fields for `https://www.linkedin.com/in/spencerwang1`:
+    - Name: `Spencer Wang`.
+    - Profile URL: `https://www.linkedin.com/in/spencerwang1`.
+    - Current company: `Name: WeKruit | URL: https://www.linkedin.com/company/wekruit?trk=public_profile_topcard-current-company`.
+    - Location: `Los Angeles`.
+    - Education: `School: UCLA Henry Samueli School of Engineering and Applied Science`.
+    - About summary length: `89`.
+    - About summary: `I am a dedicated Computer Science student at UCLA's Samueli School of Engineering with a…`.
+    - Experience count: `0`.
+    - Skills count: `0`.
+    - Projects/publications count: `0`.
+    - Encoded `&amp;` was not present. This verifies the decode/cleanup path for the returned about text.
+    - Conclusion: the deployed normalizer preserved the public company URL and cleaned returned text, but Bright Data did not return rich experience/project/skills data for this LinkedIn profile. This is a provider-output/public-profile limitation for the live Spencer test, not a failure of the richer normalization code paths, which were proven by local fixtures and tests.
+  - Browser/Ruflo clicked `Generate enrichment` from the deployed Approved detail after approving the vendor match.
+  - Enrichment run ID: `enrich_run_97d3fc14-1fc8-4ada-afaa-19348f3c8714`.
+  - Enrichment review item ID: `enrich_review_9ca5900c7c417018b9aa5bf3`.
+  - Enrichment review status: `pending_review`.
+  - Evidence count: `7`.
+  - Vendor evidence ID included: `vendor_profile_match:vendor_match_2ec44fc517ca281fdd854def`.
+  - Vendor evidence type: `vendor_professional_profile`.
+  - Vendor evidence quality: `medium`.
+  - Vendor evidence text contained the public WeKruit company URL and decoded UCLA about excerpt, but did not contain rich experience/project descriptions.
+  - Draft cited the vendor evidence ID and produced summary: `Spencer Wang is a founder with a project signal and a current affiliation with WeKruit.`
+  - Browser/Ruflo verified the Enrichment tab item is visible and still pending.
+  - Because the live provider output was thin and did not contain rich experience/project facts, enrichment approval was intentionally not clicked and no final profile was materialized for `cand_2eef60785b010df078cb8cec`.
+  - Read-only profile verification: `GET /api/sourcing/candidate-profiles/profile_cand_2eef60785b010df078cb8cec` returned `404`.
+  - Approved entity after generation: `enrichmentStatus=in_review`, `needsEnrichment=true`.
+  - Browser/Ruflo screenshot evidence:
+    - `/tmp/wekruit-phase65j-live-rich-before-fetch.png`
+    - `/tmp/wekruit-phase65j-live-rich-fetch-visible.png`
+    - `/tmp/wekruit-phase65j-live-rich-after-brightdata.png`
+    - `/tmp/wekruit-phase65j-live-rich-approve-button-visible.png`
+    - `/tmp/wekruit-phase65j-live-rich-match-buttons.png`
+    - `/tmp/wekruit-phase65j-live-rich-generate-visible-after-approve.png`
+    - `/tmp/wekruit-phase65j-live-rich-generate-visible-final.png`
+    - `/tmp/wekruit-phase65j-live-rich-enrichment-pending.png`
+- Phase 6.5J final state:
+  - Code, docs, local verification, deploy, and live synthetic Spencer smoke are complete.
+  - The production/staging dashboard at `https://wekruit-sourcing.web.app` is running the richer normalization/rendering patch.
+  - TreeHacks source data was not used for Phase 6.5J verification.
+  - The latest live synthetic Spencer enrichment review remains pending by design because the Bright Data payload itself was thin.
+  - If the team needs a live proof of rich experience/project extraction, use another explicitly approved synthetic test candidate whose public LinkedIn profile is known to return experience/project descriptions through Bright Data, or ask Bright Data support whether the LinkedIn Profiles scraper can return a less-truncated public profile payload for the current account/dataset.
 
 #### Immediate Blockers Before Full Live Completion
 
