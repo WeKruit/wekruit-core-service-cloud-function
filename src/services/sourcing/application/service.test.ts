@@ -4,8 +4,14 @@ import test from 'node:test';
 import {
   PendingMergeReviewBlockError,
   SourcingService,
+  VendorProfileLookupProviderError,
+  VendorProfileLookupValidationError,
   type SourcingRepositoryPort,
 } from './service';
+import type {
+  ProfessionalProfileLookupPort,
+  ProfessionalProfileLookupResult,
+} from '../integrations/brightdata';
 import type {
   ApprovedEntity,
   CandidateEnrichmentDraft,
@@ -16,6 +22,8 @@ import type {
   EvidenceRecord,
   ReviewLabelRecord,
   SourceRecord,
+  VendorEnrichmentRun,
+  VendorProfileMatch,
 } from '../domain/records';
 
 function buildSourceRecord(overrides: Partial<SourceRecord> = {}): SourceRecord {
@@ -321,6 +329,200 @@ function buildReviewHarness(input: {
   };
 }
 
+function buildVendorMatch(overrides: Partial<VendorProfileMatch> = {}): VendorProfileMatch {
+  return {
+    id: 'vendor_match_existing',
+    approvedEntityId: 'cand_existing_alex',
+    vendorRunId: 'vendor_run_existing',
+    provider: 'fake',
+    lookupType: 'linkedin_profile_by_url',
+    inputUrlHash: 'lookup-hash',
+    selectedLinkedInUrl: 'https://www.linkedin.com/in/spencerwang1',
+    selectedLinkedInUrlLineage: {
+      url: 'https://www.linkedin.com/in/spencerwang1',
+      sourceRecordIds: ['src_github_person_alex'],
+      evidenceIds: ['evidence_linkedin_alex'],
+      sourcePaths: ['rawSummary.linkedin'],
+    },
+    providerRecordId: 'fake:spencerwang1',
+    providerProfileUrl: 'https://www.linkedin.com/in/spencerwang1',
+    normalizedProfile: {
+      profileUrl: 'https://www.linkedin.com/in/spencerwang1',
+      name: 'Spencer Wang',
+      headline: 'Synthetic provider response',
+      currentCompany: 'WeKruit Test Fixture',
+      location: 'San Francisco Bay Area, US',
+      educationSummary: ['Synthetic University | Computer Science'],
+      experienceSummary: ['Builder at Synthetic Labs'],
+      skills: ['software engineering', 'candidate sourcing'],
+      aboutSummary: 'Synthetic local fixture for validating professional profile lookup.',
+      projectsPublications: ['Synthetic sourcing pipeline validation'],
+    },
+    reviewStatus: 'pending_review',
+    reviewerId: null,
+    reviewNote: '',
+    reviewedAt: null,
+    approvedEvidenceId: null,
+    createdAt: '2026-04-28T00:00:00.000Z',
+    updatedAt: '2026-04-28T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function successfulLookupResult(url = 'https://www.linkedin.com/in/spencerwang1'): ProfessionalProfileLookupResult {
+  return {
+    provider: 'fake',
+    lookupType: 'linkedin_profile_by_url',
+    datasetId: 'fake-linkedin-profiles',
+    inputUrl: url,
+    status: 'completed',
+    snapshotId: null,
+    matches: [
+      {
+        provider: 'fake',
+        providerRecordId: 'fake:spencerwang1',
+        providerProfileUrl: url,
+        normalizedProfile: {
+          profileUrl: url,
+          name: 'Spencer Wang',
+          headline: 'Synthetic provider response',
+          currentCompany: 'WeKruit Test Fixture',
+          location: 'San Francisco Bay Area, US',
+          educationSummary: ['Synthetic University | Computer Science'],
+          experienceSummary: ['Builder at Synthetic Labs'],
+          skills: ['software engineering', 'candidate sourcing'],
+          aboutSummary: 'Synthetic local fixture for validating professional profile lookup.',
+          projectsPublications: ['Synthetic sourcing pipeline validation'],
+        },
+      },
+    ],
+  };
+}
+
+function noMatchLookupResult(url = 'https://www.linkedin.com/in/spencerwang1'): ProfessionalProfileLookupResult {
+  return {
+    provider: 'fake',
+    lookupType: 'linkedin_profile_by_url',
+    datasetId: 'fake-linkedin-profiles',
+    inputUrl: url,
+    status: 'no_match',
+    snapshotId: null,
+    matches: [],
+  };
+}
+
+function buildVendorLookupHarness(input: {
+  approvedEntity?: ApprovedEntity | null;
+  sourceRecords?: SourceRecord[];
+  evidence?: EvidenceRecord[];
+  pendingCandidates?: DedupCandidate[];
+  providerResults?: ProfessionalProfileLookupResult[];
+  providerErrors?: Error[];
+  vendorRuns?: VendorEnrichmentRun[];
+  vendorMatches?: VendorProfileMatch[];
+}) {
+  let providerCalls = 0;
+  const approvedEntitiesById = new Map(
+    input.approvedEntity ? [[input.approvedEntity.id, input.approvedEntity]] : [],
+  );
+  const vendorRunsById = new Map((input.vendorRuns ?? []).map((run) => [run.id, run]));
+  const vendorMatchesById = new Map((input.vendorMatches ?? []).map((match) => [match.id, match]));
+  const providerResults = [...(input.providerResults ?? [successfulLookupResult()])];
+  const providerErrors = [...(input.providerErrors ?? [])];
+  const provider: ProfessionalProfileLookupPort = {
+    lookupLinkedInProfile: async () => {
+      providerCalls += 1;
+      const error = providerErrors.shift();
+      if (error) {
+        throw error;
+      }
+      return providerResults.shift() ?? successfulLookupResult();
+    },
+  };
+  const repository = {
+    getApprovedEntity: async (id: string) => approvedEntitiesById.get(id) ?? null,
+    listDedupCandidates: async () => input.pendingCandidates ?? [],
+    getSourceRecordsByIds: async (ids: string[]) =>
+      (input.sourceRecords ?? []).filter((record) => ids.includes(record.id)),
+    getEvidenceByIds: async (ids: string[]) =>
+      (input.evidence ?? []).filter((entry) => ids.includes(entry.id)),
+    listVendorEnrichmentRunsForApprovedEntity: async (approvedEntityId: string) =>
+      [...vendorRunsById.values()]
+        .filter((run) => run.approvedEntityId === approvedEntityId)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+    listVendorEnrichmentRunsByInputHash: async (approvedEntityId: string, inputUrlHash: string) =>
+      [...vendorRunsById.values()]
+        .filter((run) => run.approvedEntityId === approvedEntityId && run.inputUrlHash === inputUrlHash),
+    startVendorEnrichmentRun: async (run: VendorEnrichmentRun) => {
+      const existing = vendorRunsById.get(run.id);
+      if (existing && existing.status !== 'failed') {
+        return {
+          run: existing,
+          shouldCallProvider: false,
+        };
+      }
+      const next = existing?.status === 'failed'
+        ? {
+          ...existing,
+          status: 'running' as const,
+          snapshotId: null,
+          matchIds: [],
+          error: null,
+          updatedAt: run.updatedAt,
+        }
+        : run;
+      vendorRunsById.set(next.id, next);
+      return {
+        run: next,
+        shouldCallProvider: true,
+      };
+    },
+    updateVendorEnrichmentRun: async (run: VendorEnrichmentRun) => {
+      vendorRunsById.set(run.id, run);
+      return run;
+    },
+    upsertVendorProfileMatches: async (matches: VendorProfileMatch[]) => {
+      for (const match of matches) {
+        vendorMatchesById.set(match.id, match);
+      }
+      return matches;
+    },
+    getVendorProfileMatch: async (id: string) => vendorMatchesById.get(id) ?? null,
+    listVendorProfileMatchesForApprovedEntity: async (approvedEntityId: string) =>
+      [...vendorMatchesById.values()]
+        .filter((match) => match.approvedEntityId === approvedEntityId)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+    listVendorProfileMatchesByInputHash: async (approvedEntityId: string, inputUrlHash: string) =>
+      [...vendorMatchesById.values()]
+        .filter((match) => match.approvedEntityId === approvedEntityId && match.inputUrlHash === inputUrlHash),
+    updateVendorProfileMatch: async (match: VendorProfileMatch) => {
+      vendorMatchesById.set(match.id, match);
+      return match;
+    },
+    upsertApprovedEntity: async (entity: ApprovedEntity) => {
+      approvedEntitiesById.set(entity.id, entity);
+      return entity;
+    },
+  } as Partial<SourcingRepositoryPort> as SourcingRepositoryPort;
+
+  return {
+    service: new SourcingService(repository, undefined, provider),
+    get providerCalls() {
+      return providerCalls;
+    },
+    get vendorRuns() {
+      return [...vendorRunsById.values()];
+    },
+    get vendorMatches() {
+      return [...vendorMatchesById.values()];
+    },
+    get approvedEntity() {
+      const id = input.approvedEntity?.id;
+      return id ? approvedEntitiesById.get(id) ?? null : null;
+    },
+  };
+}
+
 test('createReviewLabel materializes a singleton only when reviewer approves candidate relevance', async () => {
   const sourceRecord = buildSourceRecord();
   const evidence = buildEvidence();
@@ -610,6 +812,342 @@ test('listApprovedEntities surfaces pending merge blockers for approved candidat
     label: 'Source',
     urls: ['https://github.com/alex'],
   });
+});
+
+test('runProfessionalProfileLookupForApprovedEntity validates approved entity and LinkedIn lineage gates', async () => {
+  const approvedEntity = buildApprovedEntity({
+    id: 'cand_spencer',
+    sourceRecordIds: ['src_spencer'],
+    evidenceIds: [],
+    status: 'active',
+  });
+  const sourceRecord = buildSourceRecord({
+    id: 'src_spencer',
+    sourceUrl: 'https://devpost.com/spencer',
+    rawSummary: {},
+    display: {},
+  });
+  let harness = buildVendorLookupHarness({ approvedEntity: null });
+
+  await assert.rejects(
+    harness.service.runProfessionalProfileLookupForApprovedEntity(
+      'missing-candidate',
+      'https://www.linkedin.com/in/spencerwang1',
+    ),
+    (error: unknown) => error instanceof VendorProfileLookupValidationError,
+  );
+
+  harness = buildVendorLookupHarness({
+    approvedEntity: {
+      ...approvedEntity,
+      status: 'merged',
+    },
+    sourceRecords: [sourceRecord],
+  });
+  await assert.rejects(
+    harness.service.runProfessionalProfileLookupForApprovedEntity(
+      approvedEntity.id,
+      'https://www.linkedin.com/in/spencerwang1',
+    ),
+    /not active/,
+  );
+
+  harness = buildVendorLookupHarness({
+    approvedEntity,
+    sourceRecords: [sourceRecord],
+    evidence: [],
+  });
+  await assert.rejects(
+    harness.service.runProfessionalProfileLookupForApprovedEntity(
+      approvedEntity.id,
+      'https://www.linkedin.com/in/spencerwang1',
+    ),
+    /no eligible LinkedIn profile URL/,
+  );
+
+  const linkedInEvidence = buildEvidence({
+    id: 'evidence_spencer_linkedin',
+    sourceRecordId: sourceRecord.id,
+    evidenceType: 'linkedin',
+    rawValue: 'https://www.linkedin.com/in/spencerwang1',
+    normalizedValue: 'https://www.linkedin.com/in/spencerwang1',
+    valueHash: 'linkedin-spencer-hash',
+    quality: 'medium',
+  });
+  harness = buildVendorLookupHarness({
+    approvedEntity: {
+      ...approvedEntity,
+      evidenceIds: [linkedInEvidence.id],
+    },
+    sourceRecords: [sourceRecord],
+    evidence: [linkedInEvidence],
+  });
+  await assert.rejects(
+    harness.service.runProfessionalProfileLookupForApprovedEntity(
+      approvedEntity.id,
+      'https://www.linkedin.com/in/someone-else',
+    ),
+    /not present/,
+  );
+});
+
+test('runProfessionalProfileLookupForApprovedEntity blocks pending merge review before provider call', async () => {
+  const approvedEntity = buildApprovedEntity({
+    id: 'cand_spencer',
+    sourceRecordIds: ['src_spencer'],
+    evidenceIds: ['evidence_spencer_linkedin'],
+  });
+  const sourceRecord = buildSourceRecord({
+    id: 'src_spencer',
+    rawSummary: {
+      linkedin: 'https://www.linkedin.com/in/spencerwang1',
+    },
+  });
+  const linkedInEvidence = buildEvidence({
+    id: 'evidence_spencer_linkedin',
+    sourceRecordId: sourceRecord.id,
+    evidenceType: 'linkedin',
+    rawValue: 'https://www.linkedin.com/in/spencerwang1',
+    normalizedValue: 'https://www.linkedin.com/in/spencerwang1',
+    valueHash: 'linkedin-spencer-hash',
+    quality: 'medium',
+  });
+  const blocker = buildCandidate({
+    id: 'dedup_pending_spencer_merge',
+    sourceRecordIds: ['src_spencer', 'src_other_spencer'],
+    valueHashes: ['github-hash'],
+  });
+  const harness = buildVendorLookupHarness({
+    approvedEntity,
+    sourceRecords: [sourceRecord],
+    evidence: [linkedInEvidence],
+    pendingCandidates: [blocker],
+  });
+
+  await assert.rejects(
+    harness.service.runProfessionalProfileLookupForApprovedEntity(
+      approvedEntity.id,
+      'https://www.linkedin.com/in/spencerwang1',
+    ),
+    (error: unknown) => error instanceof PendingMergeReviewBlockError,
+  );
+  assert.equal(harness.providerCalls, 0);
+});
+
+test('runProfessionalProfileLookupForApprovedEntity creates fake run and prevents duplicate spend', async () => {
+  const approvedEntity = buildApprovedEntity({
+    id: 'cand_spencer',
+    sourceRecordIds: ['src_spencer'],
+    evidenceIds: ['evidence_spencer_linkedin'],
+  });
+  const sourceRecord = buildSourceRecord({
+    id: 'src_spencer',
+    rawSummary: {
+      linkedin: 'https://www.linkedin.com/in/spencerwang1',
+    },
+  });
+  const linkedInEvidence = buildEvidence({
+    id: 'evidence_spencer_linkedin',
+    sourceRecordId: sourceRecord.id,
+    evidenceType: 'linkedin',
+    rawValue: 'https://www.linkedin.com/in/spencerwang1',
+    normalizedValue: 'https://www.linkedin.com/in/spencerwang1',
+    valueHash: 'linkedin-spencer-hash',
+    quality: 'medium',
+  });
+  const harness = buildVendorLookupHarness({
+    approvedEntity,
+    sourceRecords: [sourceRecord],
+    evidence: [linkedInEvidence],
+  });
+
+  const first = await harness.service.runProfessionalProfileLookupForApprovedEntity(
+    approvedEntity.id,
+    'https://www.linkedin.com/in/spencerwang1/',
+  );
+  const second = await harness.service.runProfessionalProfileLookupForApprovedEntity(
+    approvedEntity.id,
+    'https://www.linkedin.com/in/spencerwang1',
+  );
+
+  assert.equal(first.reusedExisting, false);
+  assert.equal(second.reusedExisting, true);
+  assert.equal(harness.providerCalls, 1);
+  assert.equal(first.run.status, 'completed');
+  assert.equal(first.matchesForRun.length, 1);
+  assert.equal(second.run.id, first.run.id);
+  assert.equal(second.matchesForRun[0]?.id, first.matchesForRun[0]?.id);
+  assert.deepEqual(first.eligibleLinkedInUrls[0]?.evidenceIds, ['evidence_spencer_linkedin']);
+});
+
+test('runProfessionalProfileLookupForApprovedEntity remembers rejected or ignored matches by query hash', async () => {
+  const approvedEntity = buildApprovedEntity({
+    id: 'cand_spencer',
+    sourceRecordIds: ['src_spencer'],
+    evidenceIds: ['evidence_spencer_linkedin'],
+  });
+  const sourceRecord = buildSourceRecord({
+    id: 'src_spencer',
+    rawSummary: {
+      linkedin: 'https://www.linkedin.com/in/spencerwang1',
+    },
+  });
+  const linkedInEvidence = buildEvidence({
+    id: 'evidence_spencer_linkedin',
+    sourceRecordId: sourceRecord.id,
+    evidenceType: 'linkedin',
+    rawValue: 'https://www.linkedin.com/in/spencerwang1',
+    normalizedValue: 'https://www.linkedin.com/in/spencerwang1',
+    valueHash: 'linkedin-spencer-hash',
+    quality: 'medium',
+  });
+  const harness = buildVendorLookupHarness({
+    approvedEntity,
+    sourceRecords: [sourceRecord],
+    evidence: [linkedInEvidence],
+  });
+  const first = await harness.service.runProfessionalProfileLookupForApprovedEntity(
+    approvedEntity.id,
+    'https://www.linkedin.com/in/spencerwang1',
+  );
+  const ignored = await harness.service.decideVendorProfileMatch(first.matchesForRun[0]?.id ?? '', {
+    action: 'ignore',
+    reviewerId: 'phase65c-test',
+    notes: 'Not enough evidence.',
+  });
+  const second = await harness.service.runProfessionalProfileLookupForApprovedEntity(
+    approvedEntity.id,
+    'https://www.linkedin.com/in/spencerwang1',
+  );
+
+  assert.equal(ignored.match.reviewStatus, 'ignored');
+  assert.equal(second.reusedExisting, true);
+  assert.equal(harness.providerCalls, 1);
+  assert.equal(second.matches.find((match) => match.id === ignored.match.id)?.reviewStatus, 'ignored');
+});
+
+test('runProfessionalProfileLookupForApprovedEntity reuses no-match results and retries failed lookups', async () => {
+  const approvedEntity = buildApprovedEntity({
+    id: 'cand_spencer',
+    sourceRecordIds: ['src_spencer'],
+    evidenceIds: ['evidence_spencer_linkedin'],
+  });
+  const sourceRecord = buildSourceRecord({
+    id: 'src_spencer',
+    rawSummary: {
+      linkedin: 'https://www.linkedin.com/in/spencerwang1',
+    },
+  });
+  const linkedInEvidence = buildEvidence({
+    id: 'evidence_spencer_linkedin',
+    sourceRecordId: sourceRecord.id,
+    evidenceType: 'linkedin',
+    rawValue: 'https://www.linkedin.com/in/spencerwang1',
+    normalizedValue: 'https://www.linkedin.com/in/spencerwang1',
+    valueHash: 'linkedin-spencer-hash',
+    quality: 'medium',
+  });
+  let harness = buildVendorLookupHarness({
+    approvedEntity,
+    sourceRecords: [sourceRecord],
+    evidence: [linkedInEvidence],
+    providerResults: [noMatchLookupResult()],
+  });
+
+  const firstNoMatch = await harness.service.runProfessionalProfileLookupForApprovedEntity(
+    approvedEntity.id,
+    'https://www.linkedin.com/in/spencerwang1',
+  );
+  const secondNoMatch = await harness.service.runProfessionalProfileLookupForApprovedEntity(
+    approvedEntity.id,
+    'https://www.linkedin.com/in/spencerwang1',
+  );
+
+  assert.equal(firstNoMatch.run.status, 'no_match');
+  assert.equal(secondNoMatch.reusedExisting, true);
+  assert.equal(harness.providerCalls, 1);
+
+  harness = buildVendorLookupHarness({
+    approvedEntity,
+    sourceRecords: [sourceRecord],
+    evidence: [linkedInEvidence],
+    providerErrors: [new Error('temporary provider failure')],
+    providerResults: [successfulLookupResult()],
+  });
+  await assert.rejects(
+    harness.service.runProfessionalProfileLookupForApprovedEntity(
+      approvedEntity.id,
+      'https://www.linkedin.com/in/spencerwang1',
+    ),
+    (error: unknown) => error instanceof VendorProfileLookupProviderError,
+  );
+  assert.equal(harness.vendorRuns[0]?.status, 'failed');
+  const retried = await harness.service.runProfessionalProfileLookupForApprovedEntity(
+    approvedEntity.id,
+    'https://www.linkedin.com/in/spencerwang1',
+  );
+
+  assert.equal(retried.reusedExisting, false);
+  assert.equal(retried.run.status, 'completed');
+  assert.equal(harness.providerCalls, 2);
+});
+
+test('decideVendorProfileMatch approves, rejects, and ignores matches with enrichment state updates', async () => {
+  const approvedEntity = buildApprovedEntity({
+    id: 'cand_spencer',
+    sourceRecordIds: ['src_spencer'],
+    evidenceIds: ['evidence_spencer_linkedin'],
+    needsEnrichment: false,
+    enrichmentStatus: 'enriched',
+  });
+  const approvedMatch = buildVendorMatch({
+    id: 'vendor_match_approved',
+    approvedEntityId: approvedEntity.id,
+    vendorRunId: 'vendor_run_approved',
+    reviewStatus: 'pending_review',
+  });
+  const rejectedMatch = buildVendorMatch({
+    id: 'vendor_match_rejected',
+    approvedEntityId: approvedEntity.id,
+    vendorRunId: 'vendor_run_rejected',
+    reviewStatus: 'pending_review',
+  });
+  const ignoredMatch = buildVendorMatch({
+    id: 'vendor_match_ignored',
+    approvedEntityId: approvedEntity.id,
+    vendorRunId: 'vendor_run_ignored',
+    reviewStatus: 'pending_review',
+  });
+  const harness = buildVendorLookupHarness({
+    approvedEntity,
+    vendorMatches: [approvedMatch, rejectedMatch, ignoredMatch],
+  });
+
+  const approved = await harness.service.decideVendorProfileMatch(approvedMatch.id, {
+    action: 'approve',
+    reviewerId: 'phase65c-test',
+    notes: 'Correct professional profile.',
+  });
+  const rejected = await harness.service.decideVendorProfileMatch(rejectedMatch.id, {
+    action: 'reject',
+    reviewerId: 'phase65c-test',
+    notes: 'Wrong profile.',
+  });
+  const ignored = await harness.service.decideVendorProfileMatch(ignoredMatch.id, {
+    action: 'ignore',
+    reviewerId: 'phase65c-test',
+    notes: 'Not enough evidence.',
+  });
+
+  assert.equal(approved.match.reviewStatus, 'approved');
+  assert.equal(approved.match.approvedEvidenceId, `vendor_profile_match:${approvedMatch.id}`);
+  assert.equal(approved.approvedEntity?.needsEnrichment, true);
+  assert.equal(approved.approvedEntity?.enrichmentStatus, 'needs_enrichment');
+  assert.equal(harness.approvedEntity?.needsEnrichment, true);
+  assert.equal(rejected.match.reviewStatus, 'rejected');
+  assert.equal(rejected.match.approvedEvidenceId, null);
+  assert.equal(ignored.match.reviewStatus, 'ignored');
+  assert.equal(ignored.match.approvedEvidenceId, null);
 });
 
 test('generateEnrichmentForApprovedEntity blocks when a pending merge overlaps the approved candidate', async () => {

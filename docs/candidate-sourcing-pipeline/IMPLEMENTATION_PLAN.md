@@ -69,6 +69,7 @@ Last updated: 2026-05-09.
 - [x] Coresignal integration planning is preserved in this document as a paused archive. No Coresignal implementation has started.
 - [x] Bright Data is now the active vendor direction for professional LinkedIn profile enrichment planning.
 - [x] Phase 6.5B added the Bright Data LinkedIn evidence/provider foundation: `linkedin` evidence normalization, vendor profile schemas/types, `ProfessionalProfileLookupPort`, deterministic fake provider fixtures, and a real Bright Data provider contract behind tests. No live Bright Data call, Firestore mutation, route wiring, UI wiring, deploy, approval, enrichment, or profile materialization was performed in Phase 6.5B.
+- [x] Phase 6.5C added backend Firestore/service flow for vendor lookup runs and profile matches: collection constants, repository persistence/reservation methods, eligible LinkedIn URL derivation, pending-merge and lineage gates, deterministic duplicate-spend protection, no-match/failed retry behavior, and approve/reject/ignore service decisions. No API routes, dashboard UI, deploy, Firestore mutation outside tests, or live Bright Data call was performed in Phase 6.5C.
 
 ## Current Open Decisions And Waiting State
 
@@ -116,7 +117,7 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight and Phase 6.5B domain/provider-contract work are complete.
+   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, and Phase 6.5C backend service/repository flow are complete.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
    - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
@@ -2272,6 +2273,69 @@ Plan update required before Phase 6.5D:
 - Record run/match document shapes actually implemented.
 - Record duplicate-spend behavior and status names.
 - Record exact test command and result.
+
+Phase 6.5C execution findings from 2026-05-10 00:11 PDT:
+
+- Phase status: completed after full-plan greenlight. This phase implemented backend-only service and repository behavior. It did not add HTTP routes, dashboard UI, deployed Firebase changes, live Firestore mutations, approvals/enrichments/profiles in staging, or live Bright Data calls.
+- Files changed in `wekruit-core-service-cloud-function`:
+  - `src/shared/firestore/collections.ts`
+    - Added collection constants `sourcing-vendor-enrichment-runs` and `sourcing-vendor-profile-matches`.
+  - `src/services/sourcing/domain/records.ts`
+    - Added `createVendorProfileMatchDecisionSchema` / `CreateVendorProfileMatchDecisionInput` for approve/reject/ignore decisions.
+  - `src/services/sourcing/repositories/sourcingRepository.ts`
+    - Added repository methods for vendor run reservation, get/list/update, and vendor match upsert/get/list/update.
+    - Added transactional `startVendorEnrichmentRun` behavior: create a running run if absent, return existing non-failed runs without provider call, and allow failed runs to be retried by resetting the same deterministic run document to `running`.
+  - `src/services/sourcing/application/service.ts`
+    - Added `listVendorProfileMatchesForApprovedEntity`.
+    - Added `runProfessionalProfileLookupForApprovedEntity`.
+    - Added `decideVendorProfileMatch`.
+    - Added eligible LinkedIn profile URL derivation from approved evidence/source lineage, including `linkedin`, LinkedIn-shaped `source_url`/`homepage`, and approved source-record LinkedIn fields.
+    - Added `VendorProfileLookupValidationError` and `VendorProfileLookupProviderError`.
+    - Added emulator/fake-provider default for local Functions emulator unless `SOURCING_PROFESSIONAL_PROFILE_PROVIDER=brightdata` is explicitly set.
+  - `src/services/sourcing/application/service.test.ts`
+    - Added backend service tests for Phase 6.5C gates and decision behavior.
+- Vendor run document shape implemented:
+  - Collection: `sourcing-vendor-enrichment-runs`.
+  - Stable ID shape: `vendor_run_<24-char hash>`, derived from approved entity ID and deterministic selected-URL lineage hash.
+  - Fields: `approvedEntityId`, `provider`, `lookupType`, `inputUrlHash`, `selectedLinkedInUrl`, `selectedLinkedInUrlLineage`, `datasetId`, `status`, `snapshotId`, `matchIds`, `error`, `createdAt`, `updatedAt`.
+  - Status names: `running`, `completed`, `no_match`, `failed`, `async_snapshot_pending`.
+- Vendor match document shape implemented:
+  - Collection: `sourcing-vendor-profile-matches`.
+  - Stable ID shape: `vendor_match_<24-char hash>`, derived from run ID, provider record/profile URL, and result index.
+  - Fields: `approvedEntityId`, `vendorRunId`, `provider`, `lookupType`, `inputUrlHash`, `selectedLinkedInUrl`, `selectedLinkedInUrlLineage`, `providerRecordId`, `providerProfileUrl`, `normalizedProfile`, `reviewStatus`, `reviewerId`, `reviewNote`, `reviewedAt`, `approvedEvidenceId`, `createdAt`, `updatedAt`.
+  - Review status names: `pending_review`, `approved`, `rejected`, `ignored`.
+  - Approved vendor evidence ID shape: `vendor_profile_match:<matchId>`.
+- Duplicate-spend behavior implemented:
+  - The selected lookup key is deterministic from approved entity ID, canonical LinkedIn URL, approved evidence IDs, approved source record IDs, and source paths.
+  - Existing non-failed runs for the same key return existing run/matches without provider call.
+  - Existing pending/completed/approved/rejected/ignored/no-match states are surfaced without another provider call.
+  - Existing `failed` runs are retryable manually; retry reuses the deterministic run ID and calls the provider again.
+  - Repository reservation is transactional in Firestore so a concurrent second request sees the existing `running` run instead of spending another provider call.
+- Decision behavior implemented:
+  - `approve` sets match `reviewStatus=approved`, writes `approvedEvidenceId=vendor_profile_match:<matchId>`, and sets/preserves approved entity `needsEnrichment=true`.
+  - If the approved entity was already `enriched`, approval changes `enrichmentStatus` to `needs_enrichment` without mutating the existing final profile.
+  - `reject` and `ignore` persist reviewer decision metadata and do not update the approved entity.
+- Verification evidence:
+  - `npm run build` passed.
+  - Focused command passed: `node --test lib/services/sourcing/application/extraction.test.js lib/services/sourcing/application/dedup.test.js lib/services/sourcing/application/service.test.js lib/services/sourcing/application/enrichment.test.js lib/services/sourcing/integrations/brightdata.test.js` -> `32` tests, `32` pass, `0` fail.
+  - Plan-required broad sourcing command passed: `find lib/services/sourcing -name '*.test.js' -print0 | xargs -0 node --test` -> `32` tests, `32` pass, `0` fail.
+  - `git diff --check` passed.
+- Behavior verified by tests:
+  - Missing approved entity is rejected.
+  - Inactive/merged approved entity is rejected.
+  - Approved entity with no eligible LinkedIn URL is rejected before provider call.
+  - Selected LinkedIn URL outside approved source/evidence lineage is rejected.
+  - Pending merge blocker raises the existing pending-merge error before provider call.
+  - Fake lookup success creates one vendor run and one pending vendor match.
+  - Re-running unchanged input returns the existing run/match without a second provider call.
+  - Rejected/ignored existing matches are remembered by unchanged query hash and do not spend another provider call.
+  - `no_match` results are remembered and reused without provider call.
+  - `failed` lookup can be retried manually and calls provider again.
+  - Approve/reject/ignore decisions persist expected status and review metadata.
+  - Approved vendor match sets/preserves `needsEnrichment=true` and changes an already-enriched approved entity to `needs_enrichment`.
+- Phase 6.5C conclusion:
+  - Preconditions are good for Phase 6.5D.
+  - Phase 6.5D should expose these service methods through small normalized HTTP routes and map `PendingMergeReviewBlockError` to `409`, validation errors to `422`, and provider errors to sanitized provider-status responses.
 
 ##### Phase 6.5D: API Routes And Error Contract
 

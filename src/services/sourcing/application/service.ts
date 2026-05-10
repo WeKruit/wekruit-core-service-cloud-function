@@ -10,7 +10,11 @@ import {
   extractEvidenceFromSourceRecord,
   stableHash,
 } from './extraction';
-import { isLinkedInProfileUrl } from './linkedin';
+import {
+  extractLinkedInProfileUrls,
+  isLinkedInProfileUrl,
+  normalizeLinkedInProfileUrl,
+} from './linkedin';
 import {
   buildEnrichmentEvidencePack,
   buildEvidencePackHash,
@@ -23,6 +27,13 @@ import {
   OpenAISourcingEnrichmentClient,
   type SourcingEnrichmentInferencePort,
 } from '../integrations/openai';
+import {
+  BrightDataLinkedInProvider,
+  FakeProfessionalProfileLookupProvider,
+  brightDataLinkedInProfilesDatasetId,
+  getBrightDataLinkedInProviderConfig,
+  type ProfessionalProfileLookupPort,
+} from '../integrations/brightdata';
 import type {
   ApprovedEntity,
   BatchUpsertSourceRecordsInput,
@@ -32,6 +43,7 @@ import type {
   CandidateEnrichmentRun,
   CandidateProfile,
   CreateEnrichmentReviewDecisionInput,
+  CreateVendorProfileMatchDecisionInput,
   SourcingCandidateDecision,
   SourcingIdentityLabel,
   SourcingReviewStatus,
@@ -42,6 +54,9 @@ import type {
   ReviewLabelRecord,
   SourceRecord,
   SourceRunRecord,
+  VendorEnrichmentRun,
+  VendorProfileMatch,
+  VendorProfileProvider,
 } from '../domain/records';
 import { SourcingRepository } from '../repositories/sourcingRepository';
 
@@ -101,6 +116,10 @@ function valuesFromEvidence(evidence: EvidenceRecord[], type: EvidenceRecord['ev
       .filter((entry) => entry.evidenceType === type)
       .map((entry) => entry.normalizedValue),
   );
+}
+
+function evidenceLikeIdForVendorMatch(matchId: string): string {
+  return `vendor_profile_match:${matchId}`;
 }
 
 const urlRegex = /https?:\/\/[^\s"'<>]+/gi;
@@ -247,6 +266,90 @@ function buildSourceRecordLinkGroups(record: SourceRecord): SourceRecordLinkGrou
     .filter((group) => group.urls.length > 0);
 }
 
+function collectLinkedInUrlsFromSourceRecord(record: SourceRecord): Array<{
+  url: string;
+  sourceRecordId: string;
+  sourcePath: string;
+}> {
+  const collected: Array<{ url: string; sourceRecordId: string; sourcePath: string }> = [];
+  const candidates: Array<{ path: string; value: unknown }> = [
+    { path: 'sourceUrl', value: record.sourceUrl },
+    { path: 'display', value: record.display },
+    { path: 'rawSummary', value: record.rawSummary },
+    { path: 'raw', value: record.raw },
+  ];
+
+  for (const candidate of candidates) {
+    for (const url of extractLinkedInProfileUrls(JSON.stringify(candidate.value ?? ''))) {
+      collected.push({
+        url,
+        sourceRecordId: record.id,
+        sourcePath: candidate.path,
+      });
+    }
+  }
+  return collected;
+}
+
+function mergeLinkedInLineage(input: {
+  evidence: EvidenceRecord[];
+  sourceRecords: SourceRecord[];
+}): EligibleLinkedInProfileUrl[] {
+  const byUrl = new Map<string, EligibleLinkedInProfileUrl>();
+  const add = (url: string, lineage: { sourceRecordId?: string; evidenceId?: string; sourcePath?: string }) => {
+    const canonicalUrl = normalizeLinkedInProfileUrl(url);
+    if (!canonicalUrl) {
+      return;
+    }
+    const existing = byUrl.get(canonicalUrl) ?? {
+      url: canonicalUrl,
+      sourceRecordIds: [],
+      evidenceIds: [],
+      sourcePaths: [],
+    };
+    byUrl.set(canonicalUrl, {
+      url: canonicalUrl,
+      sourceRecordIds: sortedUnique([
+        ...existing.sourceRecordIds,
+        ...(lineage.sourceRecordId ? [lineage.sourceRecordId] : []),
+      ]),
+      evidenceIds: sortedUnique([
+        ...existing.evidenceIds,
+        ...(lineage.evidenceId ? [lineage.evidenceId] : []),
+      ]),
+      sourcePaths: sortedUnique([
+        ...existing.sourcePaths,
+        ...(lineage.sourcePath ? [lineage.sourcePath] : []),
+      ]),
+    });
+  };
+
+  for (const evidence of input.evidence) {
+    if (
+      evidence.evidenceType === 'linkedin' ||
+      evidence.evidenceType === 'source_url' ||
+      evidence.evidenceType === 'homepage'
+    ) {
+      add(evidence.normalizedValue, {
+        sourceRecordId: evidence.sourceRecordId,
+        evidenceId: evidence.id,
+        sourcePath: evidence.extractedFrom.sourcePath,
+      });
+    }
+  }
+
+  for (const record of input.sourceRecords) {
+    for (const item of collectLinkedInUrlsFromSourceRecord(record)) {
+      add(item.url, {
+        sourceRecordId: item.sourceRecordId,
+        sourcePath: item.sourcePath,
+      });
+    }
+  }
+
+  return [...byUrl.values()].sort((left, right) => left.url.localeCompare(right.url));
+}
+
 const dedupStrengthRank: Record<DedupCandidate['strength'], number> = {
   weak: 0,
   medium: 1,
@@ -302,6 +405,16 @@ export type SourcingRepositoryPort = Pick<
   | 'listCandidateProfiles'
   | 'getCandidateProfile'
   | 'getCandidateProfileByApprovedEntityId'
+  | 'startVendorEnrichmentRun'
+  | 'getVendorEnrichmentRun'
+  | 'listVendorEnrichmentRunsForApprovedEntity'
+  | 'listVendorEnrichmentRunsByInputHash'
+  | 'updateVendorEnrichmentRun'
+  | 'upsertVendorProfileMatches'
+  | 'getVendorProfileMatch'
+  | 'listVendorProfileMatchesForApprovedEntity'
+  | 'listVendorProfileMatchesByInputHash'
+  | 'updateVendorProfileMatch'
 >;
 
 export type CandidateProfileListOptions = {
@@ -404,6 +517,26 @@ export type ApprovedEntityWithReviewState = ApprovedEntity & {
   sourceRecordSummaries: CandidateProfileSourceSummary[];
 };
 
+export type EligibleLinkedInProfileUrl = {
+  url: string;
+  sourceRecordIds: string[];
+  evidenceIds: string[];
+  sourcePaths: string[];
+};
+
+export type VendorProfileLookupState = {
+  approvedEntityId: string;
+  eligibleLinkedInUrls: EligibleLinkedInProfileUrl[];
+  runs: VendorEnrichmentRun[];
+  matches: VendorProfileMatch[];
+};
+
+export type VendorProfileLookupRunResult = VendorProfileLookupState & {
+  run: VendorEnrichmentRun;
+  matchesForRun: VendorProfileMatch[];
+  reusedExisting: boolean;
+};
+
 export type CandidateEnrichmentReviewItemWithEvidence = CandidateEnrichmentReviewItem & {
   sourceRecordSummaries: CandidateProfileSourceSummary[];
   evidence: EvidenceRecord[];
@@ -419,6 +552,24 @@ export class PendingMergeReviewBlockError extends Error {
     const label = blockers.length === 1 ? 'merge review' : 'merge reviews';
     super(`Resolve ${blockers.length} pending ${label} before generating enrichment.`);
     this.name = 'PendingMergeReviewBlockError';
+  }
+}
+
+export class VendorProfileLookupValidationError extends Error {
+  readonly code = 'VENDOR_PROFILE_LOOKUP_VALIDATION';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'VendorProfileLookupValidationError';
+  }
+}
+
+export class VendorProfileLookupProviderError extends Error {
+  readonly code = 'VENDOR_PROFILE_LOOKUP_PROVIDER';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'VendorProfileLookupProviderError';
   }
 }
 
@@ -559,6 +710,27 @@ function isSingletonCandidate(candidate: DedupCandidate): boolean {
 
 function lowerSet(values: string[]): Set<string> {
   return new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean));
+}
+
+function vendorLookupLineageHash(lineage: EligibleLinkedInProfileUrl): string {
+  return stableHash(JSON.stringify({
+    url: lineage.url,
+    evidenceIds: lineage.evidenceIds,
+    sourceRecordIds: lineage.sourceRecordIds,
+    sourcePaths: lineage.sourcePaths,
+  }));
+}
+
+function vendorInputUrlHash(approvedEntityId: string, lineage: EligibleLinkedInProfileUrl): string {
+  return stableHash(`vendor-linkedin:${approvedEntityId}:${vendorLookupLineageHash(lineage)}`);
+}
+
+function vendorRunId(approvedEntityId: string, inputUrlHash: string): string {
+  return `vendor_run_${stableHash(`brightdata:${approvedEntityId}:${inputUrlHash}`).slice(0, 24)}`;
+}
+
+function vendorMatchId(runId: string, providerRecordId: string | null, providerProfileUrl: string | null, index: number): string {
+  return `vendor_match_${stableHash(`${runId}:${providerRecordId ?? ''}:${providerProfileUrl ?? ''}:${index}`).slice(0, 24)}`;
 }
 
 function profileMatchesText(profile: CandidateProfile, query: string): boolean {
@@ -737,6 +909,7 @@ export class SourcingService {
   constructor(
     private readonly repository: SourcingRepositoryPort = new SourcingRepository(),
     private readonly enrichmentInference?: SourcingEnrichmentInferencePort,
+    private readonly professionalProfileLookup?: ProfessionalProfileLookupPort,
   ) {}
 
   async createSourceRun(input: CreateSourceRunInput): Promise<SourceRunRecord> {
@@ -957,6 +1130,210 @@ export class SourcingService {
           .map((record) => summarizeSourceRecord(record)),
       };
     });
+  }
+
+  async listVendorProfileMatchesForApprovedEntity(approvedEntityId: string): Promise<VendorProfileLookupState> {
+    const approvedEntity = await this.repository.getApprovedEntity(approvedEntityId);
+    if (!approvedEntity) {
+      throw new VendorProfileLookupValidationError(`Approved entity "${approvedEntityId}" was not found.`);
+    }
+    return this.loadVendorProfileLookupState(approvedEntity);
+  }
+
+  async runProfessionalProfileLookupForApprovedEntity(
+    approvedEntityId: string,
+    selectedLinkedInUrl: string,
+  ): Promise<VendorProfileLookupRunResult> {
+    const approvedEntity = await this.repository.getApprovedEntity(approvedEntityId);
+    if (!approvedEntity) {
+      throw new VendorProfileLookupValidationError(`Approved entity "${approvedEntityId}" was not found.`);
+    }
+    if (!isUpdatableCandidateEntity(approvedEntity)) {
+      throw new VendorProfileLookupValidationError(`Approved entity "${approvedEntityId}" is not active.`);
+    }
+
+    const pendingMergeBlockers = findPendingMergeBlockersForEntity(
+      approvedEntity,
+      await this.repository.listDedupCandidates('pending_review'),
+    );
+    if (pendingMergeBlockers.length > 0) {
+      throw new PendingMergeReviewBlockError(approvedEntity.id, pendingMergeBlockers);
+    }
+
+    const canonicalUrl = normalizeLinkedInProfileUrl(selectedLinkedInUrl);
+    if (!canonicalUrl) {
+      throw new VendorProfileLookupValidationError('Bright Data lookup requires a linkedin.com/in/... profile URL.');
+    }
+
+    const state = await this.loadVendorProfileLookupState(approvedEntity);
+    const selectedLineage = state.eligibleLinkedInUrls.find((entry) => entry.url === canonicalUrl);
+    if (!selectedLineage) {
+      throw new VendorProfileLookupValidationError(
+        state.eligibleLinkedInUrls.length === 0
+          ? `Approved entity "${approvedEntityId}" has no eligible LinkedIn profile URL in approved source/evidence lineage.`
+          : 'Selected LinkedIn URL is not present in this approved entity source/evidence lineage.',
+      );
+    }
+
+    const inputUrlHash = vendorInputUrlHash(approvedEntity.id, selectedLineage);
+    const existingReusableRun = state.runs
+      .filter((run) => run.inputUrlHash === inputUrlHash && run.status !== 'failed')
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+    if (existingReusableRun) {
+      const matchesForRun = state.matches.filter((match) => match.vendorRunId === existingReusableRun.id);
+      return {
+        ...state,
+        run: existingReusableRun,
+        matchesForRun,
+        reusedExisting: true,
+      };
+    }
+
+    const { lookup, provider, datasetId } = this.resolveProfessionalProfileLookup();
+    const now = new Date().toISOString();
+    const run: VendorEnrichmentRun = {
+      id: vendorRunId(approvedEntity.id, inputUrlHash),
+      approvedEntityId: approvedEntity.id,
+      provider,
+      lookupType: 'linkedin_profile_by_url',
+      inputUrlHash,
+      selectedLinkedInUrl: canonicalUrl,
+      selectedLinkedInUrlLineage: selectedLineage,
+      datasetId,
+      status: 'running',
+      snapshotId: null,
+      matchIds: [],
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const reserved = await this.repository.startVendorEnrichmentRun(run);
+    if (!reserved.shouldCallProvider) {
+      const matchesForRun = await this.repository.listVendorProfileMatchesByInputHash(
+        approvedEntity.id,
+        reserved.run.inputUrlHash,
+      );
+      return {
+        ...(await this.loadVendorProfileLookupState(approvedEntity)),
+        run: reserved.run,
+        matchesForRun: matchesForRun.filter((match) => match.vendorRunId === reserved.run.id),
+        reusedExisting: true,
+      };
+    }
+
+    try {
+      const result = await lookup.lookupLinkedInProfile({ linkedinUrl: canonicalUrl });
+      const completedAt = new Date().toISOString();
+      const matches: VendorProfileMatch[] = result.matches.map((match, index) => {
+        const id = vendorMatchId(reserved.run.id, match.providerRecordId, match.providerProfileUrl, index);
+        return {
+          id,
+          approvedEntityId: approvedEntity.id,
+          vendorRunId: reserved.run.id,
+          provider: result.provider,
+          lookupType: result.lookupType,
+          inputUrlHash,
+          selectedLinkedInUrl: canonicalUrl,
+          selectedLinkedInUrlLineage: selectedLineage,
+          providerRecordId: match.providerRecordId,
+          providerProfileUrl: match.providerProfileUrl,
+          normalizedProfile: match.normalizedProfile,
+          reviewStatus: 'pending_review',
+          reviewerId: null,
+          reviewNote: '',
+          reviewedAt: null,
+          approvedEvidenceId: null,
+          createdAt: completedAt,
+          updatedAt: completedAt,
+        };
+      });
+      const persistedMatches = await this.repository.upsertVendorProfileMatches(matches);
+      const updatedRun: VendorEnrichmentRun = {
+        ...reserved.run,
+        provider: result.provider,
+        lookupType: result.lookupType,
+        datasetId: result.datasetId,
+        status: result.status,
+        snapshotId: result.snapshotId,
+        matchIds: persistedMatches.map((match) => match.id),
+        error: null,
+        updatedAt: completedAt,
+      };
+      await this.repository.updateVendorEnrichmentRun(updatedRun);
+
+      return {
+        ...(await this.loadVendorProfileLookupState(approvedEntity)),
+        run: updatedRun,
+        matchesForRun: persistedMatches,
+        reusedExisting: false,
+      };
+    } catch (error) {
+      const failedAt = new Date().toISOString();
+      await this.repository.updateVendorEnrichmentRun({
+        ...reserved.run,
+        status: 'failed',
+        error: this.sanitizedProviderError(error),
+        updatedAt: failedAt,
+      });
+      throw new VendorProfileLookupProviderError(this.sanitizedProviderError(error));
+    }
+  }
+
+  async decideVendorProfileMatch(
+    matchId: string,
+    input: CreateVendorProfileMatchDecisionInput,
+  ): Promise<{
+    match: VendorProfileMatch;
+    approvedEntity: ApprovedEntity | null;
+  }> {
+    const match = await this.repository.getVendorProfileMatch(matchId);
+    if (!match) {
+      throw new VendorProfileLookupValidationError(`Vendor profile match "${matchId}" was not found.`);
+    }
+    const status = input.action === 'ignore' ? 'ignored' : input.action === 'reject' ? 'rejected' : 'approved';
+    if (match.reviewStatus !== 'pending_review') {
+      if (match.reviewStatus === status) {
+        return {
+          match,
+          approvedEntity: await this.repository.getApprovedEntity(match.approvedEntityId),
+        };
+      }
+      throw new VendorProfileLookupValidationError(`Vendor profile match "${matchId}" is already ${match.reviewStatus}.`);
+    }
+
+    const now = new Date().toISOString();
+    const updatedMatch: VendorProfileMatch = {
+      ...match,
+      reviewStatus: status,
+      reviewerId: input.reviewerId,
+      reviewNote: input.notes,
+      reviewedAt: now,
+      approvedEvidenceId: status === 'approved' ? evidenceLikeIdForVendorMatch(match.id) : null,
+      updatedAt: now,
+    };
+    await this.repository.updateVendorProfileMatch(updatedMatch);
+
+    const approvedEntity = await this.repository.getApprovedEntity(match.approvedEntityId);
+    if (approvedEntity && status === 'approved') {
+      const nextEntity: ApprovedEntity = {
+        ...approvedEntity,
+        needsEnrichment: true,
+        enrichmentStatus: approvedEntity.enrichmentStatus === 'enriched'
+          ? 'needs_enrichment'
+          : approvedEntity.enrichmentStatus,
+        updatedAt: now,
+      };
+      await this.repository.upsertApprovedEntity(nextEntity);
+      return {
+        match: updatedMatch,
+        approvedEntity: nextEntity,
+      };
+    }
+
+    return {
+      match: updatedMatch,
+      approvedEntity,
+    };
   }
 
   async listCandidateProfiles(options: CandidateProfileListOptions = {}): Promise<CandidateProfile[]> {
@@ -1271,6 +1648,64 @@ export class SourcingService {
       inference: new OpenAISourcingEnrichmentClient(config),
       provider: 'openai',
       model: config.model,
+    };
+  }
+
+  private resolveProfessionalProfileLookup(): {
+    lookup: ProfessionalProfileLookupPort;
+    provider: VendorProfileProvider;
+    datasetId: string;
+  } {
+    if (this.professionalProfileLookup) {
+      return {
+        lookup: this.professionalProfileLookup,
+        provider: 'fake',
+        datasetId: 'fake-linkedin-profiles',
+      };
+    }
+    if (
+      process.env.SOURCING_PROFESSIONAL_PROFILE_PROVIDER === 'fake' ||
+      (process.env.FUNCTIONS_EMULATOR === 'true' && process.env.SOURCING_PROFESSIONAL_PROFILE_PROVIDER !== 'brightdata')
+    ) {
+      return {
+        lookup: new FakeProfessionalProfileLookupProvider(),
+        provider: 'fake',
+        datasetId: 'fake-linkedin-profiles',
+      };
+    }
+    const config = getBrightDataLinkedInProviderConfig();
+    return {
+      lookup: new BrightDataLinkedInProvider(config),
+      provider: 'brightdata',
+      datasetId: config.datasetId ?? brightDataLinkedInProfilesDatasetId,
+    };
+  }
+
+  private sanitizedProviderError(error: unknown): string {
+    if (!(error instanceof Error)) {
+      return 'Professional profile lookup failed.';
+    }
+    const redacted = error.message
+      .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/gi, 'Bearer [redacted]')
+      .replace(/BRIGHTDATA_API_KEY=[^\s]+/g, 'BRIGHTDATA_API_KEY=[redacted]');
+    return redacted || 'Professional profile lookup failed.';
+  }
+
+  private async loadVendorProfileLookupState(approvedEntity: ApprovedEntity): Promise<VendorProfileLookupState> {
+    const [sourceRecords, evidence, runs, matches] = await Promise.all([
+      this.repository.getSourceRecordsByIds(approvedEntity.sourceRecordIds),
+      this.repository.getEvidenceByIds(approvedEntity.evidenceIds),
+      this.repository.listVendorEnrichmentRunsForApprovedEntity(approvedEntity.id),
+      this.repository.listVendorProfileMatchesForApprovedEntity(approvedEntity.id),
+    ]);
+    return {
+      approvedEntityId: approvedEntity.id,
+      eligibleLinkedInUrls: mergeLinkedInLineage({
+        sourceRecords,
+        evidence,
+      }),
+      runs,
+      matches,
     };
   }
 

@@ -11,6 +11,8 @@ import type {
   ReviewLabelRecord,
   SourceRecord,
   SourceRunRecord,
+  VendorEnrichmentRun,
+  VendorProfileMatch,
 } from '../domain/records';
 
 function uniqueById<T extends { id: string }>(records: T[]): T[] {
@@ -36,6 +38,8 @@ export class SourcingRepository {
   private readonly enrichmentRunCollection = this.db.collection(sourcingCollections.enrichmentRuns);
   private readonly enrichmentReviewItemCollection = this.db.collection(sourcingCollections.enrichmentReviewItems);
   private readonly candidateProfileCollection = this.db.collection(sourcingCollections.candidateProfiles);
+  private readonly vendorEnrichmentRunCollection = this.db.collection(sourcingCollections.vendorEnrichmentRuns);
+  private readonly vendorProfileMatchCollection = this.db.collection(sourcingCollections.vendorProfileMatches);
 
   async createSourceRun(run: SourceRunRecord): Promise<SourceRunRecord> {
     await this.sourceRunCollection.doc(run.id).set(run);
@@ -350,5 +354,122 @@ export class SourcingRepository {
       .get();
     const doc = snapshot.docs[0];
     return doc ? (doc.data() as CandidateProfile) : null;
+  }
+
+  async startVendorEnrichmentRun(run: VendorEnrichmentRun): Promise<{
+    run: VendorEnrichmentRun;
+    shouldCallProvider: boolean;
+  }> {
+    const ref = this.vendorEnrichmentRunCollection.doc(run.id);
+    return this.db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (snapshot.exists) {
+        const existing = snapshot.data() as VendorEnrichmentRun;
+        if (existing.status !== 'failed') {
+          return {
+            run: existing,
+            shouldCallProvider: false,
+          };
+        }
+        const retried: VendorEnrichmentRun = {
+          ...existing,
+          status: 'running',
+          snapshotId: null,
+          matchIds: [],
+          error: null,
+          updatedAt: run.updatedAt,
+        };
+        transaction.set(ref, retried);
+        return {
+          run: retried,
+          shouldCallProvider: true,
+        };
+      }
+      transaction.set(ref, run);
+      return {
+        run,
+        shouldCallProvider: true,
+      };
+    });
+  }
+
+  async getVendorEnrichmentRun(id: string): Promise<VendorEnrichmentRun | null> {
+    const snapshot = await this.vendorEnrichmentRunCollection.doc(id).get();
+    return snapshot.exists ? (snapshot.data() as VendorEnrichmentRun) : null;
+  }
+
+  async listVendorEnrichmentRunsForApprovedEntity(approvedEntityId: string): Promise<VendorEnrichmentRun[]> {
+    const snapshot = await this.vendorEnrichmentRunCollection
+      .where('approvedEntityId', '==', approvedEntityId)
+      .limit(100)
+      .get();
+    return snapshot.docs
+      .map((doc) => doc.data() as VendorEnrichmentRun)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async listVendorEnrichmentRunsByInputHash(
+    approvedEntityId: string,
+    inputUrlHash: string,
+  ): Promise<VendorEnrichmentRun[]> {
+    const snapshot = await this.vendorEnrichmentRunCollection
+      .where('approvedEntityId', '==', approvedEntityId)
+      .where('inputUrlHash', '==', inputUrlHash)
+      .limit(20)
+      .get();
+    return snapshot.docs
+      .map((doc) => doc.data() as VendorEnrichmentRun)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async updateVendorEnrichmentRun(run: VendorEnrichmentRun): Promise<VendorEnrichmentRun> {
+    await this.vendorEnrichmentRunCollection.doc(run.id).set(run);
+    return run;
+  }
+
+  async upsertVendorProfileMatches(matches: VendorProfileMatch[]): Promise<VendorProfileMatch[]> {
+    if (matches.length === 0) {
+      return [];
+    }
+    const batch = this.db.batch();
+    for (const match of matches) {
+      batch.set(this.vendorProfileMatchCollection.doc(match.id), match);
+    }
+    await batch.commit();
+    return matches;
+  }
+
+  async getVendorProfileMatch(id: string): Promise<VendorProfileMatch | null> {
+    const snapshot = await this.vendorProfileMatchCollection.doc(id).get();
+    return snapshot.exists ? (snapshot.data() as VendorProfileMatch) : null;
+  }
+
+  async listVendorProfileMatchesForApprovedEntity(approvedEntityId: string): Promise<VendorProfileMatch[]> {
+    const snapshot = await this.vendorProfileMatchCollection
+      .where('approvedEntityId', '==', approvedEntityId)
+      .limit(100)
+      .get();
+    return snapshot.docs
+      .map((doc) => doc.data() as VendorProfileMatch)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async listVendorProfileMatchesByInputHash(
+    approvedEntityId: string,
+    inputUrlHash: string,
+  ): Promise<VendorProfileMatch[]> {
+    const snapshot = await this.vendorProfileMatchCollection
+      .where('approvedEntityId', '==', approvedEntityId)
+      .where('inputUrlHash', '==', inputUrlHash)
+      .limit(50)
+      .get();
+    return snapshot.docs
+      .map((doc) => doc.data() as VendorProfileMatch)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async updateVendorProfileMatch(match: VendorProfileMatch): Promise<VendorProfileMatch> {
+    await this.vendorProfileMatchCollection.doc(match.id).set(match);
+    return match;
   }
 }

@@ -23,4 +23,6 @@ export const sourcingCollections = {
   enrichmentRuns: 'sourcing-enrichment-runs',
   enrichmentReviewItems: 'sourcing-enrichment-review-items',
   candidateProfiles: 'sourcing-candidate-profiles',
+  vendorEnrichmentRuns: 'sourcing-vendor-enrichment-runs',
+  vendorProfileMatches: 'sourcing-vendor-profile-matches',
 } as const;

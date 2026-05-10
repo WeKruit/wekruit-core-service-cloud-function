@@ -546,6 +546,12 @@ export const createEnrichmentReviewDecisionSchema = z.object({
   reviewedDraft: candidateEnrichmentDraftSchema.optional(),
 });
 
+export const createVendorProfileMatchDecisionSchema = z.object({
+  action: z.enum(['approve', 'reject', 'ignore']),
+  reviewerId: z.string().trim().min(1).default('manual-reviewer'),
+  notes: z.string().trim().default(''),
+});
+
 export type SourcingEntityType = z.infer<typeof sourcingEntityTypeSchema>;
 export type SourcingEvidenceType = z.infer<typeof sourcingEvidenceTypeSchema>;
 export type SourcingEvidenceQuality = z.infer<typeof sourcingEvidenceQualitySchema>;
@@ -585,3 +591,4 @@ export type VendorProfileMatch = z.infer<typeof vendorProfileMatchSchema>;
 export type CandidateEnrichmentReviewItem = z.infer<typeof candidateEnrichmentReviewItemSchema>;
 export type CandidateProfile = z.infer<typeof candidateProfileSchema>;
 export type CreateEnrichmentReviewDecisionInput = z.infer<typeof createEnrichmentReviewDecisionSchema>;
+export type CreateVendorProfileMatchDecisionInput = z.infer<typeof createVendorProfileMatchDecisionSchema>;
