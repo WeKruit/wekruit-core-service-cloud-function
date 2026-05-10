@@ -90,7 +90,8 @@ This is the current single source of truth after the successful Phase 3.5 live s
   - Firebase CLI access is expected to be sufficient to set/confirm Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` before deployed live lookup verification. If the user greenlights implementation, pipe the local `.env` value into `firebase functions:secrets:set BRIGHTDATA_API_KEY --project wekruit-dev-env --data-file -` without printing the value or placing it directly in the shell command.
   - Confirm the Bright Data account has access to the LinkedIn Scraper API / Profiles scraper.
   - Bright Data v1 data-use decision is narrowed and confirmed for implementation planning: use Bright Data only to gather professional information for enrichment evidence/context. Do not use it for broad sourcing, contact-data acquisition, automatic matching decisions, or identity/dedup approval.
-  - First live Bright Data test policy is confirmed: after local fake/provider tests pass and the staging deploy is complete, create an isolated synthetic sourcing run/job for a single fake test candidate, `Spencer Wang`, with fake non-sensitive source context and reviewer-provided LinkedIn URL `https://www.linkedin.com/in/spencerwang1`. Approve only that synthetic candidate, then run exactly one live Bright Data lookup from the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`.
+  - First live Bright Data test policy is confirmed: after local fake/provider tests pass and the staging deploy is complete, create an isolated synthetic sourcing run/job for a single fake test candidate, `Spencer Wang`, with fake non-sensitive source context and LinkedIn URL `https://www.linkedin.com/in/spencerwang1` embedded in that synthetic source record/source evidence. Approve only that synthetic candidate, then run exactly one live Bright Data lookup from the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`.
+  - Bright Data lookup must be hard-gated on eligible LinkedIn source/evidence lineage. If an approved candidate has no LinkedIn profile URL in its approved source/evidence records or source summaries, the dashboard must not show an active lookup button and the backend must reject lookup attempts. V1 must not provide a freeform/reviewer-supplied URL input or discover LinkedIn profiles from name/company fields.
   - Read-only live check on 2026-05-09 confirmed `https://wekruit-sourcing.web.app/api/sourcing/health` is healthy and the deployed Approved tab is reachable, but the live `approved-entities` endpoint currently returns `0` approved entities. This is acceptable because the live Bright Data test should create and isolate its own synthetic approved candidate instead of touching the TreeHacks dataset.
   - Manual-only v1 mode from the Approved detail panel is confirmed.
   - Raw vendor payload retention policy is confirmed for v1: store normalized summaries only, with no full raw Bright Data payload in hot Firestore docs.
@@ -1782,6 +1783,7 @@ This is a vendor evidence layer, not a new raw source importer and not a replace
 - Do not use Bright Data to import raw candidate pools before identity review.
 - Do not use Bright Data as the source of truth for candidate identity.
 - Do not use Bright Data as a blind LinkedIn discovery/search step in v1. The first implementation should require a known LinkedIn URL.
+- Do not show or enable a Bright Data lookup action for approved candidates that have no eligible LinkedIn profile URL in their approved source/evidence lineage.
 - Do not write Bright Data output directly into final candidate profiles without reviewer approval.
 - Do not store Bright Data API keys in Firestore or dashboard-visible documents.
 - Do not store the full raw vendor payload in hot dashboard documents by default.
@@ -1823,6 +1825,7 @@ flowchart LR
 - [ ] Add Firestore storage for vendor lookup runs and candidate professional-profile matches.
 - [ ] Add a manual dashboard action from the Approved detail panel after merge blockers are clear.
 - [ ] Show all known LinkedIn URLs found on the approved candidate's source/evidence records and require the reviewer to choose which URL(s) to fetch.
+- [ ] Hide or disable any Bright Data fetch action when the approved candidate has no eligible LinkedIn URL in its source/evidence lineage. Do not provide a freeform URL entry box in v1.
 - [ ] Treat LinkedIn profile URLs as first-class evidence for display, reviewer selection, Bright Data query seeds, and lineage, but not as strong dedup evidence in v1.
 - [ ] Use synchronous Bright Data `/scrape` for the first manual single-candidate path. Support the returned `snapshot_id` case if Bright Data automatically switches to async.
 - [ ] Normalize the returned LinkedIn profile into a compact professional summary using only the approved v1 field allowlist: profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, projects/publications if present, and source lineage.
@@ -1853,7 +1856,7 @@ Rejected or ignored matches should remain tied to the selected LinkedIn URL/quer
 - [x] Confirm which fields may be stored/displayed: v1 allows profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, and projects/publications if present. Contact/private/sensitive fields are excluded unless explicitly approved later.
 - [x] Confirm first implementation mode: manual-only from the Approved detail panel.
 - [ ] Confirm credit/budget expectations.
-- [x] Confirm first live test policy: after local fake/provider tests pass and staging deploy is complete, create an isolated synthetic source run/job for a single fake test candidate, `Spencer Wang`, with LinkedIn URL `https://www.linkedin.com/in/spencerwang1`; approve only that synthetic candidate; then run exactly one live lookup through the active staging dashboard `https://wekruit-sourcing.web.app` / Firebase project `wekruit-dev-env`.
+- [x] Confirm first live test policy: after local fake/provider tests pass and staging deploy is complete, create an isolated synthetic source run/job for a single fake test candidate, `Spencer Wang`, with LinkedIn URL `https://www.linkedin.com/in/spencerwang1` embedded in the synthetic source record/source evidence; approve only that synthetic candidate; then run exactly one live lookup through the active staging dashboard `https://wekruit-sourcing.web.app` / Firebase project `wekruit-dev-env`.
 - [x] Confirm raw payload retention policy: v1 stores normalized summaries only and does not store the full raw Bright Data payload in hot Firestore docs.
 
 ### Bright Data Decision Log
@@ -1870,8 +1873,11 @@ This section should be updated after each planning discussion so implementation 
    - Deferred: automatic lookup on candidate approval, batch lookup, scheduled lookup, and source-run-wide lookup are out of scope until the manual flow is proven.
 
 3. **What should be used as the Bright Data input?**
-   - Answer recorded 2026-05-09: v1 Bright Data lookup is LinkedIn-URL-only.
-   - Allowed inputs: LinkedIn profile URLs that already exist in Devpost/GitHub/research source evidence after candidate approval, plus LinkedIn profile URLs explicitly selected or supplied by a reviewer in the approved-candidate context.
+   - Answer recorded 2026-05-09 and tightened 2026-05-09 after final planning check: v1 Bright Data lookup is LinkedIn-URL-only and source/evidence-lineage-only.
+   - Allowed inputs: LinkedIn profile URLs that already exist in the approved candidate's source/evidence lineage, including approved source records, extracted evidence, and source-record summaries tied to that approved entity.
+   - Disallowed inputs: arbitrary/freeform LinkedIn URLs supplied in the dashboard, reviewer-entered URLs that are not already present in approved source/evidence lineage, and any name/company/school/GitHub/Devpost-derived discovery query.
+   - UI gate: if an approved candidate has no eligible LinkedIn profile URL in its evidence/source lineage, the Approved detail panel must not show an active Bright Data fetch button. It may show a neutral empty state explaining that no LinkedIn URL is available.
+   - Backend gate: the lookup API must reject missing URLs, non-LinkedIn-profile URLs, and LinkedIn URLs that are not present in the approved entity's source/evidence lineage.
    - Boundary: name/company/GitHub/Devpost fields can help a reviewer decide whether the returned profile belongs to the candidate, but v1 must not use Bright Data for broad LinkedIn discovery from name, company, school, GitHub, Devpost, or other partial attributes.
 
 4. **Should Bright Data lookup be blocked by unresolved pending merge candidates?**
@@ -1913,12 +1919,12 @@ This section should be updated after each planning discussion so implementation 
 10. **Should LinkedIn become a first-class evidence type for display/query seeds but not strong dedup evidence?**
    - Answer recorded 2026-05-09: yes. LinkedIn profile URLs should be first-class evidence for display, reviewer selection, Bright Data lookup inputs, and downstream lineage.
    - Dedup boundary: LinkedIn profile URLs must not count as strong dedup evidence or trigger automatic strong identity merges in v1 unless the team explicitly approves that policy later.
-   - Required behavior: reviewers should be able to inspect and choose LinkedIn URLs as Bright Data inputs, and any approved vendor evidence should preserve LinkedIn/source lineage.
+   - Required behavior: reviewers should be able to inspect and choose eligible LinkedIn URLs that already came from approved source/evidence lineage as Bright Data inputs, and any approved vendor evidence should preserve LinkedIn/source lineage. V1 must not let reviewers paste arbitrary LinkedIn URLs into the lookup flow.
    - Reason: LinkedIn URLs are useful context and vendor lookup inputs, but treating them as strong identity evidence would change merge semantics and compliance/product policy beyond the current Bright Data enrichment scope.
 
 11. **What should the first live Bright Data test candidate/environment be?**
    - Answer recorded 2026-05-09 and refined after user clarification: after local fake/provider tests pass and the staging deploy is complete, run exactly one live staging lookup through the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`.
-   - Candidate policy: create an isolated synthetic source run/job containing one fake test candidate, `Spencer Wang`, with fake non-sensitive source context and reviewer-provided LinkedIn URL `https://www.linkedin.com/in/spencerwang1`. Approve only this synthetic singleton candidate, then manually select that LinkedIn URL in the Approved detail panel for the one live Bright Data lookup.
+   - Candidate policy: create an isolated synthetic source run/job containing one fake test candidate, `Spencer Wang`, with fake non-sensitive source context and LinkedIn URL `https://www.linkedin.com/in/spencerwang1` embedded in the synthetic source record/source evidence. Approve only this synthetic singleton candidate, then manually select that eligible LinkedIn URL in the Approved detail panel for the one live Bright Data lookup.
    - Verification policy refined after user clarification: approving the synthetic Spencer singleton through the review-label API is acceptable because candidate approval is already proven. The new Bright Data lookup button must be clicked through the deployed dashboard, and the live smoke should continue through Bright Data match approval, enrichment generation, enrichment approval, and final profile verification.
    - Isolation boundary: do not approve, merge, enrich, or run Bright Data lookup against the existing TreeHacks staging dataset as part of the Bright Data smoke test.
    - Boundary: do not run live Bright Data calls during planning or before local fake/provider verification passes.
@@ -2076,6 +2082,7 @@ Scope:
 - Add service method to run a manual lookup for an approved entity and selected LinkedIn URL.
 - Enforce pending-merge guard before lookup.
 - Enforce LinkedIn-URL-only input.
+- Enforce that the selected LinkedIn URL belongs to the approved entity's eligible source/evidence lineage.
 - Enforce query hash duplicate-spend guard.
 - Store lookup runs and normalized matches only.
 - Add service method to approve, reject, or ignore a vendor match.
@@ -2086,6 +2093,8 @@ Verification:
 - Unit tests cover missing approved entity.
 - Unit tests cover inactive/merged approved entity.
 - Unit tests cover missing LinkedIn URL.
+- Unit tests cover selected LinkedIn URL not present in approved source/evidence lineage.
+- Unit tests cover approved candidates with no eligible LinkedIn URL cannot start lookup.
 - Unit tests cover pending merge blocker.
 - Unit tests cover fake lookup success.
 - Unit tests cover duplicate rejected/ignored query hash behavior.
@@ -2107,7 +2116,7 @@ Scope:
 - Add POST route to run Bright Data lookup for an approved entity with selected LinkedIn URL.
 - Add POST route to decide a vendor profile match.
 - Return `409` with the existing pending-merge error shape when lookup is blocked by merge review.
-- Return `422` for validation errors such as missing/invalid LinkedIn URL.
+- Return `422` for validation errors such as missing URL, invalid non-LinkedIn profile URL, or LinkedIn URL not present in the approved entity's source/evidence lineage.
 - Keep route payloads small and normalized.
 
 Recommended route shape:
@@ -2156,10 +2165,12 @@ Plan update required before Phase 6.5F:
 Scope:
 
 - Load vendor matches for approved entities.
-- Show known LinkedIn URLs from approved entity evidence/source summaries.
+- Show known eligible LinkedIn URLs from approved entity evidence/source summaries.
 - Add a single manual fetch action in the Approved detail panel.
 - Disable fetch when pending merge blockers exist.
 - Disable fetch when no LinkedIn URL is selected.
+- Do not render an active Bright Data fetch button for candidates with no eligible LinkedIn URL in approved source/evidence lineage.
+- Do not provide a freeform LinkedIn URL entry field in v1.
 - Show lookup run/match states: not checked, blocked, pending review, approved, rejected, ignored, failed/no match.
 - Show normalized allowed fields only.
 - Add approve/reject/ignore controls for pending vendor matches.
@@ -2173,6 +2184,7 @@ Verification:
 - Browser/Ruflo verifies Approved tab:
   - LinkedIn URLs render and are clickable/selectable.
   - Fetch button is disabled with pending merge blockers.
+  - Candidate without a LinkedIn URL shows no usable Bright Data lookup action.
   - Fake lookup creates a pending vendor match card.
   - Approve/reject/ignore controls update card state.
   - Approved vendor match makes the candidate need enrichment without silently changing final profile data.
@@ -2189,6 +2201,7 @@ Scope:
 
 - Use local emulator only.
 - Create or upload a tiny controlled candidate with a LinkedIn URL.
+- Create or seed a second tiny controlled candidate without a LinkedIn URL for the negative UI/backend gate check.
 - Approve identity/relevance locally.
 - Run fake Bright Data lookup locally.
 - Approve vendor match locally.
@@ -2201,6 +2214,7 @@ Verification:
 - Focused sourcing tests pass.
 - `npm run build` passes.
 - Local browser/Ruflo walk-through passes from Approved to Enrichment to Profiles.
+- Local browser/Ruflo verifies the no-LinkedIn candidate has no active Bright Data lookup action, and backend tests verify lookup is rejected.
 - No live Bright Data call has happened.
 
 Plan update required before Phase 6.5H:
@@ -2246,14 +2260,14 @@ Scope:
   - Suggested run ID: `brightdata-live-smoke-spencer-<timestamp>`.
   - Suggested source/domain: source `manual_test`, domain `vendor_smoke_test`.
   - Candidate display name: `Spencer Wang`.
-  - Candidate LinkedIn URL: `https://www.linkedin.com/in/spencerwang1`.
+  - Candidate LinkedIn URL: `https://www.linkedin.com/in/spencerwang1`, intentionally embedded in the synthetic source record/source evidence so it is eligible for Bright Data lookup.
   - Use fake non-sensitive supporting info only, such as test institution/company/project labels. Do not add real private/contact data.
 - Prefer the existing sourcing API/source-record ingestion path to create the synthetic run and source record, so the test follows the same `source record -> dedup candidate -> review -> approved entity` lifecycle as real data.
 - Approve only the synthetic Spencer singleton candidate through the review-label API. This is acceptable because the core candidate approval mechanism is already proven and is not the new surface under test.
 - Verify the new Bright Data flow through the deployed dashboard, not by directly calling the Bright Data API route:
   - Open `https://wekruit-sourcing.web.app/#approved` with Browser/Ruflo.
   - Select the approved synthetic Spencer candidate.
-  - Manually select the Spencer LinkedIn URL in the Approved detail panel.
+  - Manually select the Spencer LinkedIn URL that is visible from the candidate's source/evidence lineage in the Approved detail panel.
   - Click the Bright Data lookup/fetch button in the dashboard exactly once.
   - Review the normalized Bright Data result card in the dashboard.
   - Approve the Bright Data match from the dashboard so the UI decision flow is verified.
@@ -2295,6 +2309,7 @@ Verification:
 - Lookup run and vendor match documents are created in Firestore.
 - No raw vendor payload is stored in hot Firestore docs.
 - Bright Data lookup was triggered by clicking the deployed dashboard button, not by direct API call.
+- The deployed dashboard only exposed the Bright Data lookup action because the Spencer LinkedIn URL was present in source/evidence lineage.
 - Bright Data reviewer decision is persisted after dashboard approval.
 - Re-running unchanged rejected/ignored input does not spend another lookup.
 - Approved vendor evidence appears in the next enrichment evidence pack.
