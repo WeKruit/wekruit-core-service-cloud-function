@@ -2120,6 +2120,38 @@ Current preflight findings from 2026-05-09:
 - Live Approved tab is reachable with Ruflo.
 - Live approved entities currently total `0`; the Bright Data live smoke will create its own isolated synthetic `Spencer Wang` candidate instead of touching TreeHacks data.
 
+Phase 6.5A execution findings from 2026-05-09 23:38 PDT:
+
+- Phase status: completed after user greenlight. No code implementation, Firestore mutation, deployment, or Bright Data call was performed.
+- Repo safety:
+  - `wekruit-core-service-cloud-function`: `git status --short --branch` returned `## codex/brightdata-integration-plan...origin/codex/brightdata-integration-plan` before plan update.
+  - `wekruit-scraping`: `git status --short --branch` returned `## codex/brightdata-integration-plan...origin/codex/brightdata-integration-plan` before plan update.
+  - `diff -q` between both plan documents returned clean before plan update.
+- Secret safety:
+  - Local check printed only `BRIGHTDATA_API_KEY present`; the key value was not printed.
+  - `git check-ignore -v .env` returned `.gitignore:11:.env .env`.
+  - `git ls-files .env` returned no tracked file.
+- Firebase/deploy safety:
+  - Bare `firebase` is not on PATH in this shell; use `npx -y firebase-tools ...` for future Firebase commands.
+  - `npx -y firebase-tools --version` returned `15.17.0`.
+  - `npx -y firebase-tools use --json` returned `No active project`; future deploy/secret commands must pass explicit `--project wekruit-dev-env`.
+  - `firebase.sourcing.json` still targets Hosting site `wekruit-sourcing` and rewrites `/api/sourcing/**` to function `sourcing-api` in `us-central1`.
+- Read-only live API evidence from `https://wekruit-sourcing.web.app/api/sourcing`:
+  - `/health`: HTTP 200, `ok: true`, service `sourcing`.
+  - `/source-runs?limit=10`: HTTP 200, `total: 1`, sample run `stanford-treehacks-2026-20260506T030716Z`, status `completed`, source `devpost`.
+  - `/dedup-candidates?status=pending_review`: HTTP 200, `total: 200` visible from the capped endpoint, sample status `pending_review`.
+  - `/approved-entities`: HTTP 200, `total: 0`.
+  - `/enrichment-review-items`: HTTP 200, `total: 0`.
+  - `/candidate-profiles?status=active&limit=200`: HTTP 200, `total: 0`.
+- Browser/Ruflo deployed dashboard evidence:
+  - Opened `https://wekruit-sourcing.web.app/#approved`; page title was `WeKruit Sourcing Review`.
+  - Screenshot path: `/tmp/wekruit-brightdata-phase0-approved.png`.
+  - Visual check showed status `Ready`, nav counts Jobs `1`, Review `1,010`, Approved `0`, Enrichment `0`, Profiles `0`, and the Approved tab empty state `No approved entities found`.
+- Phase 6.5A conclusion:
+  - Preconditions are good for Phase 6.5B.
+  - Keep using explicit `--project wekruit-dev-env` because no default Firebase project is active in this repo.
+  - The earlier broad-use access/spend-control concern remains a blocker for broad Bright Data usage, but not for local fake-provider implementation or the later one-candidate synthetic smoke under documented limits.
+
 ##### Phase 6.5B: Domain, Provider Contract, And Fake Provider
 
 Scope:
