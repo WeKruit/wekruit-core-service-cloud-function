@@ -75,6 +75,7 @@ Last updated: 2026-05-10.
 - [x] Phase 6.5F added the Approved tab Bright Data/LinkedIn lookup UI: backend-derived LinkedIn URL selection, manual fetch, duplicate-spend reuse display, no-URL gate, pending-merge disabled state, lookup run cards, async snapshot check control, normalized match cards, and approve/reject/ignore controls. Verification used only the local emulator and fake/provider-seeded fixtures. No deploy, live Firestore mutation, OpenAI enrichment, final profile materialization, or live Bright Data call was performed in Phase 6.5F.
 - [x] Phase 6.5G completed local emulator end-to-end verification: API-seeded synthetic candidates, API approval, dashboard fake Bright Data lookup, dashboard vendor approval, OpenAI enrichment generation, dashboard enrichment approval, final profile materialization with vendor lineage, no-LinkedIn negative gate, and stale enrichment approval blocking after vendor evidence changed. No deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5G.
 - [x] Phase 6.5H set Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env`, ran scoped build/dry-run/deploy, deployed only `functions:core-service:sourcing.api` and Hosting site `wekruit-sourcing`, and verified deployed read-only endpoints plus the Approved tab UI on `https://wekruit-sourcing.web.app`. No live Bright Data lookup was performed in Phase 6.5H.
+- [x] Phase 6.5I completed the isolated live staging smoke test on `https://wekruit-sourcing.web.app`: created one synthetic Spencer source run/candidate, fixed and redeployed exact-ID review candidate resolution for live capped review queues, approved only that synthetic candidate, clicked the deployed dashboard Bright Data fetch button exactly once, approved the Bright Data match, generated and approved enrichment, and verified the final profile with Bright Data vendor evidence lineage. Broader Bright Data use remains blocked until explicit access/spend-control decisions.
 
 ## Current Open Decisions And Waiting State
 
@@ -100,7 +101,7 @@ This is the current single source of truth after the successful Phase 3.5 live s
   - First live Bright Data test policy is confirmed: after local fake/provider tests pass and the staging deploy is complete, create an isolated synthetic sourcing run/job for a single fake test candidate, `Spencer Wang`, with fake non-sensitive source context and LinkedIn URL `https://www.linkedin.com/in/spencerwang1` embedded in that synthetic source record/source evidence. Approve only that synthetic candidate, then run exactly one live Bright Data lookup from the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`.
   - Bright Data lookup must be hard-gated on eligible LinkedIn source/evidence lineage. If an approved candidate has no LinkedIn profile URL in its approved source/evidence records or source summaries, the dashboard must not show an active lookup button and the backend must reject lookup attempts. V1 must not provide a freeform/reviewer-supplied URL input or discover LinkedIn profiles from name/company fields.
   - Final readiness audit on 2026-05-09 added implementation guardrails for edge cases: canonical LinkedIn `/in/...` URL validation, backend-owned eligible URL derivation, exclusion of LinkedIn URLs from strong identity hashes even when they appear as `source_url` or `homepage`, deterministic duplicate-spend/concurrency protection, bounded manual async refresh if Bright Data sync returns `snapshot_id`, stale enrichment review protection after vendor evidence changes, sanitized vendor errors/logging, and an explicit access/spend-control check before a paid live route is broadly usable.
-  - Read-only live check on 2026-05-09 confirmed `https://wekruit-sourcing.web.app/api/sourcing/health` is healthy and the deployed Approved tab is reachable, but the live `approved-entities` endpoint currently returns `0` approved entities. This is acceptable because the live Bright Data test should create and isolate its own synthetic approved candidate instead of touching the TreeHacks dataset.
+  - Live Bright Data smoke on 2026-05-10 created exactly one isolated synthetic approved Spencer candidate in staging, then materialized one final profile from that candidate. TreeHacks candidates remain unapproved/unmerged/unenriched by this work.
   - Manual-only v1 mode from the Approved detail panel is confirmed.
   - Raw vendor payload retention policy is confirmed for v1: store normalized summaries only, with no full raw Bright Data payload in hot Firestore docs.
   - Field allowlist is confirmed for v1: profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, and projects/publications if present. Contact/private/sensitive fields are excluded unless explicitly approved later.
@@ -122,7 +123,7 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, and Phase 6.5H scoped deploy/read-only staging verification are complete.
+   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, Phase 6.5H scoped deploy/read-only staging verification, and Phase 6.5I isolated live staging smoke are complete.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
    - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
@@ -1843,7 +1844,7 @@ flowchart LR
 - [x] Keep OpenAI taxonomy generation and enrichment HITL unchanged: Bright Data adds evidence; it does not assign final labels by itself.
 - [x] Add focused tests for merge-blocked candidates, missing API key behavior, no-match results, rejected vendor matches, approved vendor matches, and enrichment evidence-pack inclusion.
 - [ ] Run the full local emulator workflow before any live Bright Data call.
-- [ ] After local fake verification, run exactly one live staging lookup from `https://wekruit-sourcing.web.app` / Firebase project `wekruit-dev-env` against the isolated synthetic approved candidate with a clear eligible LinkedIn profile URL from source/evidence lineage.
+- [x] After local fake verification, run exactly one live staging lookup from `https://wekruit-sourcing.web.app` / Firebase project `wekruit-dev-env` against the isolated synthetic approved candidate with a clear eligible LinkedIn profile URL from source/evidence lineage.
 
 ### Proposed Firestore Shape
 
@@ -2877,12 +2878,78 @@ Phase 6.5I in-progress finding from 2026-05-10 00:55 PDT:
   - Approve only the synthetic Spencer candidate by exact candidate/source-record lineage.
   - Then proceed to the first live Bright Data dashboard click.
 
+Phase 6.5I execution findings from 2026-05-10 01:10 PDT:
+
+- Phase status: completed after the exact-ID review candidate hotfix was committed, pushed, and redeployed to `functions:core-service:sourcing.api`. The live smoke remained isolated to the single synthetic Spencer candidate. No TreeHacks candidate was approved, merged, enriched, or looked up through Bright Data.
+- Hotfix redeploy:
+  - Core commit: `6d3df18 fix: resolve review candidates by exact id`.
+  - Scraping docs commit: `721724d docs: record Bright Data live smoke approval blocker`.
+  - Scoped function-only deploy succeeded with `--config firebase.sourcing.json --project wekruit-dev-env --only functions:core-service:sourcing.api`.
+- Live synthetic candidate lifecycle:
+  - Source run: `brightdata-live-smoke-spencer-20260510T075145`.
+  - Source record: `brightdata-live-smoke-spencer-20260510T075145-spencer`.
+  - Dedup candidate: `47bf2a30b8f8ddeb70839fb38f1be1ea`.
+  - Review label: `7e44663a-2946-44e2-9ce7-2547671d905f`.
+  - Approved entity: `cand_e04cb48aee4092f25cf714b8`.
+  - Approved display name: `Spencer Wang`.
+  - Approved source record IDs: only `brightdata-live-smoke-spencer-20260510T075145-spencer`.
+  - Selected LinkedIn URL: `https://www.linkedin.com/in/spencerwang1`.
+  - Live approved entity count after approval: `1`.
+  - Vendor lookup state before dashboard click: `eligibleLinkedInUrls=["https://www.linkedin.com/in/spencerwang1"]`, `initialVendorRuns=0`, `initialVendorMatches=0`.
+- Live Bright Data lookup:
+  - Browser/Ruflo opened `https://wekruit-sourcing.web.app/#approved`.
+  - Dashboard showed the isolated Spencer approved entity and the eligible LinkedIn URL from source/evidence lineage.
+  - Browser/Ruflo clicked the deployed `Fetch LinkedIn profile` button exactly once.
+  - Bright Data run: `vendor_run_3c7d583ba2c6344ebebc58c8`.
+  - Provider: `brightdata`.
+  - Dataset ID: `gd_l1viktl72bvl7bjuj0`.
+  - Run status: `completed`.
+  - Snapshot ID: `null`; the sync path completed without async snapshot refresh.
+  - Vendor match: `vendor_match_25d5a3d115ee208db9a48c8e`.
+  - Provider profile URL: `https://www.linkedin.com/in/spencerwang1`.
+  - Normalized profile name: `Spencer Wang`.
+  - Match status after dashboard approval: `approved`.
+  - Approved vendor evidence ID: `vendor_profile_match:vendor_match_25d5a3d115ee208db9a48c8e`.
+- Duplicate-spend protection verification:
+  - After the dashboard-created live run completed, a repeat API call with the unchanged selected LinkedIn URL returned `200` with `reusedExisting=true` and returned the same run ID `vendor_run_3c7d583ba2c6344ebebc58c8`.
+  - Vendor state after the repeat check still had `runCount=1` and `matchCount=1`.
+  - The deployed dashboard also disabled the fetch button after the result existed.
+- Vendor data retention/display verification:
+  - Vendor run document keys were limited to run metadata such as approved entity ID, provider, lookup type, input URL hash, selected LinkedIn URL lineage, dataset ID, status, snapshot ID, match IDs, error, and timestamps.
+  - Vendor match document keys were limited to normalized match metadata and `normalizedProfile`.
+  - `normalizedProfile` keys were exactly the v1 allowed professional summary fields: `profileUrl`, `name`, `headline`, `currentCompany`, `location`, `educationSummary`, `experienceSummary`, `skills`, `aboutSummary`, and `projectsPublications`.
+  - API verification found `hasRawPayloadKey=false` and `hasContactFieldsInNormalizedProfile=false`.
+- Live enrichment/profile lifecycle:
+  - Browser/Ruflo clicked `Generate enrichment` from the deployed Approved detail after vendor approval.
+  - Enrichment run: `enrich_run_466b972a-33c3-45e7-a2d4-7d56d3a42a84`.
+  - Enrichment review item: `enrich_review_58956469a972e27111a36c90`.
+  - Enrichment review status before approval: `pending_review`.
+  - Enrichment evidence count: `7`.
+  - Enrichment vendor evidence ID: `vendor_profile_match:vendor_match_25d5a3d115ee208db9a48c8e`.
+  - Browser/Ruflo selected the enrichment item in the Enrichment tab and approved it from the deployed dashboard.
+  - Final profile: `profile_cand_e04cb48aee4092f25cf714b8`.
+  - Final profile status: `active`.
+  - Final profile primary track: `software_engineering`.
+  - Final profile evidence count: `7`.
+  - Final profile vendor evidence ID: `vendor_profile_match:vendor_match_25d5a3d115ee208db9a48c8e`.
+  - Candidate profile detail API resolved the vendor evidence row with `evidenceType=vendor_professional_profile` and `sourceName=brightdata`.
+- Browser/Ruflo screenshot evidence:
+  - `/tmp/wekruit-phase65i-live-before-brightdata.png`: approved synthetic Spencer candidate before live Bright Data lookup, with eligible LinkedIn URL and no lookup runs/matches.
+  - `/tmp/wekruit-phase65i-live-after-brightdata-fetch.png`: completed Bright Data lookup and pending vendor match card.
+  - `/tmp/wekruit-phase65i-live-after-brightdata-approve.png`: approved Bright Data match card.
+  - `/tmp/wekruit-phase65i-live-enrichment-review.png`: enrichment review item with `7` evidence records before approval.
+  - `/tmp/wekruit-phase65i-live-profile.png`: final Spencer profile in the deployed Profiles tab.
+- Phase 6.5I conclusion:
+  - The Bright Data LinkedIn URL-only integration is fully implemented, deployed to `https://wekruit-sourcing.web.app`, and verified end to end on one isolated live synthetic candidate.
+  - Ready to hand off for limited manual use on approved candidates that already have source/evidence LinkedIn URLs, subject to the existing merge guard, vendor review, enrichment review, and duplicate-spend protection.
+  - Broader use remains intentionally blocked by policy until the team explicitly approves access/spend controls for public dashboard/API exposure.
+
 #### Immediate Blockers Before Full Live Completion
 
 - Deployed Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` is now set and metadata-confirmed as version `1` / `ENABLED`; the value was not exposed.
-- Bright Data account access to the LinkedIn Profiles scraper cannot be proven without one live call. If the first live lookup against the Spencer test URL returns an auth/account/access error, stop and document it before any retry.
+- Bright Data account access to the LinkedIn Profiles scraper was proven by the successful live Spencer lookup in Phase 6.5I.
 - Paid-route access/spend posture is not yet confirmed for broad use. The current sourcing API is publicly invokable; the one-candidate staging smoke may proceed with the documented blast-radius limits, but broader Bright Data use should wait for an explicit dashboard/auth/spend-control decision.
-- The live Bright Data smoke requires approving exactly one isolated synthetic Spencer candidate. The source run/source record have been created; approval is paused until the candidate-resolution hotfix is redeployed.
+- The live Bright Data smoke created, approved, enriched, and materialized exactly one isolated synthetic Spencer candidate. This is complete.
 - V1 data-use policy is narrowed and confirmed for implementation: enrichment-only professional information gathering from selected LinkedIn URLs. Any broader sourcing/discovery/contact use remains out of scope.
 
 #### Verification Tooling
