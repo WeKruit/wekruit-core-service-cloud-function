@@ -2135,6 +2135,8 @@ Phase 6.5A execution findings from 2026-05-09 23:38 PDT:
   - Bare `firebase` is not on PATH in this shell; use `npx -y firebase-tools ...` for future Firebase commands.
   - `npx -y firebase-tools --version` returned `15.17.0`.
   - `npx -y firebase-tools use --json` returned `No active project`; future deploy/secret commands must pass explicit `--project wekruit-dev-env`.
+  - Follow-up read-only check confirmed Firebase account access through `npx -y firebase-tools projects:list --json`; visible projects included `wekruit-dev-env`.
+  - Follow-up read-only `npx -y firebase-tools functions:list --project wekruit-dev-env --json` confirmed project/function access, but the raw command output can include deployed environment variable values. Do not run or log this command unfiltered again; use scoped commands or filtered/summarized output that cannot print secrets.
   - `firebase.sourcing.json` still targets Hosting site `wekruit-sourcing` and rewrites `/api/sourcing/**` to function `sourcing-api` in `us-central1`.
 - Read-only live API evidence from `https://wekruit-sourcing.web.app/api/sourcing`:
   - `/health`: HTTP 200, `ok: true`, service `sourcing`.
