@@ -73,6 +73,7 @@ Last updated: 2026-05-10.
 - [x] Phase 6.5D added normalized HTTP routes and error mapping for vendor profile match list, manual LinkedIn lookup run, async snapshot refresh, and vendor match decisions. The sourcing function now declares `BRIGHTDATA_API_KEY` as a Firebase secret for deployed lookup use. No dashboard UI, deploy, live Firestore mutation, approval/enrichment/profile materialization, or live Bright Data call was performed in Phase 6.5D.
 - [x] Phase 6.5E wired approved vendor profile matches into enrichment evidence packs, enrichment draft validation, enrichment review lineage, final profile lineage, and stale review approval protection. Only approved vendor profile summaries can become enrichment context. No dashboard UI, deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5E.
 - [x] Phase 6.5F added the Approved tab Bright Data/LinkedIn lookup UI: backend-derived LinkedIn URL selection, manual fetch, duplicate-spend reuse display, no-URL gate, pending-merge disabled state, lookup run cards, async snapshot check control, normalized match cards, and approve/reject/ignore controls. Verification used only the local emulator and fake/provider-seeded fixtures. No deploy, live Firestore mutation, OpenAI enrichment, final profile materialization, or live Bright Data call was performed in Phase 6.5F.
+- [x] Phase 6.5G completed local emulator end-to-end verification: API-seeded synthetic candidates, API approval, dashboard fake Bright Data lookup, dashboard vendor approval, OpenAI enrichment generation, dashboard enrichment approval, final profile materialization with vendor lineage, no-LinkedIn negative gate, and stale enrichment approval blocking after vendor evidence changed. No deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5G.
 
 ## Current Open Decisions And Waiting State
 
@@ -120,7 +121,7 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, and Phase 6.5F Approved tab dashboard UX are complete.
+   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, and Phase 6.5G local end-to-end verification are complete.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
    - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
@@ -2643,6 +2644,75 @@ Plan update required before Phase 6.5H:
 - Record local run IDs or fixture IDs.
 - Record evidence counts and match IDs if useful.
 - Record browser/Ruflo screenshot paths.
+
+Phase 6.5G execution findings from 2026-05-10 01:02 PDT:
+
+- Phase status: completed after Phase 6.5F was committed and pushed. This phase used a fresh local Firebase emulator state and current compiled code. It did not deploy Firebase, mutate live Firestore, approve/enrich any live TreeHacks candidate, or call live Bright Data.
+- Local emulator/browser setup:
+  - Restarted local command after Phase 6.5F commit: `SOURCING_PROFESSIONAL_PROFILE_PROVIDER=fake npm run serve:web:full`.
+  - Local dashboard URL verified with Browser/Ruflo: `http://127.0.0.1:5100/#approved`, then `#enrichment` and `#profiles`.
+  - Local emulator ports: Hosting `5100`, Functions `5101`, Firestore `8180`.
+  - `OPENAI_API_KEY` was present in local `.env` by non-secret existence/length check, so local enrichment generation exercised the existing OpenAI enrichment integration. The key value was not printed.
+  - Vendor profile provider was forced to `fake`; all local vendor runs/matches verified with provider `fake`.
+- Local synthetic source run and approval fixtures:
+  - Source run: `phase65g-e2e-20260510T074056`.
+  - Source run counts: `3` source records, `17` evidence records, `3` dedup candidates.
+  - Main LinkedIn candidate:
+    - Source record: `phase65g-e2e-20260510T074056-main-linkedin`.
+    - Dedup candidate: `076be2a2444c222184d7fa4e17d81887`.
+    - Approved entity: `cand_621f749cca399671f0f69157`.
+    - LinkedIn URL: `https://www.linkedin.com/in/spencerwang1`.
+  - No-LinkedIn negative control:
+    - Source record: `phase65g-e2e-20260510T074056-no-linkedin`.
+    - Dedup candidate: `310a983291d2eb5a8ff3f436022e2203`.
+    - Approved entity: `cand_6afd5924f4cd393ec9dc8c25`.
+  - Stale-guard LinkedIn candidate:
+    - Source record: `phase65g-e2e-20260510T074056-stale-linkedin`.
+    - Dedup candidate: `a4a549c89f9b5713585be0f277a76311`.
+    - Approved entity: `cand_b89304a297e39f7c7dea7ecf`.
+    - LinkedIn URL: `https://www.linkedin.com/in/spencerwang1`.
+- Local no-LinkedIn gate verification:
+  - Browser/Ruflo selected `cand_6afd5924f4cd393ec9dc8c25` in the Approved tab.
+  - Dashboard showed `No LinkedIn profile URL is available from this candidate's approved source/evidence lineage.`
+  - Browser DOM check verified `fetchButtonCount=0`.
+  - Direct forged lookup API call returned `422` with code `VENDOR_PROFILE_LOOKUP_VALIDATION` and message `Approved entity "cand_6afd5924f4cd393ec9dc8c25" has no eligible LinkedIn profile URL in approved source/evidence lineage.`
+- Main local end-to-end verification:
+  - Browser/Ruflo selected `cand_621f749cca399671f0f69157` in the Approved tab and verified the eligible LinkedIn URL select plus an enabled fetch button.
+  - Browser/Ruflo clicked the dashboard fetch button. The fake provider created completed run `vendor_run_f82514503de7f66309406705` and pending match `vendor_match_6e7d298055261aaadc283515`.
+  - Browser/Ruflo approved the vendor match from the dashboard. API verification showed provider `fake`, run status `completed`, match status `approved`, and approved vendor evidence ID `vendor_profile_match:vendor_match_6e7d298055261aaadc283515`.
+  - Browser/Ruflo clicked `Generate enrichment` from the Approved detail after vendor approval. OpenAI enrichment created review item `enrich_review_b589a2561e54bfde94e47289`.
+  - Enrichment review item `enrich_review_b589a2561e54bfde94e47289` had `7` evidence IDs and included vendor evidence ID `vendor_profile_match:vendor_match_6e7d298055261aaadc283515`.
+  - Browser/Ruflo selected that item in the Enrichment tab and approved enrichment from the dashboard.
+  - Final profile materialized as `profile_cand_621f749cca399671f0f69157`, status `active`, `7` evidence IDs, and `hasVendorEvidence=true`.
+  - Candidate profile detail API resolved the vendor evidence row with `evidenceType=vendor_professional_profile`, `sourceName=fake`, and ID `vendor_profile_match:vendor_match_6e7d298055261aaadc283515`.
+- Stale enrichment review protection verification:
+  - Before vendor evidence was added, API generated source-only enrichment review item `enrich_review_2a1ccc13532801f87d435560` for stale-guard entity `cand_b89304a297e39f7c7dea7ecf`.
+  - The source-only stale item had `6` evidence IDs and no vendor evidence.
+  - Browser/Ruflo then selected `cand_b89304a297e39f7c7dea7ecf` in the Approved tab, ran fake vendor lookup, and approved vendor match `vendor_match_8951882bed10c25182ee3c87`.
+  - API verification showed stale-guard provider `fake`, run status `completed`, match status `approved`, and approved vendor evidence ID `vendor_profile_match:vendor_match_8951882bed10c25182ee3c87`.
+  - Browser/Ruflo selected old review item `enrich_review_2a1ccc13532801f87d435560` in the Enrichment tab and attempted to approve it.
+  - Dashboard displayed the stale approval error: `Enrichment review item "enrich_review_2a1ccc13532801f87d435560" is stale because approved evidence changed. Generate a fresh enrichment draft.`
+  - Browser DOM check verified `staleError=true`, `generateFreshText=true`, and the old item remained pending. This confirms stale source-only drafts cannot be approved after approved vendor evidence changes the evidence pack.
+- Browser/Ruflo screenshot evidence:
+  - `/tmp/wekruit-phase65g-no-linkedin.png`: no-LinkedIn approved candidate gate.
+  - `/tmp/wekruit-phase65g-main-before-fetch.png`: main candidate eligible LinkedIn URL and enabled fetch button.
+  - `/tmp/wekruit-phase65g-main-after-fetch.png`: main candidate fake lookup result and pending vendor match card.
+  - `/tmp/wekruit-phase65g-main-after-vendor-approve.png`: main candidate approved vendor match.
+  - `/tmp/wekruit-phase65g-main-enrichment-review.png`: main candidate enrichment review item before approval.
+  - `/tmp/wekruit-phase65g-main-profile.png`: main final profile in Profiles tab.
+  - `/tmp/wekruit-phase65g-stale-after-vendor-approve.png`: stale-guard candidate after vendor evidence approval.
+  - `/tmp/wekruit-phase65g-stale-approval-blocked.png`: stale source-only enrichment approval blocked in Enrichment tab.
+- Verification commands:
+  - `npm run build` passed.
+  - `find lib/services/sourcing -name '*.test.js' -print0 | xargs -0 node --test` passed with `42` tests, `42` pass, `0` fail.
+- Final local state summary:
+  - Approved entity `cand_621f749cca399671f0f69157` is `enriched` with `needsEnrichment=false`.
+  - Approved entity `cand_6afd5924f4cd393ec9dc8c25` remains `not_started` / `needsEnrichment=true` and has no eligible vendor lookup action.
+  - Approved entity `cand_b89304a297e39f7c7dea7ecf` remains `in_review` / `needsEnrichment=true` with a deliberately pending stale source-only enrichment item after the stale approval block.
+  - Active profiles: one, `profile_cand_621f749cca399671f0f69157`, with source and fake vendor evidence lineage.
+- Phase 6.5G conclusion:
+  - Preconditions are good for Phase 6.5H.
+  - Phase 6.5H should set/confirm Firebase Secret Manager `BRIGHTDATA_API_KEY` without printing it, run the scoped sourcing bundle build/deploy, deploy only the sourcing API and `wekruit-sourcing` Hosting site, and verify deployed read-only endpoints/UI before any live Bright Data lookup.
 
 ##### Phase 6.5H: Live Bright Data Provider And Staging Deploy
 
