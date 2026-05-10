@@ -2852,12 +2852,37 @@ Plan update required after Phase 6.5I:
 - Record any Bright Data account/API errors.
 - Record whether implementation is ready to hand off.
 
+Phase 6.5I in-progress finding from 2026-05-10 00:55 PDT:
+
+- Created the live isolated synthetic source run and source record in `wekruit-dev-env`; no live Bright Data lookup has happened yet.
+  - Source run: `brightdata-live-smoke-spencer-20260510T075145`.
+  - Source record: `brightdata-live-smoke-spencer-20260510T075145-spencer`.
+  - Source: `manual_test`; domain: `vendor_smoke_test`.
+  - Display name: `Spencer Wang`.
+  - LinkedIn URL: `https://www.linkedin.com/in/spencerwang1`.
+  - Live source run counts after completion: `1` source record.
+- API approval initially failed before any vendor lookup:
+  - The review-label request used dedup candidate ID `47bf2a30b8f8ddeb70839fb38f1be1ea` returned from the ingestion payload.
+  - The deployed service returned `422`: `Dedup candidate "47bf2a30b8f8ddeb70839fb38f1be1ea" was not found.`
+  - Root cause identified in code: `createReviewLabel` resolved the dedup candidate through `resolveDedupCandidateGroup`, which first used capped `listDedupCandidates()`. On live TreeHacks staging data, that capped list is not guaranteed to include the newly created synthetic candidate even though the exact candidate ID exists. This is a live-scale correctness bug in candidate review resolution, not a Bright Data provider issue.
+- Hotfix implemented locally before continuing:
+  - `resolveDedupCandidateGroup` now fetches `repository.getDedupCandidate(candidateId)` directly before falling back to capped list/group aggregation.
+  - Regression test added: `createReviewLabel resolves a candidate by ID even when it is outside the listed review page`.
+  - Verification passed:
+    - `npm run build`
+    - `node --test lib/services/sourcing/application/service.test.js` -> `19` tests, `19` pass.
+    - `find lib/services/sourcing -name '*.test.js' -print0 | xargs -0 node --test` -> `43` tests, `43` pass.
+- Next step after committing/pushing and redeploying this scoped hotfix:
+  - Resume the same live source run/source record.
+  - Approve only the synthetic Spencer candidate by exact candidate/source-record lineage.
+  - Then proceed to the first live Bright Data dashboard click.
+
 #### Immediate Blockers Before Full Live Completion
 
-- Deployed Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` is not yet confirmed. This should be resolvable through Firebase CLI after greenlight by piping the local `.env` value to `functions:secrets:set --data-file -` without exposing the secret.
+- Deployed Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` is now set and metadata-confirmed as version `1` / `ENABLED`; the value was not exposed.
 - Bright Data account access to the LinkedIn Profiles scraper cannot be proven without one live call. If the first live lookup against the Spencer test URL returns an auth/account/access error, stop and document it before any retry.
 - Paid-route access/spend posture is not yet confirmed for broad use. The current sourcing API is publicly invokable; the one-candidate staging smoke may proceed with the documented blast-radius limits, but broader Bright Data use should wait for an explicit dashboard/auth/spend-control decision.
-- The live Bright Data smoke requires creating and approving exactly one isolated synthetic Spencer candidate. This is now the intended test setup, not a blocker.
+- The live Bright Data smoke requires approving exactly one isolated synthetic Spencer candidate. The source run/source record have been created; approval is paused until the candidate-resolution hotfix is redeployed.
 - V1 data-use policy is narrowed and confirmed for implementation: enrichment-only professional information gathering from selected LinkedIn URLs. Any broader sourcing/discovery/contact use remains out of scope.
 
 #### Verification Tooling

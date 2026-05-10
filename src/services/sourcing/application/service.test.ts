@@ -281,13 +281,15 @@ function buildReviewHarness(input: {
   sourceRecords: SourceRecord[];
   evidence: EvidenceRecord[];
   approvedEntities?: ApprovedEntity[];
+  listedCandidates?: DedupCandidate[];
 }) {
   const createdReviewLabels: ReviewLabelRecord[] = [];
   const reviewedStatuses: DedupCandidate['status'][] = [];
   const approvedEntitiesById = new Map((input.approvedEntities ?? []).map((entity) => [entity.id, entity]));
 
   const repository = {
-    listDedupCandidates: async () => [input.candidate],
+    getDedupCandidate: async (id: string) => id === input.candidate.id ? input.candidate : null,
+    listDedupCandidates: async () => input.listedCandidates ?? [input.candidate],
     getSourceRecordsByIds: async (ids: string[]) =>
       input.sourceRecords.filter((record) => ids.includes(record.id)),
     listEvidenceBySourceRecordIds: async (ids: string[]) =>
@@ -568,6 +570,37 @@ test('createReviewLabel materializes a singleton only when reviewer approves can
   assert.deepEqual(result.approvedEntity.reviewLabelIds, [result.reviewLabel.id]);
   assert.deepEqual(result.approvedEntity.identityEvidenceHashes, ['github-hash']);
   assert.deepEqual(result.approvedEntity.confirmedSignals, ['technical_project']);
+});
+
+test('createReviewLabel resolves a candidate by ID even when it is outside the listed review page', async () => {
+  const sourceRecord = buildSourceRecord();
+  const evidence = buildEvidence();
+  const candidate = buildCandidate({
+    id: 'dedup_live_smoke_candidate',
+    reasonCodes: ['singleton_review'],
+    sourceRecordIds: [sourceRecord.id],
+    evidenceIds: [evidence.id],
+    valueHashes: ['singleton-hash'],
+    strength: 'weak',
+  });
+  const harness = buildReviewHarness({
+    candidate,
+    sourceRecords: [sourceRecord],
+    evidence: [evidence],
+    listedCandidates: [],
+  });
+
+  const result = await harness.service.createReviewLabel({
+    dedupCandidateId: candidate.id,
+    candidateDecision: 'approve_candidate',
+    reviewerId: 'phase6-5i-live-smoke-regression',
+    notes: 'Candidate is fetched directly by ID when the review list is capped.',
+    confirmedSignals: ['technical_project'],
+  });
+
+  assert.equal(result.reviewLabel.dedupCandidateId, candidate.id);
+  assert.ok(result.approvedEntity);
+  assert.deepEqual(harness.reviewedStatuses, ['approved_candidate']);
 });
 
 test('createReviewLabel excludes LinkedIn-shaped evidence from approved identity hashes', async () => {

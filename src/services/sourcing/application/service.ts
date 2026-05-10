@@ -2069,12 +2069,18 @@ export class SourcingService {
   private async resolveDedupCandidateGroup(
     candidateId: string,
   ): Promise<{ candidate: DedupCandidate; rawCandidates: DedupCandidate[] } | null> {
-    const allCandidates = await this.repository.listDedupCandidates();
-    const direct = allCandidates.find((candidate) => candidate.id === candidateId);
+    const [directById, allCandidates] = await Promise.all([
+      this.repository.getDedupCandidate(candidateId),
+      this.repository.listDedupCandidates(),
+    ]);
+    const direct = directById ?? allCandidates.find((candidate) => candidate.id === candidateId);
 
     if (direct) {
       const groupKey = buildCandidateGroupKey(direct);
       const rawCandidates = allCandidates.filter((candidate) => buildCandidateGroupKey(candidate) === groupKey);
+      if (!rawCandidates.some((candidate) => candidate.id === direct.id)) {
+        rawCandidates.push(direct);
+      }
       return {
         candidate: aggregateDedupCandidates(rawCandidates)[0] ?? {
           ...direct,
