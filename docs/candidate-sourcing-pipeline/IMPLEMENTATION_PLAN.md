@@ -76,6 +76,7 @@ Last updated: 2026-05-10.
 - [x] Phase 6.5G completed local emulator end-to-end verification: API-seeded synthetic candidates, API approval, dashboard fake Bright Data lookup, dashboard vendor approval, OpenAI enrichment generation, dashboard enrichment approval, final profile materialization with vendor lineage, no-LinkedIn negative gate, and stale enrichment approval blocking after vendor evidence changed. No deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5G.
 - [x] Phase 6.5H set Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env`, ran scoped build/dry-run/deploy, deployed only `functions:core-service:sourcing.api` and Hosting site `wekruit-sourcing`, and verified deployed read-only endpoints plus the Approved tab UI on `https://wekruit-sourcing.web.app`. No live Bright Data lookup was performed in Phase 6.5H.
 - [x] Phase 6.5I completed the isolated live staging smoke test on `https://wekruit-sourcing.web.app`: created one synthetic Spencer source run/candidate, fixed and redeployed exact-ID review candidate resolution for live capped review queues, approved only that synthetic candidate, clicked the deployed dashboard Bright Data fetch button exactly once, approved the Bright Data match, generated and approved enrichment, and verified the final profile with Bright Data vendor evidence lineage. Broader Bright Data use remains blocked until explicit access/spend-control decisions.
+- [ ] Phase 6.5J is planned but not implemented: patch Bright Data normalization so vendor matches preserve richer public professional context for enrichment, not only thin labels such as project names.
 
 ## Current Open Decisions And Waiting State
 
@@ -102,9 +103,13 @@ This is the current single source of truth after the successful Phase 3.5 live s
   - Bright Data lookup must be hard-gated on eligible LinkedIn source/evidence lineage. If an approved candidate has no LinkedIn profile URL in its approved source/evidence records or source summaries, the dashboard must not show an active lookup button and the backend must reject lookup attempts. V1 must not provide a freeform/reviewer-supplied URL input or discover LinkedIn profiles from name/company fields.
   - Final readiness audit on 2026-05-09 added implementation guardrails for edge cases: canonical LinkedIn `/in/...` URL validation, backend-owned eligible URL derivation, exclusion of LinkedIn URLs from strong identity hashes even when they appear as `source_url` or `homepage`, deterministic duplicate-spend/concurrency protection, bounded manual async refresh if Bright Data sync returns `snapshot_id`, stale enrichment review protection after vendor evidence changes, sanitized vendor errors/logging, and an explicit access/spend-control check before a paid live route is broadly usable.
   - Live Bright Data smoke on 2026-05-10 created exactly one isolated synthetic approved Spencer candidate in staging, then materialized one final profile from that candidate. TreeHacks candidates remain unapproved/unmerged/unenriched by this work.
+  - Bright Data quality issue discovered after Phase 6.5I: a user-run real LinkedIn lookup showed the deployed flow is technically wired but the current normalized profile can be too thin for enrichment value. The observed card had current company and location, an `aboutSummary` that was only an 89-character public excerpt with an encoded `&amp;`, zero experience rows, zero skills, and project rows that were only names. This means the integration can succeed while still failing the product goal of giving OpenAI materially richer professional context.
+  - Root cause is in WeKruit's normalization/display layer, not the vendor approval/enrichment plumbing: `normalizeBrightDataLinkedInProfile` currently stores summary strings only; `summarizeExperienceItem` mostly keeps title/company/date; `summarizeProjectItem` returns the first title/name/publication/description field and therefore drops description/URL detail when a name exists; `aboutSummary` is not HTML/entity decoded; and the dashboard list renderer escapes list entries without linkifying URLs.
+  - Bright Data's public docs for LinkedIn profile-by-URL scraping show structured profile output can include profile details, `about`, `current_company`, `experience`, `education`, `projects`, `publications`, certifications, organizations, honors/awards, activity/posts, and media/ID fields. V1 should still keep only the approved professional-context subset and exclude contact/private/sensitive/social-graph/media fields.
+  - Bright Data is public-data limited. If Bright Data returns only a public excerpt or an already-truncated value for a restricted LinkedIn profile, WeKruit must not try to reconstruct hidden data through unofficial scraping. The target for Phase 6.5J is to preserve the full public professional text that Bright Data returns within bounded normalized fields, and to clearly document provider limitations when the returned payload itself is thin.
   - Manual-only v1 mode from the Approved detail panel is confirmed.
-  - Raw vendor payload retention policy is confirmed for v1: store normalized summaries only, with no full raw Bright Data payload in hot Firestore docs.
-  - Field allowlist is confirmed for v1: profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, and projects/publications if present. Contact/private/sensitive fields are excluded unless explicitly approved later.
+  - Raw vendor payload retention policy is confirmed for v1 and remains unchanged for Phase 6.5J: store richer normalized summaries only, with no full raw Bright Data payload in hot Firestore docs.
+  - Field allowlist is confirmed for v1 and remains unchanged for Phase 6.5J: profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, and projects/publications if present. Contact/private/sensitive/social-graph/media fields are excluded unless explicitly approved later.
   - Rejected/ignored Bright Data matches should be remembered by selected LinkedIn URL/query hash and approved evidence lineage so unchanged lookups do not spend credits or show the same bad match again.
   - If approved Bright Data evidence is added to a candidate that already has a final enriched profile, set or preserve `needsEnrichment=true` and allow manual re-enrichment; do not implement complex diffing/versioning in v1.
   - LinkedIn URLs should become first-class evidence for display, reviewer selection, vendor lookup inputs, and lineage, but not strong dedup evidence in v1.
@@ -114,7 +119,7 @@ This is the current single source of truth after the successful Phase 3.5 live s
   - Wait for the teammate-owned unified tag npm package, then migrate hardcoded taxonomy definitions out of `records.ts` / `web/app.js` duplication.
 - Current reviewer workflow caution:
   - Do not approve, merge, enrich, materialize profiles, or run Bright Data lookup against the TreeHacks staging dataset unless the user/team intentionally starts a separate validation pass.
-  - The Bright Data live smoke should use only the isolated synthetic `Spencer Wang` test run/job and candidate.
+  - The Bright Data live smoke and Phase 6.5J verification should use only isolated synthetic `Spencer Wang` test run/job candidates with LinkedIn URL `https://www.linkedin.com/in/spencerwang1`. Do not use TreeHacks Devpost source data as the verification basis for the normalization patch.
 
 ## Current Remaining Work Triage
 
@@ -123,9 +128,10 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, Phase 6.5H scoped deploy/read-only staging verification, and Phase 6.5I isolated live staging smoke are complete.
+   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, Phase 6.5H scoped deploy/read-only staging verification, and Phase 6.5I isolated live staging smoke are complete. Phase 6.5J rich-normalization patch is planned and not yet greenlit for implementation.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
+   - Current issue to fix next: the deployed integration can store/display too little detail for enrichment. The next patch must preserve rich normalized public professional context from Bright Data's allowed fields: full returned about text within a bound, richer experience rows with descriptions/dates/company/location/link context, and richer project/publication rows with descriptions/URLs when present.
    - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
    - Team input required: Bright Data API key, account access to the LinkedIn Profiles scraper, allowed fields, lookup policy, budget expectations, and retention policy.
 
@@ -2943,6 +2949,130 @@ Phase 6.5I execution findings from 2026-05-10 01:10 PDT:
   - The Bright Data LinkedIn URL-only integration is fully implemented, deployed to `https://wekruit-sourcing.web.app`, and verified end to end on one isolated live synthetic candidate.
   - Ready to hand off for limited manual use on approved candidates that already have source/evidence LinkedIn URLs, subject to the existing merge guard, vendor review, enrichment review, and duplicate-spend protection.
   - Broader use remains intentionally blocked by policy until the team explicitly approves access/spend controls for public dashboard/API exposure.
+
+##### Phase 6.5J: Rich Bright Data Normalization Patch
+
+Status as of 2026-05-10 11:45 PDT: planned only. No implementation greenlight yet. Do not edit production code for this phase until the user explicitly approves.
+
+Problem statement:
+
+- The purpose of Bright Data in WeKruit is to add professional context that improves downstream enrichment. A lookup that only stores a name, current company, location, and project names does not materially improve enrichment.
+- A user-run live lookup on 2026-05-10 proved that the current deployed flow can be technically successful while still too lossy:
+  - Lookup ran from the deployed Approved detail panel and returned a pending Bright Data profile match.
+  - The dashboard showed current company and location.
+  - `aboutSummary` was only an 89-character public excerpt and still contained encoded HTML entity text (`&amp;`).
+  - `experienceSummary` and `skills` were empty.
+  - `projectsPublications` contained only project names, without project descriptions, URLs, or context.
+- This is a normalization/product-value issue. The provider lookup, storage collections, reviewer approval workflow, enrichment evidence-pack inclusion, and final profile lineage are already wired.
+
+Root-cause analysis in current code:
+
+- `src/services/sourcing/integrations/brightdata.ts`
+  - `normalizeBrightDataLinkedInProfile` parses the right high-level allowed fields, but it intentionally compresses them too aggressively for the enrichment goal.
+  - `summarizeExperienceItem` keeps only a compact title/company/date shape. It does not preserve `description`, `description_html`, `subtitle`, company profile link, location, or richer nested position fields when Bright Data returns them.
+  - `summarizeProjectItem` returns the first one of `title`, `name`, `publication_title`, or `description`. If a project has a `name`, its description and URL are dropped.
+  - `aboutSummary` uses a plain first-string lookup over `about`, `summary`, and `description`, with no HTML/entity decoding and a relatively small cap for a field expected to feed enrichment.
+  - The current allowed normalized schema is safe, but the field bounds are too small for rich descriptions in experience/project summaries.
+- `src/services/sourcing/application/enrichment.ts`
+  - Approved vendor facts already flow into both `evidence[]` and `professionalProfileFacts[]`.
+  - This path does not need a new vendor review model; it needs richer normalized facts upstream.
+- `src/services/sourcing/application/service.ts`
+  - Vendor evidence summaries are resolved for enrichment/profile display from the normalized match. This will improve automatically if `normalizedProfile` becomes richer.
+- `web/app.js`
+  - The match card already displays about, education, experience, skills, and projects.
+  - List entries are escaped as plain text, so project/experience URLs embedded in richer list summaries would not currently be clickable. Phase 6.5J should render list values with linkification while preserving HTML escaping.
+
+Bright Data research findings relevant to this patch:
+
+- The active LinkedIn Profiles dataset ID remains `gd_l1viktl72bvl7bjuj0`.
+- The sync `/datasets/v3/scrape` URL-first endpoint remains the correct v1 mechanism for manual single-candidate lookups.
+- Bright Data's LinkedIn profile-by-URL documentation shows profile responses can include structured public fields such as `about`, `current_company`, `experience`, `education`, `projects`, `publications`, certifications, organizations, honors/awards, profile URL, and ID/media fields.
+- Bright Data's LinkedIn collection docs also state data access is limited to publicly available LinkedIn data. If a public/restricted profile only returns an excerpt, WeKruit must record that limitation rather than attempting unofficial LinkedIn scraping or broad discovery.
+
+Recommended data policy for the patch:
+
+- Preserve the existing v1 policy: no raw Bright Data payload in hot Firestore docs.
+- Preserve the existing allowlist: profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, and projects/publications.
+- Enrich the allowed normalized summaries rather than adding sensitive fields:
+  - Do not store emails, phone numbers, contact info, private fields, people-also-viewed/social graph details, avatar/banner/media URLs, follower/connection counts, or raw activity/post payloads unless explicitly approved later.
+  - Public professional links inside allowed fields are acceptable when they clarify experience/project/company context, for example a public LinkedIn company link or public project/publication URL returned by Bright Data.
+- "Full about page" means the full public `about`/summary text returned by Bright Data within a bounded normalized field. If Bright Data returns an already-truncated public excerpt, Phase 6.5J should preserve it cleanly and document that the provider did not return more text.
+
+Recommended implementation shape once greenlit:
+
+1. Extend normalization helpers in `src/services/sourcing/integrations/brightdata.ts`.
+   - Add central helpers for:
+     - HTML fragment to text conversion for fields like `description_html`.
+     - HTML entity decoding for values like `&amp;`.
+     - Whitespace normalization.
+     - Bounded labeled summaries such as `Title: ... | Company: ... | Dates: ... | Description: ...`.
+   - Keep implementation small and deterministic. Do not add a generic scraping/parser subsystem.
+2. Make current-company normalization richer but still compact.
+   - Extract from `current_company`, `current_company_name`, `company`, and `company_name`.
+   - Include public company profile link/location/title if Bright Data returns them and if doing so fits within the field bound.
+3. Make experience normalization materially useful for enrichment.
+   - Support likely Bright Data shapes such as `experience[]` entries with `title`, `position`, `role`, `company`, `company_name`, `subtitle`, `start_date`, `end_date`, `duration`, `location`, `description`, `description_html`, and company link fields.
+   - Support nested grouped-position shapes if present by flattening them into bounded experience rows.
+   - Include description/subtitle text when available, not only employer labels.
+4. Make projects/publications normalization materially useful for enrichment.
+   - For each project/publication/patent/honor-like allowed item, preserve title/name plus description/summary, date range, role/association, and public URL/link when present.
+   - Do not stop at the project name when description or link fields exist.
+5. Make education normalization moderately richer.
+   - Include school, degree, field, dates, activities/description when returned.
+6. Revisit normalized bounds without storing raw payloads.
+   - Proposed safe v1 bounds:
+     - `aboutSummary`: increase from 900 to around 2,500 characters.
+     - `experienceSummary`: keep a bounded list, increase item cap from 280 to around 700-900 characters and item count from 8 to 10.
+     - `projectsPublications`: increase item cap from 240 to around 600-800 characters and item count from 8 to 12.
+     - `educationSummary`: increase item cap from 240 to around 400 characters and item count from 8 to 10.
+     - `skills`: keep bounded and normalized; optionally increase to 30-40 if Bright Data returns useful public skill labels.
+   - Confirm total evidence-pack size remains reasonable before deployment.
+7. Keep the evidence-pack contract stable if possible.
+   - Prefer richer strings in the existing `professionalProfileFacts` fields over adding new top-level objects in v1.
+   - Only add schema fields if tests prove the current field names cannot preserve needed context clearly.
+8. Improve dashboard rendering for richer normalized values.
+   - Continue escaping user/vendor text.
+   - Render list entries through linkification so public URLs inside experience/project summaries are clickable.
+   - Keep the Approved tab card readable with multiline summaries.
+9. Update tests.
+   - Add Bright Data fixture tests containing `description_html`, entity-encoded text, project descriptions/links, publication fields, company links, dates, and disallowed contact/social/media fields.
+   - Assert rich allowed details survive normalization.
+   - Assert contact/private/media/social-graph fields remain excluded.
+   - Assert caps prevent oversized Firestore docs/evidence packs.
+   - Update enrichment evidence-pack tests to prove approved vendor facts include the richer normalized strings.
+
+Verification plan once greenlit:
+
+1. Local code verification:
+   - `npm run build`
+   - `node --test lib/services/sourcing/integrations/brightdata.test.js`
+   - `node --test lib/services/sourcing/application/enrichment.test.js lib/services/sourcing/application/service.test.js`
+   - `find lib/services/sourcing -name '*.test.js' -print0 | xargs -0 node --test`
+   - `node --check web/app.js`
+   - `git diff --check`
+2. Local emulator/browser verification with the fake provider:
+   - Run `SOURCING_PROFESSIONAL_PROFILE_PROVIDER=fake npm run serve:web:full`.
+   - Seed a synthetic approved candidate with LinkedIn URL `https://www.linkedin.com/in/spencerwang1`.
+   - Use a fake Bright Data fixture that includes rich about, experience descriptions, project descriptions, project URLs, education details, skills, and excluded contact/media/social fields.
+   - Click lookup through the local dashboard.
+   - Verify the Approved tab card shows rich multiline about/experience/project information and does not show excluded fields.
+   - Approve the vendor match, generate enrichment, and verify the enrichment evidence pack contains the richer vendor facts before enrichment approval.
+3. Staging/live verification after deploy:
+   - Do not use TreeHacks Devpost source data as the test basis.
+   - Create a fresh isolated synthetic source run/job for `Spencer Wang Rich BrightData Smoke` using source `manual_test`, domain `vendor_smoke_test`, fake non-sensitive context, and LinkedIn URL `https://www.linkedin.com/in/spencerwang1`.
+   - Approve only that synthetic candidate through the API by exact dedup/source-record lineage.
+   - Run the actual Bright Data lookup by clicking the deployed dashboard button on `https://wekruit-sourcing.web.app/#approved`, not by direct API call.
+   - Verify via dashboard and read-only API that the normalized profile has richer allowed fields where Bright Data returned them.
+   - If Bright Data only returns a truncated public about/excerpt for Spencer, record that as provider-output limitation, not a normalization failure, and rely on local fixture tests for the rich-field code paths.
+   - Approve the Bright Data match, generate enrichment, inspect the enrichment review evidence, approve enrichment only if the rich vendor facts are present, and verify final profile lineage.
+4. Plan updates during execution:
+   - After each implementation/verification slice, update this plan with exact commands, IDs, screenshots, and whether Bright Data returned rich public fields for the synthetic Spencer live run.
+   - Commit and push incrementally after each verified phase slice.
+
+Open questions / human input before implementation:
+
+- Recommendation is to proceed without expanding the field allowlist: richer normalized summaries should still use only the existing approved professional fields. If the team wants company links/project links treated as outside the current allowlist, clarify before implementation; otherwise treat public links embedded in allowed company/project/experience fields as allowed professional context.
+- Recommendation is to keep raw payload retention unchanged. If the team wants a temporary raw-payload capture for debugging, that needs explicit approval and a storage/retention policy. The default Phase 6.5J plan does not store raw payloads.
 
 #### Immediate Blockers Before Full Live Completion
 
