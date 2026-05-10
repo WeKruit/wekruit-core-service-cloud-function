@@ -1336,6 +1336,101 @@ export class SourcingService {
     };
   }
 
+  async refreshProfessionalProfileLookupRun(runId: string): Promise<VendorProfileLookupRunResult> {
+    const run = await this.repository.getVendorEnrichmentRun(runId);
+    if (!run) {
+      throw new VendorProfileLookupValidationError(`Vendor enrichment run "${runId}" was not found.`);
+    }
+    if (run.status !== 'async_snapshot_pending') {
+      const approvedEntity = await this.repository.getApprovedEntity(run.approvedEntityId);
+      const state = approvedEntity
+        ? await this.loadVendorProfileLookupState(approvedEntity)
+        : {
+          approvedEntityId: run.approvedEntityId,
+          eligibleLinkedInUrls: [],
+          runs: [run],
+          matches: [],
+        };
+      return {
+        ...state,
+        run,
+        matchesForRun: state.matches.filter((match) => match.vendorRunId === run.id),
+        reusedExisting: true,
+      };
+    }
+    if (!run.snapshotId) {
+      throw new VendorProfileLookupValidationError(`Vendor enrichment run "${runId}" has no snapshot ID.`);
+    }
+
+    const approvedEntity = await this.repository.getApprovedEntity(run.approvedEntityId);
+    if (!approvedEntity) {
+      throw new VendorProfileLookupValidationError(`Approved entity "${run.approvedEntityId}" was not found.`);
+    }
+    const { lookup } = this.resolveProfessionalProfileLookup();
+    if (!lookup.refreshLinkedInProfileSnapshot) {
+      throw new VendorProfileLookupProviderError('Professional profile provider does not support snapshot refresh.');
+    }
+
+    try {
+      const result = await lookup.refreshLinkedInProfileSnapshot({
+        linkedinUrl: run.selectedLinkedInUrl,
+        snapshotId: run.snapshotId,
+      });
+      const refreshedAt = new Date().toISOString();
+      const matches: VendorProfileMatch[] = result.matches.map((match, index) => {
+        const id = vendorMatchId(run.id, match.providerRecordId, match.providerProfileUrl, index);
+        return {
+          id,
+          approvedEntityId: run.approvedEntityId,
+          vendorRunId: run.id,
+          provider: result.provider,
+          lookupType: result.lookupType,
+          inputUrlHash: run.inputUrlHash,
+          selectedLinkedInUrl: run.selectedLinkedInUrl,
+          selectedLinkedInUrlLineage: run.selectedLinkedInUrlLineage,
+          providerRecordId: match.providerRecordId,
+          providerProfileUrl: match.providerProfileUrl,
+          normalizedProfile: match.normalizedProfile,
+          reviewStatus: 'pending_review',
+          reviewerId: null,
+          reviewNote: '',
+          reviewedAt: null,
+          approvedEvidenceId: null,
+          createdAt: refreshedAt,
+          updatedAt: refreshedAt,
+        };
+      });
+      const persistedMatches = await this.repository.upsertVendorProfileMatches(matches);
+      const updatedRun: VendorEnrichmentRun = {
+        ...run,
+        provider: result.provider,
+        lookupType: result.lookupType,
+        datasetId: result.datasetId,
+        status: result.status,
+        snapshotId: result.snapshotId,
+        matchIds: persistedMatches.map((match) => match.id),
+        error: null,
+        updatedAt: refreshedAt,
+      };
+      await this.repository.updateVendorEnrichmentRun(updatedRun);
+      return {
+        ...(await this.loadVendorProfileLookupState(approvedEntity)),
+        run: updatedRun,
+        matchesForRun: persistedMatches,
+        reusedExisting: false,
+      };
+    } catch (error) {
+      const failedAt = new Date().toISOString();
+      await this.repository.updateVendorEnrichmentRun({
+        ...run,
+        status: 'failed',
+        error: this.sanitizedProviderError(error),
+        updatedAt: failedAt,
+      });
+      throw new VendorProfileLookupProviderError(this.sanitizedProviderError(error));
+    }
+  }
+
   async listCandidateProfiles(options: CandidateProfileListOptions = {}): Promise<CandidateProfile[]> {
     const limit = Math.max(1, Math.min(options.limit ?? 200, 500));
     const query = options.q?.trim().toLowerCase() ?? '';

@@ -22,6 +22,11 @@ export type ProfessionalProfileLookupInput = {
   linkedinUrl: string;
 };
 
+export type ProfessionalProfileSnapshotRefreshInput = {
+  linkedinUrl: string;
+  snapshotId: string;
+};
+
 export type ProfessionalProfileLookupMatch = {
   provider: VendorProfileProvider;
   providerRecordId: string | null;
@@ -41,6 +46,7 @@ export type ProfessionalProfileLookupResult = {
 
 export interface ProfessionalProfileLookupPort {
   lookupLinkedInProfile(input: ProfessionalProfileLookupInput): Promise<ProfessionalProfileLookupResult>;
+  refreshLinkedInProfileSnapshot?(input: ProfessionalProfileSnapshotRefreshInput): Promise<ProfessionalProfileLookupResult>;
 }
 
 export type BrightDataLinkedInProviderConfig = {
@@ -247,6 +253,13 @@ function recordsFromPayload(payload: unknown): Array<Record<string, unknown>> {
   return [];
 }
 
+function snapshotStatusFromPayload(payload: unknown): string | null {
+  if (!isPlainRecord(payload)) {
+    return null;
+  }
+  return stringFromUnknown(payload.status, 80)?.toLowerCase() ?? null;
+}
+
 export function normalizeBrightDataLinkedInProfile(
   payload: unknown,
   fallbackProfileUrl: string,
@@ -423,6 +436,81 @@ export class BrightDataLinkedInProvider implements ProfessionalProfileLookupPort
       };
     }
 
+    const matches = recordsFromPayload(payload).map((record, index) => {
+      const normalizedProfile = normalizeBrightDataLinkedInProfile(record, canonicalUrl);
+      return {
+        provider: 'brightdata' as const,
+        providerRecordId: firstString(record, ['id', 'profile_id', 'public_identifier'], 160) ?? `row:${index}`,
+        providerProfileUrl: normalizedProfile.profileUrl,
+        normalizedProfile,
+      };
+    });
+
+    return {
+      provider: 'brightdata',
+      lookupType,
+      datasetId: this.datasetId,
+      inputUrl: canonicalUrl,
+      status: matches.length > 0 ? 'completed' : 'no_match',
+      snapshotId: null,
+      matches,
+    };
+  }
+
+  async refreshLinkedInProfileSnapshot(
+    input: ProfessionalProfileSnapshotRefreshInput,
+  ): Promise<ProfessionalProfileLookupResult> {
+    const canonicalUrl = normalizeLinkedInProfileUrl(input.linkedinUrl);
+    const snapshotId = input.snapshotId.trim();
+    if (!canonicalUrl) {
+      throw new Error('LinkedIn lookup requires a valid linkedin.com/in/... profile URL.');
+    }
+    if (!snapshotId) {
+      throw new Error('Bright Data snapshot refresh requires a snapshot ID.');
+    }
+
+    const progressResponse = await this.fetchImpl(
+      `${this.baseUrl}/datasets/v3/progress/${encodeURIComponent(snapshotId)}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+      },
+    );
+    if (!progressResponse.ok) {
+      throw new Error(`Bright Data snapshot progress failed with status ${progressResponse.status}.`);
+    }
+    const progressPayload = parseJsonText(await progressResponse.text());
+    const status = snapshotStatusFromPayload(progressPayload);
+    if (status && ['running', 'collecting', 'digesting'].includes(status)) {
+      return {
+        provider: 'brightdata',
+        lookupType,
+        datasetId: this.datasetId,
+        inputUrl: canonicalUrl,
+        status: 'async_snapshot_pending',
+        snapshotId,
+        matches: [],
+      };
+    }
+    if (status === 'failed') {
+      throw new Error('Bright Data snapshot failed.');
+    }
+
+    const snapshotResponse = await this.fetchImpl(
+      `${this.baseUrl}/datasets/v3/snapshot/${encodeURIComponent(snapshotId)}?format=json`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+      },
+    );
+    if (!snapshotResponse.ok) {
+      throw new Error(`Bright Data snapshot download failed with status ${snapshotResponse.status}.`);
+    }
+    const payload = parseJsonText(await snapshotResponse.text());
     const matches = recordsFromPayload(payload).map((record, index) => {
       const normalizedProfile = normalizeBrightDataLinkedInProfile(record, canonicalUrl);
       return {

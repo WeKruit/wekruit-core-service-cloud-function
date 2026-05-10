@@ -477,6 +477,7 @@ function buildVendorLookupHarness(input: {
         shouldCallProvider: true,
       };
     },
+    getVendorEnrichmentRun: async (id: string) => vendorRunsById.get(id) ?? null,
     updateVendorEnrichmentRun: async (run: VendorEnrichmentRun) => {
       vendorRunsById.set(run.id, run);
       return run;

@@ -163,3 +163,63 @@ test('BrightDataLinkedInProvider returns no_match for an empty JSON response arr
   assert.equal(result.status, 'no_match');
   assert.deepEqual(result.matches, []);
 });
+
+test('BrightDataLinkedInProvider refreshes pending snapshots and downloads ready snapshots', async () => {
+  const capturedUrls: string[] = [];
+  const provider = new BrightDataLinkedInProvider({
+    apiKey: 'test-brightdata-key',
+    baseUrl: 'https://api.brightdata.test',
+    fetchImpl: async (url) => {
+      capturedUrls.push(url);
+      if (url.includes('/progress/s_pending')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ snapshot_id: 's_pending', status: 'running' }),
+        };
+      }
+      if (url.includes('/progress/s_ready')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ snapshot_id: 's_ready', status: 'ready' }),
+        };
+      }
+      if (url.includes('/snapshot/s_ready')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify([
+              {
+                id: 'snapshot-row-1',
+                url: 'https://www.linkedin.com/in/spencerwang1',
+                name: 'Spencer Wang',
+                position: 'Synthetic snapshot response',
+              },
+            ]),
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    },
+  });
+
+  const pending = await provider.refreshLinkedInProfileSnapshot?.({
+    linkedinUrl: 'https://www.linkedin.com/in/spencerwang1',
+    snapshotId: 's_pending',
+  });
+  const ready = await provider.refreshLinkedInProfileSnapshot?.({
+    linkedinUrl: 'https://www.linkedin.com/in/spencerwang1',
+    snapshotId: 's_ready',
+  });
+
+  assert.equal(pending?.status, 'async_snapshot_pending');
+  assert.equal(pending?.snapshotId, 's_pending');
+  assert.equal(ready?.status, 'completed');
+  assert.equal(ready?.matches[0]?.providerRecordId, 'snapshot-row-1');
+  assert.deepEqual(capturedUrls, [
+    'https://api.brightdata.test/datasets/v3/progress/s_pending',
+    'https://api.brightdata.test/datasets/v3/progress/s_ready',
+    'https://api.brightdata.test/datasets/v3/snapshot/s_ready?format=json',
+  ]);
+});

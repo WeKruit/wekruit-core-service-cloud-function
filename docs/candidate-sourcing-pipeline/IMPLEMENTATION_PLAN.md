@@ -70,6 +70,7 @@ Last updated: 2026-05-09.
 - [x] Bright Data is now the active vendor direction for professional LinkedIn profile enrichment planning.
 - [x] Phase 6.5B added the Bright Data LinkedIn evidence/provider foundation: `linkedin` evidence normalization, vendor profile schemas/types, `ProfessionalProfileLookupPort`, deterministic fake provider fixtures, and a real Bright Data provider contract behind tests. No live Bright Data call, Firestore mutation, route wiring, UI wiring, deploy, approval, enrichment, or profile materialization was performed in Phase 6.5B.
 - [x] Phase 6.5C added backend Firestore/service flow for vendor lookup runs and profile matches: collection constants, repository persistence/reservation methods, eligible LinkedIn URL derivation, pending-merge and lineage gates, deterministic duplicate-spend protection, no-match/failed retry behavior, and approve/reject/ignore service decisions. No API routes, dashboard UI, deploy, Firestore mutation outside tests, or live Bright Data call was performed in Phase 6.5C.
+- [x] Phase 6.5D added normalized HTTP routes and error mapping for vendor profile match list, manual LinkedIn lookup run, async snapshot refresh, and vendor match decisions. The sourcing function now declares `BRIGHTDATA_API_KEY` as a Firebase secret for deployed lookup use. No dashboard UI, deploy, live Firestore mutation, approval/enrichment/profile materialization, or live Bright Data call was performed in Phase 6.5D.
 
 ## Current Open Decisions And Waiting State
 
@@ -117,7 +118,7 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, and Phase 6.5C backend service/repository flow are complete.
+   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, and Phase 6.5D API routes/error contract are complete.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
    - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
@@ -2367,6 +2368,69 @@ Plan update required before Phase 6.5E:
 
 - Record final route names and request/response shapes.
 - Record exact test command and result.
+
+Phase 6.5D execution findings from 2026-05-10 00:15 PDT:
+
+- Phase status: completed after full-plan greenlight. This phase implemented HTTP/API surfaces and provider snapshot refresh plumbing only. It did not add dashboard UI, deploy Firebase, mutate live Firestore, approve/enrich/materialize profiles, or call live Bright Data.
+- Files changed in `wekruit-core-service-cloud-function`:
+  - `src/services/sourcing/functions/http/api.ts`
+    - Added `createSourcingApiApp` factory so routes can be service-backed tested without Firebase deployment.
+    - Added vendor lookup/list/refresh/decision routes.
+    - Added route error mapping for pending merge, validation, and provider failures.
+    - Added `BRIGHTDATA_API_KEY` to the sourcing function declared secrets, alongside `OPENAI_API_KEY`.
+  - `src/services/sourcing/functions/http/api.test.ts`
+    - Added service-backed HTTP tests using a local Express server and fake route service methods.
+  - `src/services/sourcing/application/service.ts`
+    - Added `refreshProfessionalProfileLookupRun` for `async_snapshot_pending` vendor runs.
+  - `src/services/sourcing/integrations/brightdata.ts`
+    - Added optional `refreshLinkedInProfileSnapshot` provider method.
+    - Implemented Bright Data snapshot progress check and ready snapshot download.
+  - `src/services/sourcing/integrations/brightdata.test.ts`
+    - Added provider snapshot refresh tests for pending and ready snapshots.
+  - `src/services/sourcing/application/service.test.ts`
+    - Added repository harness support for fetching a vendor enrichment run by ID.
+- Final route names and shapes:
+  - `GET /api/sourcing/approved-entities/:approvedEntityId/vendor-profile-matches`
+    - Response: `{ data: VendorProfileLookupState }`.
+    - `data.eligibleLinkedInUrls` contains backend-derived canonical LinkedIn URLs and lineage.
+    - `data.runs` contains vendor run documents.
+    - `data.matches` contains normalized vendor profile match documents.
+  - `POST /api/sourcing/approved-entities/:approvedEntityId/vendor-profile-lookup:run`
+    - Request: `{ "selectedLinkedInUrl": "<canonical or canonicalizable linkedin.com/in/... URL>" }`.
+    - Response: `{ data: VendorProfileLookupRunResult }`.
+    - Returns `201` when a new provider run is reserved/called.
+    - Returns `200` when an existing non-failed run/match/no-match decision is reused.
+  - `POST /api/sourcing/vendor-enrichment-runs/:runId/refresh`
+    - Request: empty JSON body is accepted.
+    - Response: `{ data: VendorProfileLookupRunResult }`.
+    - Only `async_snapshot_pending` runs call provider snapshot refresh; non-pending runs return current state.
+  - `POST /api/sourcing/vendor-profile-matches/:matchId/decision`
+    - Request: `{ "action": "approve" | "reject" | "ignore", "reviewerId": "...", "notes": "..." }`.
+    - Response: `{ data: { match, approvedEntity } }`.
+- Error contract implemented:
+  - Pending merge guard returns `409` with `{ error: { message, code: "PENDING_MERGE_REVIEW", approvedEntityId, blockers } }`.
+  - Validation errors return `422`; vendor lookup validation includes code `VENDOR_PROFILE_LOOKUP_VALIDATION`, and Zod parse errors use code `VALIDATION_ERROR`.
+  - Provider lookup/refresh errors return `503` with code `VENDOR_PROFILE_LOOKUP_PROVIDER` and sanitized message.
+  - No route returns raw provider payloads or secret values.
+- Snapshot refresh behavior implemented:
+  - Bright Data progress endpoint: `GET /datasets/v3/progress/:snapshotId`.
+  - If progress is `running`, `collecting`, or `digesting`, the run remains `async_snapshot_pending`.
+  - If progress is `ready`, the provider downloads `GET /datasets/v3/snapshot/:snapshotId?format=json`, normalizes results, and creates pending match cards.
+  - If progress is `failed` or transport/download fails, the run is marked `failed` with sanitized error and is retryable through the existing failed-run retry path.
+- Verification evidence:
+  - `npm run build` passed.
+  - Focused route/provider command passed: `node --test lib/services/sourcing/functions/http/api.test.js lib/services/sourcing/application/service.test.js lib/services/sourcing/integrations/brightdata.test.js` -> `24` tests, `24` pass, `0` fail.
+  - Broad sourcing command passed: `find lib/services/sourcing -name '*.test.js' -print0 | xargs -0 node --test` -> `37` tests, `37` pass, `0` fail.
+  - `git diff --check` passed.
+- Behavior verified by tests:
+  - Vendor match list route returns normalized lookup state.
+  - Lookup run route returns `201` for new run and `200` for reused run.
+  - Lookup run route maps pending merge to `409`, lineage/validation to `422`, and provider errors to `503`.
+  - Refresh and decision routes call the expected service methods and return normalized payloads.
+  - Bright Data provider preserves pending snapshots and downloads ready snapshots using the documented progress/snapshot endpoints.
+- Phase 6.5D conclusion:
+  - Preconditions are good for Phase 6.5E.
+  - Phase 6.5E should wire approved vendor profile matches into the enrichment evidence pack, validation allowlist, enrichment review/profile lineage, and stale review protection.
 
 ##### Phase 6.5E: Enrichment Pack And Profile Lineage Integration
 

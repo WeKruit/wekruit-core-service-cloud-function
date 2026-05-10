@@ -9,19 +9,47 @@ import {
   createEnrichmentReviewDecisionSchema,
   createReviewLabelSchema,
   createSourceRunSchema,
+  createVendorProfileMatchDecisionSchema,
   candidateEnrichmentReviewStatusSchema,
   candidateContactabilitySchema,
   candidateIndustryDomainSchema,
   candidateTrackSchema,
 } from '../../domain/records';
-import { PendingMergeReviewBlockError, SourcingService } from '../../application/service';
+import {
+  PendingMergeReviewBlockError,
+  SourcingService,
+  VendorProfileLookupProviderError,
+  VendorProfileLookupValidationError,
+} from '../../application/service';
 
-const app = express();
-app.use(cors({ origin: true }));
-app.use(express.json({ limit: '2mb' }));
-
-const service = new SourcingService();
 const sourcingOpenAiApiKey = defineSecret('OPENAI_API_KEY');
+const brightDataApiKey = defineSecret('BRIGHTDATA_API_KEY');
+
+export type SourcingHttpServicePort = Pick<
+  SourcingService,
+  | 'listSourceRuns'
+  | 'createSourceRun'
+  | 'listSourceRecordsForRun'
+  | 'batchUpsertSourceRecords'
+  | 'completeSourceRun'
+  | 'listDedupCandidates'
+  | 'listDedupCandidateDetails'
+  | 'createReviewLabel'
+  | 'listApprovedEntities'
+  | 'listCandidateProfiles'
+  | 'getCandidateProfileDetails'
+  | 'generateEnrichmentForApprovedEntity'
+  | 'listEnrichmentReviewItems'
+  | 'submitEnrichmentReviewDecision'
+  | 'listVendorProfileMatchesForApprovedEntity'
+  | 'runProfessionalProfileLookupForApprovedEntity'
+  | 'refreshProfessionalProfileLookupRun'
+  | 'decideVendorProfileMatch'
+>;
+
+const runVendorProfileLookupSchema = z.object({
+  selectedLinkedInUrl: z.string().trim().min(1),
+});
 
 function parseLimit(value: unknown, fallback: number, max: number): number {
   if (typeof value !== 'string') {
@@ -50,6 +78,13 @@ function sendHealth(_req: express.Request, res: express.Response) {
     runtime: 'firebase-functions',
   });
 }
+
+export function createSourcingApiApp(
+  service: SourcingHttpServicePort = new SourcingService(),
+): express.Express {
+  const app = express();
+  app.use(cors({ origin: true }));
+  app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', sendHealth);
 app.get('/api/sourcing/health', sendHealth);
@@ -180,6 +215,85 @@ app.get('/api/sourcing/approved-entities', async (_req, res, next) => {
   }
 });
 
+app.get('/api/sourcing/approved-entities/:approvedEntityId/vendor-profile-matches', async (req, res, next) => {
+  try {
+    const data = await service.listVendorProfileMatchesForApprovedEntity(req.params.approvedEntityId);
+    res.status(200).json({ data });
+  } catch (error) {
+    if (error instanceof VendorProfileLookupValidationError) {
+      jsonError(res, 422, error.message, { code: error.code });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.post('/api/sourcing/approved-entities/:approvedEntityId/vendor-profile-lookup:run', async (req, res, next) => {
+  try {
+    const parsed = runVendorProfileLookupSchema.parse(req.body);
+    const data = await service.runProfessionalProfileLookupForApprovedEntity(
+      req.params.approvedEntityId,
+      parsed.selectedLinkedInUrl,
+    );
+    res.status(data.reusedExisting ? 200 : 201).json({ data });
+  } catch (error) {
+    if (error instanceof PendingMergeReviewBlockError) {
+      jsonError(res, 409, error.message, {
+        code: error.code,
+        approvedEntityId: error.approvedEntityId,
+        blockers: error.blockers,
+      });
+      return;
+    }
+    if (error instanceof z.ZodError || error instanceof VendorProfileLookupValidationError) {
+      jsonError(res, 422, error.message, {
+        code: error instanceof VendorProfileLookupValidationError ? error.code : 'VALIDATION_ERROR',
+      });
+      return;
+    }
+    if (error instanceof VendorProfileLookupProviderError) {
+      jsonError(res, 503, error.message, { code: error.code });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.post('/api/sourcing/vendor-enrichment-runs/:runId/refresh', async (req, res, next) => {
+  try {
+    const data = await service.refreshProfessionalProfileLookupRun(req.params.runId);
+    res.status(200).json({ data });
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof VendorProfileLookupValidationError) {
+      jsonError(res, 422, error.message, {
+        code: error instanceof VendorProfileLookupValidationError ? error.code : 'VALIDATION_ERROR',
+      });
+      return;
+    }
+    if (error instanceof VendorProfileLookupProviderError) {
+      jsonError(res, 503, error.message, { code: error.code });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.post('/api/sourcing/vendor-profile-matches/:matchId/decision', async (req, res, next) => {
+  try {
+    const parsed = createVendorProfileMatchDecisionSchema.parse(req.body);
+    const data = await service.decideVendorProfileMatch(req.params.matchId, parsed);
+    res.status(200).json({ data });
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof VendorProfileLookupValidationError) {
+      jsonError(res, 422, error.message, {
+        code: error instanceof VendorProfileLookupValidationError ? error.code : 'VALIDATION_ERROR',
+      });
+      return;
+    }
+    next(error);
+  }
+});
+
 app.get('/api/sourcing/candidate-profiles', async (req, res, next) => {
   try {
     const status = req.query.status === 'archived' ? 'archived' : req.query.status === 'active' ? 'active' : undefined;
@@ -274,13 +388,18 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   jsonError(res, 500, message);
 });
 
+  return app;
+}
+
+const app = createSourcingApiApp();
+
 export const sourcingApi = onRequest(
   {
     region: 'us-central1',
     invoker: 'public',
     memory: '1GiB',
     timeoutSeconds: 300,
-    secrets: [sourcingOpenAiApiKey],
+    secrets: [sourcingOpenAiApiKey, brightDataApiKey],
   },
   app,
 );
