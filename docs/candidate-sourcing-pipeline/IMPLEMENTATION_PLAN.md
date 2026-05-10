@@ -87,11 +87,11 @@ This is the current single source of truth after the successful Phase 3.5 live s
   - No candidate approvals, merge decisions, enrichment generation, enrichment review decisions, or profile materialization were performed during the Stanford upload.
 - Current Bright Data waiting items:
   - Local `BRIGHTDATA_API_KEY` is present in `wekruit-core-service-cloud-function/.env` as of 2026-05-09. The value was not printed. `.env` is gitignored and untracked.
-  - Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` still must be set or confirmed before deployed live lookup verification. If the user greenlights implementation, use the local value only to set/confirm the Firebase secret without printing it.
+  - Firebase CLI access is expected to be sufficient to set/confirm Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` before deployed live lookup verification. If the user greenlights implementation, pipe the local `.env` value into `firebase functions:secrets:set BRIGHTDATA_API_KEY --project wekruit-dev-env --data-file -` without printing the value or placing it directly in the shell command.
   - Confirm the Bright Data account has access to the LinkedIn Scraper API / Profiles scraper.
-  - Confirm the team-approved data-use policy for scraping LinkedIn profile URLs that already appear in Devpost/GitHub/source evidence.
-  - First live Bright Data test policy is confirmed: after local fake/provider tests pass, use exactly one approved staging candidate from the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`, with a clear LinkedIn profile URL manually selected from the Approved detail panel. The exact candidate/URL remains to be chosen at test time.
-  - Read-only live check on 2026-05-09 confirmed `https://wekruit-sourcing.web.app/api/sourcing/health` is healthy and the deployed Approved tab is reachable, but the live `approved-entities` endpoint currently returns `0` approved entities. Before the one live Bright Data lookup, deliberately approve or seed exactly one staging candidate with a clear LinkedIn URL.
+  - Bright Data v1 data-use decision is narrowed and confirmed for implementation planning: use Bright Data only to gather professional information for enrichment evidence/context. Do not use it for broad sourcing, contact-data acquisition, automatic matching decisions, or identity/dedup approval.
+  - First live Bright Data test policy is confirmed: after local fake/provider tests pass and the staging deploy is complete, create an isolated synthetic sourcing run/job for a single fake test candidate, `Spencer Wang`, with fake non-sensitive source context and reviewer-provided LinkedIn URL `https://www.linkedin.com/in/spencerwang1`. Approve only that synthetic candidate, then run exactly one live Bright Data lookup from the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`.
+  - Read-only live check on 2026-05-09 confirmed `https://wekruit-sourcing.web.app/api/sourcing/health` is healthy and the deployed Approved tab is reachable, but the live `approved-entities` endpoint currently returns `0` approved entities. This is acceptable because the live Bright Data test should create and isolate its own synthetic approved candidate instead of touching the TreeHacks dataset.
   - Manual-only v1 mode from the Approved detail panel is confirmed.
   - Raw vendor payload retention policy is confirmed for v1: store normalized summaries only, with no full raw Bright Data payload in hot Firestore docs.
   - Field allowlist is confirmed for v1: profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, and projects/publications if present. Contact/private/sensitive fields are excluded unless explicitly approved later.
@@ -103,7 +103,8 @@ This is the current single source of truth after the successful Phase 3.5 live s
 - Current tag-system waiting item:
   - Wait for the teammate-owned unified tag npm package, then migrate hardcoded taxonomy definitions out of `records.ts` / `web/app.js` duplication.
 - Current reviewer workflow caution:
-  - Do not approve, merge, enrich, or materialize profiles from the TreeHacks staging dataset unless the user/team intentionally starts a validation pass.
+  - Do not approve, merge, enrich, materialize profiles, or run Bright Data lookup against the TreeHacks staging dataset unless the user/team intentionally starts a separate validation pass.
+  - The Bright Data live smoke should use only the isolated synthetic `Spencer Wang` test run/job and candidate.
 
 ## Current Remaining Work Triage
 
@@ -1846,13 +1847,13 @@ Rejected or ignored matches should remain tied to the selected LinkedIn URL/quer
 ### Required Team Decisions
 
 - [x] Provide `BRIGHTDATA_API_KEY` through `wekruit-core-service-cloud-function/.env` for local testing. Local presence was confirmed on 2026-05-09 without printing the value.
-- [ ] Set or confirm Firebase Secret Manager `BRIGHTDATA_API_KEY` for deployed testing in `wekruit-dev-env`.
+- [ ] Set or confirm Firebase Secret Manager `BRIGHTDATA_API_KEY` for deployed testing in `wekruit-dev-env` through Firebase CLI. Use `--data-file -` / stdin from the local `.env` value so the key is not printed or placed directly in shell history.
 - [ ] Confirm Bright Data account access to the LinkedIn Scraper API and Profiles dataset.
-- [ ] Confirm allowed Bright Data use case and data-use policy for LinkedIn URLs found in Devpost/GitHub/source evidence.
+- [x] Confirm allowed v1 Bright Data use case: enrichment-only professional information gathering from selected LinkedIn profile URLs. Do not use Bright Data for broad sourcing, contact-data acquisition, identity approval, dedup approval, or automatic matching decisions.
 - [x] Confirm which fields may be stored/displayed: v1 allows profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, and projects/publications if present. Contact/private/sensitive fields are excluded unless explicitly approved later.
 - [x] Confirm first implementation mode: manual-only from the Approved detail panel.
-- [ ] Confirm credit/budget expectations and live test candidate(s).
-- [x] Confirm first live test policy: after local fake/provider tests pass, run exactly one live lookup through the active staging dashboard `https://wekruit-sourcing.web.app` / Firebase project `wekruit-dev-env` against a known approved candidate with a clear reviewer-selected LinkedIn profile URL. Exact candidate/URL remains to be chosen at test time.
+- [ ] Confirm credit/budget expectations.
+- [x] Confirm first live test policy: after local fake/provider tests pass and staging deploy is complete, create an isolated synthetic source run/job for a single fake test candidate, `Spencer Wang`, with LinkedIn URL `https://www.linkedin.com/in/spencerwang1`; approve only that synthetic candidate; then run exactly one live lookup through the active staging dashboard `https://wekruit-sourcing.web.app` / Firebase project `wekruit-dev-env`.
 - [x] Confirm raw payload retention policy: v1 stores normalized summaries only and does not store the full raw Bright Data payload in hot Firestore docs.
 
 ### Bright Data Decision Log
@@ -1916,10 +1917,17 @@ This section should be updated after each planning discussion so implementation 
    - Reason: LinkedIn URLs are useful context and vendor lookup inputs, but treating them as strong identity evidence would change merge semantics and compliance/product policy beyond the current Bright Data enrichment scope.
 
 11. **What should the first live Bright Data test candidate/environment be?**
-   - Answer recorded 2026-05-09: after local fake/provider tests pass, run exactly one live staging lookup through the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`.
-   - Candidate policy: use one known approved staging candidate with a clear LinkedIn profile URL manually selected from the Approved detail panel. The exact candidate and URL will be chosen at test time after the local path works.
+   - Answer recorded 2026-05-09 and refined after user clarification: after local fake/provider tests pass and the staging deploy is complete, run exactly one live staging lookup through the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`.
+   - Candidate policy: create an isolated synthetic source run/job containing one fake test candidate, `Spencer Wang`, with fake non-sensitive source context and reviewer-provided LinkedIn URL `https://www.linkedin.com/in/spencerwang1`. Approve only this synthetic singleton candidate, then manually select that LinkedIn URL in the Approved detail panel for the one live Bright Data lookup.
+   - Isolation boundary: do not approve, merge, enrich, or run Bright Data lookup against the existing TreeHacks staging dataset as part of the Bright Data smoke test.
    - Boundary: do not run live Bright Data calls during planning or before local fake/provider verification passes.
    - Reason: this validates the real integration in the environment the team is currently using while keeping vendor spend, data mutation, and reviewer workflow risk tightly bounded.
+
+12. **What is the v1 Bright Data data-use boundary?**
+   - Answer recorded 2026-05-09 after user clarification: Bright Data v1 is for enrichment-only professional information gathering.
+   - Allowed use: fetch structured professional context from a selected LinkedIn profile URL, route the normalized summary through reviewer approval, and include only approved summaries in OpenAI enrichment evidence/context.
+   - Disallowed use in v1: broad sourcing/discovery, contact-data acquisition, automatic identity approval, automatic dedup approval, automatic matching decisions, final profile mutation without enrichment HITL, or use of contact/private/sensitive fields.
+   - Reason: this keeps Bright Data scoped to the current product goal of improving enrichment quality without expanding business logic or data-use policy beyond what has been approved.
 
 ### Bright Data Implementation Readiness Deep Dive
 
@@ -2026,9 +2034,11 @@ Current preflight findings from 2026-05-09:
 
 - Local `BRIGHTDATA_API_KEY` is present.
 - `.env` is ignored and untracked.
+- Firebase CLI version `15.17.0` is available.
+- `firebase functions:secrets:set` supports `--data-file -`, so the implementation can set `BRIGHTDATA_API_KEY` from stdin without printing the secret or putting it directly in the command.
 - Live health endpoint is healthy.
 - Live Approved tab is reachable with Ruflo.
-- Live approved entities currently total `0`, so a live Bright Data lookup requires deliberately approving or seeding exactly one staging candidate after local verification.
+- Live approved entities currently total `0`; the Bright Data live smoke will create its own isolated synthetic `Spencer Wang` candidate instead of touching TreeHacks data.
 
 ##### Phase 6.5B: Domain, Provider Contract, And Fake Provider
 
@@ -2203,10 +2213,12 @@ Plan update required before Phase 6.5H:
 Scope:
 
 - Confirm or set Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` without printing the value.
+  - Preferred secret command pattern after greenlight: read `BRIGHTDATA_API_KEY` from `.env` locally and pipe only the value to `npx -y firebase-tools functions:secrets:set BRIGHTDATA_API_KEY --project wekruit-dev-env --data-file -`.
+  - Do not use `functions:secrets:access` in a way that prints the secret value. If confirmation is needed, confirm only the existence/non-empty byte count or rely on successful deploy/runtime access.
 - Deploy only the sourcing API function and `wekruit-sourcing` Hosting site using `firebase.sourcing.json`.
 - Do not deploy unrelated functions or the default `wekruit-dev-env` Hosting site.
 - Verify deployed health and read-only endpoints.
-- Do not run a live Bright Data lookup until the dashboard and backend are deployed and the team deliberately chooses a candidate.
+- Do not run a live Bright Data lookup until the dashboard and backend are deployed and the isolated synthetic test candidate is created and approved.
 
 Verification:
 
@@ -2229,13 +2241,46 @@ Plan update required before Phase 6.5I:
 
 Scope:
 
-- Use exactly one approved staging candidate with a clear LinkedIn profile URL.
-- If no approved staging candidate exists, deliberately approve or seed one candidate only after user/team confirmation.
-- Manually select the LinkedIn URL in the Approved detail panel.
+- Create an isolated synthetic sourcing run/job in `wekruit-dev-env` for one fake test candidate only.
+  - Suggested run ID: `brightdata-live-smoke-spencer-<timestamp>`.
+  - Suggested source/domain: source `manual_test`, domain `vendor_smoke_test`.
+  - Candidate display name: `Spencer Wang`.
+  - Candidate LinkedIn URL: `https://www.linkedin.com/in/spencerwang1`.
+  - Use fake non-sensitive supporting info only, such as test institution/company/project labels. Do not add real private/contact data.
+- Prefer the existing sourcing API/source-record ingestion path to create the synthetic run and source record, so the test follows the same `source record -> dedup candidate -> review -> approved entity` lifecycle as real data.
+- Approve only the synthetic Spencer singleton candidate through the dashboard or review-label API.
+- Manually select the Spencer LinkedIn URL in the Approved detail panel.
 - Run exactly one Bright Data lookup.
 - Review the normalized result.
 - Approve, reject, or ignore based on reviewer judgment.
 - If approved, generate enrichment only if the user/team wants the full live chain exercised.
+- Do not approve, merge, enrich, or run Bright Data lookup against TreeHacks candidates as part of this smoke test.
+
+Planned synthetic run lifecycle:
+
+1. Create source run through the sourcing API:
+   - `POST /api/sourcing/source-runs`
+   - `id`: `brightdata-live-smoke-spencer-<timestamp>`
+   - `sourceName`: `manual_test`
+   - `sourceDomain`: `vendor_smoke_test`
+   - `pipelineName`: `brightdata-live-smoke`
+   - `trigger`: `manual`
+   - `metadata.purpose`: `brightdata_live_smoke_test`
+2. Upsert exactly one source record through the sourcing API:
+   - `POST /api/sourcing/source-records:batchUpsert`
+   - `entityType`: `person`
+   - `displayName`: `Spencer Wang`
+   - `sourceNativeId`: `spencer-wang-brightdata-live-smoke`
+   - `sourceUrl`: `https://www.linkedin.com/in/spencerwang1`
+   - `display.linkedin`: `https://www.linkedin.com/in/spencerwang1`
+   - `rawSummary.linkedin`: `https://www.linkedin.com/in/spencerwang1`
+   - Fake non-sensitive fields may include `rawSummary.testRole`, `rawSummary.testProject`, and `rawSummary.suggestedSignals`.
+3. Complete the source run through the sourcing API.
+4. Confirm exactly one singleton review candidate was created for the synthetic run.
+5. Approve only that singleton as a real candidate through the dashboard or review-label API.
+6. Run the Bright Data lookup only from the approved synthetic candidate's Approved detail panel.
+
+This lifecycle intentionally uses the existing pipeline instead of direct Firestore insertion so review, evidence extraction, approved-entity materialization, and lineage are all exercised.
 
 Verification:
 
@@ -2248,16 +2293,16 @@ Verification:
 
 Plan update required after Phase 6.5I:
 
-- Record exact candidate ID, selected LinkedIn URL, vendor run ID, vendor match ID, reviewer decision, and whether enrichment was generated.
+- Record exact synthetic source run ID, source record ID, dedup candidate ID, approved entity ID, selected LinkedIn URL, vendor run ID, vendor match ID, reviewer decision, and whether enrichment was generated.
 - Record any Bright Data account/API errors.
 - Record whether implementation is ready to hand off.
 
 #### Immediate Blockers Before Full Live Completion
 
-- Deployed Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` is not yet confirmed. Local `.env` has the key, but live Functions need the Firebase secret.
-- The active live dashboard currently has zero approved entities. A live Bright Data lookup needs one intentionally approved or seeded staging candidate with a clear LinkedIn URL.
-- Bright Data account access to the LinkedIn Profiles scraper cannot be proven without one live call. If the first live lookup returns an auth/account/access error, stop and document it before any retry.
-- Team data-use policy for using Bright Data on LinkedIn URLs from source evidence is still listed as a confirmation item. The implementation can be built against the approved product boundaries, but live lookup should proceed only if the team accepts that policy.
+- Deployed Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` is not yet confirmed. This should be resolvable through Firebase CLI after greenlight by piping the local `.env` value to `functions:secrets:set --data-file -` without exposing the secret.
+- Bright Data account access to the LinkedIn Profiles scraper cannot be proven without one live call. If the first live lookup against the Spencer test URL returns an auth/account/access error, stop and document it before any retry.
+- The live Bright Data smoke requires creating and approving exactly one isolated synthetic Spencer candidate. This is now the intended test setup, not a blocker.
+- V1 data-use policy is narrowed and confirmed for implementation: enrichment-only professional information gathering from selected LinkedIn URLs. Any broader sourcing/discovery/contact use remains out of scope.
 
 #### Verification Tooling
 
