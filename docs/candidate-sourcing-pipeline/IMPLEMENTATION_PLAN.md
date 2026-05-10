@@ -76,7 +76,7 @@ Last updated: 2026-05-10.
 - [x] Phase 6.5G completed local emulator end-to-end verification: API-seeded synthetic candidates, API approval, dashboard fake Bright Data lookup, dashboard vendor approval, OpenAI enrichment generation, dashboard enrichment approval, final profile materialization with vendor lineage, no-LinkedIn negative gate, and stale enrichment approval blocking after vendor evidence changed. No deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5G.
 - [x] Phase 6.5H set Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env`, ran scoped build/dry-run/deploy, deployed only `functions:core-service:sourcing.api` and Hosting site `wekruit-sourcing`, and verified deployed read-only endpoints plus the Approved tab UI on `https://wekruit-sourcing.web.app`. No live Bright Data lookup was performed in Phase 6.5H.
 - [x] Phase 6.5I completed the isolated live staging smoke test on `https://wekruit-sourcing.web.app`: created one synthetic Spencer source run/candidate, fixed and redeployed exact-ID review candidate resolution for live capped review queues, approved only that synthetic candidate, clicked the deployed dashboard Bright Data fetch button exactly once, approved the Bright Data match, generated and approved enrichment, and verified the final profile with Bright Data vendor evidence lineage. Broader Bright Data use remains blocked until explicit access/spend-control decisions.
-- [ ] Phase 6.5J is planned but not implemented: patch Bright Data normalization so vendor matches preserve richer public professional context for enrichment, not only thin labels such as project names.
+- [x] Phase 6.5J implementation and local fake-provider full-chain verification are complete: Bright Data normalization now preserves richer public professional context for enrichment, not only thin labels such as project names. Staging deploy and fresh synthetic Spencer live verification are still pending.
 
 ## Current Open Decisions And Waiting State
 
@@ -128,7 +128,7 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, Phase 6.5H scoped deploy/read-only staging verification, and Phase 6.5I isolated live staging smoke are complete. Phase 6.5J rich-normalization patch is planned and not yet greenlit for implementation.
+   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, Phase 6.5H scoped deploy/read-only staging verification, Phase 6.5I isolated live staging smoke, and Phase 6.5J implementation/local fake-provider verification are complete. Phase 6.5J staging deploy and fresh synthetic Spencer live verification are pending.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
    - Current issue to fix next: the deployed integration can store/display too little detail for enrichment. The next patch must preserve rich normalized public professional context from Bright Data's allowed fields: full returned about text within a bound, richer experience rows with descriptions/dates/company/location/link context, and richer project/publication rows with descriptions/URLs when present.
@@ -2952,7 +2952,7 @@ Phase 6.5I execution findings from 2026-05-10 01:10 PDT:
 
 ##### Phase 6.5J: Rich Bright Data Normalization Patch
 
-Status as of 2026-05-10 12:05 PDT: implementation greenlit and automated code-level verification slice completed. Local emulator/browser verification and fresh synthetic Spencer staging verification are still pending.
+Status as of 2026-05-10 after local verification: implementation, automated code-level verification, and local emulator/browser full-chain verification are complete. Fresh synthetic Spencer staging verification is still pending.
 
 Problem statement:
 
@@ -3100,10 +3100,67 @@ Phase 6.5J automated implementation slice from 2026-05-10 12:05 PDT:
   - `find lib/services/sourcing -name '*.test.js' -print0 | xargs -0 node --test` passed: `44` tests, `44` pass.
   - `node --check web/app.js` passed.
   - `git diff --check` passed.
+- Phase 6.5J local emulator/browser verification slice from 2026-05-10:
+  - Local emulator command: `SOURCING_PROFESSIONAL_PROFILE_PROVIDER=fake npm run serve:web:full`.
+  - Local dashboard URL: `http://127.0.0.1:5100`.
+  - Verification used only a fresh local synthetic fake Spencer candidate with LinkedIn URL `https://www.linkedin.com/in/spencerwang1`; no TreeHacks source data or live Firestore data was used.
+  - Synthetic source run ID: `phase65j-rich-local-spencer-20260510T184443Z`.
+  - Synthetic source record ID: `phase65j-rich-local-spencer-20260510T184443Z-spencer`.
+  - Dedup candidate ID: `b9a149a9594365abf8e0fe99cd2e4ae7`.
+  - Review label ID: `783cc036-1c61-4dc5-baa1-14c84a53f8c6`.
+  - Approved entity ID: `cand_a99f92fc705c92320cf5615e`.
+  - Browser/Ruflo verified the Approved tab showed exactly one eligible LinkedIn URL for the synthetic candidate: `https://www.linkedin.com/in/spencerwang1`.
+  - Browser/Ruflo clicked the local dashboard lookup action and created fake provider run `vendor_run_dd4416771852f01abfc9154e` and match `vendor_match_554a633834d7325bbc117a0d`.
+  - Browser/Ruflo approved the vendor match from the dashboard.
+  - Read-only API verification after approval:
+    - Run status: `completed`.
+    - Provider: `fake`.
+    - Match review status: `approved`.
+    - Approved vendor evidence ID: `vendor_profile_match:vendor_match_554a633834d7325bbc117a0d`.
+    - Normalized profile URL: `https://www.linkedin.com/in/spencerwang1`.
+    - `aboutSummary` length: `297`.
+    - `experienceSummary` count: `1`.
+    - `projectsPublications` count: `1`.
+    - Rich experience/context present: description plus `https://www.linkedin.com/company/synthetic-labs`.
+    - Rich project/context present: description plus `https://example.test/synthetic-sourcing-pipeline`.
+    - Encoded `&amp;` was not present in normalized output.
+    - Excluded fake email/phone/contact-like fields were not present.
+  - Browser/Ruflo screenshot evidence:
+    - `/tmp/wekruit-phase65j-local-before-fetch.png`
+    - `/tmp/wekruit-phase65j-local-scrolled-fetch.png`
+    - `/tmp/wekruit-phase65j-local-after-fetch-rich.png`
+    - `/tmp/wekruit-phase65j-local-rich-card.png`
+    - `/tmp/wekruit-phase65j-local-rich-card-projects.png`
+    - `/tmp/wekruit-phase65j-local-vendor-buttons.png`
+    - `/tmp/wekruit-phase65j-local-generate-visible.png`
+    - `/tmp/wekruit-phase65j-local-enrichment-review-rich.png`
+    - `/tmp/wekruit-phase65j-local-enrichment-approve-visible.png`
+    - `/tmp/wekruit-phase65j-local-profile-rich-lineage.png`
+  - Local `.env` was checked only for boolean presence of `OPENAI_API_KEY` and `BRIGHTDATA_API_KEY`; secret values were not printed.
+  - Browser/Ruflo clicked `Generate enrichment` from the local Approved detail.
+  - Enrichment run ID: `enrich_run_fb5004f5-4116-4242-8c31-67b8ee895b00`.
+  - Enrichment review item ID: `enrich_review_0184e5099c007ba8cea23ff7`.
+  - Enrichment review API verification before approval:
+    - Status: `pending_review`.
+    - Evidence count: `7`.
+    - Vendor evidence ID included: `vendor_profile_match:vendor_match_554a633834d7325bbc117a0d`.
+    - Vendor evidence type: `vendor_professional_profile`.
+    - Vendor evidence quality: `medium`.
+    - Vendor evidence contained rich experience, rich project, and rich about text.
+    - Draft fields cited the vendor evidence ID.
+    - Excluded fake email/phone/contact-like fields were not present.
+  - Browser/Ruflo selected the Enrichment tab item and clicked `Approve enrichment` from the dashboard.
+  - Final local profile ID: `profile_cand_a99f92fc705c92320cf5615e`.
+  - Final profile API verification:
+    - Approved entity became `enriched` with `needsEnrichment=false`.
+    - Enrichment review item became `approved`.
+    - Final profile status is `active`.
+    - Final profile evidence count is `7`.
+    - Final profile evidence IDs include `vendor_profile_match:vendor_match_554a633834d7325bbc117a0d`.
+    - Resolved profile lineage includes the rich vendor experience/project/about text.
+    - Excluded fake email/phone/contact-like fields were not present.
 - Remaining Phase 6.5J verification:
-  - Run local emulator with fake provider and verify the richer fake Spencer match card in the dashboard.
-  - Verify approved vendor evidence reaches enrichment/profile lineage locally.
-  - Commit and push the verified code/docs slice.
+  - Commit and push the local verification plan-doc slice.
   - Deploy to staging and verify only with a fresh isolated synthetic fake Spencer candidate using `https://www.linkedin.com/in/spencerwang1`; do not use TreeHacks source data.
 
 #### Immediate Blockers Before Full Live Completion
