@@ -3386,6 +3386,37 @@ Phase 6.5K implementation/diagnostic slice from 2026-05-10:
   - The diagnostic established that Bright Data's current response for `https://www.linkedin.com/in/spencerwang1/` does not include experience/project/skill/publication data in the profile endpoint response, so no code-only patch can manufacture that missing professional context without violating the evidence-grounded design.
   - The next product decision is whether to keep LinkedIn profile scraping as a sometimes-thin supplemental source, explicitly allow public LinkedIn activity/post summaries into the field policy, test another approved LinkedIn URL known to expose public work-history details, add website/GitHub/project-page enrichment, or evaluate another professional-data provider.
 
+Additional Phase 6.5K live diagnostic on 2026-05-10:
+
+- User requested a controlled test with `https://www.linkedin.com/in/shixiang-yang-60b46a219/` to determine whether the thin Spencer result was profile-specific.
+- Ran exactly one local Bright Data field-inventory diagnostic call with canonical body shape `{ "input": [{ "url": "..." }] }`.
+  - Output was written to `/tmp/wekruit-brightdata-shixiang-yang-input-inventory.json` for local inspection only.
+  - No Firestore writes, dashboard actions, source-record uploads, candidate approvals, enrichment runs, profile materialization, raw payload commits, or deploys were performed.
+  - Response status: `200 OK`.
+  - Record count: `1`.
+  - Dataset ID: `gd_l1viktl72bvl7bjuj0`.
+- Redacted normalized result:
+  - normalized name returned as `Adam Yang`;
+  - profile URL normalized to `https://www.linkedin.com/in/shixiang-yang-60b46a219`;
+  - current company returned as `Tesla` with public LinkedIn company URL;
+  - location returned as `Los Angeles`;
+  - about length was `89`;
+  - `experienceSummary.length = 0`;
+  - `skills.length = 0`;
+  - `educationSummary.length = 2`;
+  - `projectsPublications.length = 3`.
+- Redacted field inventory:
+  - top-level `experience` existed but was `null`, same as the Spencer diagnostic;
+  - `projects` was an array with `2` items and included `title`, `description`, and `start_date` fields;
+  - `publications` was an array with `1` item and included `title`, `subtitle`, `description`, and `date` fields;
+  - `certifications` was an array with `1` item, but certifications remain outside the current v1 normalized allowlist unless explicitly folded into an approved summary bucket later;
+  - no `skills`, `patents`, `volunteer_experience`, `courses`, or `organizations` fields were returned.
+- Conclusion:
+  - The thin Spencer result is profile/provider-output specific, not a universal failure of Bright Data or the WeKruit normalizer.
+  - Bright Data can return materially richer professional/project context for some LinkedIn URLs through the same profile endpoint, and the current normalizer preserves that project/publication context into `projectsPublications`.
+  - However, this second test still did not return work-history `experience` rows. For the profiles tested so far, Bright Data's profile endpoint is better at returning public project/publication context than full experience descriptions.
+  - Recommended next product stance: keep Bright Data LinkedIn profile scraping as useful but variable enrichment evidence. For consistent richness, prioritize additional approved public sources such as personal websites, GitHub repos, Devpost project pages, and possibly a future explicit policy decision for LinkedIn public activity/posts or another professional data provider.
+
 #### Immediate Blockers Before Full Live Completion
 
 - Deployed Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` is now set and metadata-confirmed as version `1` / `ENABLED`; the value was not exposed.
