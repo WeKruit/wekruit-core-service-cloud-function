@@ -118,6 +118,8 @@ const state = {
   enrichmentItems: [],
   profiles: [],
   profileDetails: {},
+  vendorProfileStates: {},
+  selectedVendorLinkedInUrls: {},
   selectedJobRunId: "",
   reviewRunId: "",
   reviewStatusFilter: "pending_review",
@@ -137,6 +139,10 @@ const state = {
   reviewSubmitting: false,
   approvedSubmitting: false,
   enrichmentSubmitting: false,
+  vendorLookupLoadingId: "",
+  vendorLookupSubmitting: false,
+  vendorRefreshSubmittingId: "",
+  vendorDecisionSubmittingId: "",
   profileDetailsLoadingId: "",
   reviewMessage: "",
   reviewMessageStatus: "",
@@ -1070,6 +1076,50 @@ function getSelectedApprovedEntity() {
   return filteredApprovedEntities().find((entity) => entity.id === state.selectedApprovedId) ?? null;
 }
 
+function vendorStateForEntity(entityId) {
+  return state.vendorProfileStates[entityId] || null;
+}
+
+function eligibleLinkedInUrlsForVendorState(vendorState) {
+  return arrayValue(vendorState?.eligibleLinkedInUrls).filter((entry) => stringValue(entry?.url));
+}
+
+function selectedVendorLinkedInUrl(entityId, vendorState) {
+  const urls = eligibleLinkedInUrlsForVendorState(vendorState).map((entry) => entry.url);
+  const selected = state.selectedVendorLinkedInUrls[entityId];
+  if (selected && urls.includes(selected)) {
+    return selected;
+  }
+  return urls[0] || "";
+}
+
+function setSelectedVendorLinkedInUrl(entityId, url) {
+  if (!entityId) {
+    return;
+  }
+  state.selectedVendorLinkedInUrls[entityId] = stringValue(url);
+}
+
+function vendorRunsForUrl(vendorState, url) {
+  return arrayValue(vendorState?.runs)
+    .filter((run) => stringValue(run?.selectedLinkedInUrl) === url)
+    .sort((left, right) =>
+      new Date(right.updatedAt || right.createdAt || 0).getTime() - new Date(left.updatedAt || left.createdAt || 0).getTime(),
+    );
+}
+
+function vendorMatchesForUrl(vendorState, url) {
+  return arrayValue(vendorState?.matches)
+    .filter((match) => stringValue(match?.selectedLinkedInUrl) === url)
+    .sort((left, right) =>
+      new Date(right.updatedAt || right.createdAt || 0).getTime() - new Date(left.updatedAt || left.createdAt || 0).getTime(),
+    );
+}
+
+function isReusableVendorRun(run) {
+  return Boolean(run) && stringValue(run.status) !== "failed";
+}
+
 function ensureSelections() {
   const defaultRunId = chooseDefaultRunId();
 
@@ -1136,6 +1186,8 @@ function evidenceTypeLabel(type) {
     email: "Email",
     homepage: "Homepage",
     github: "GitHub",
+    linkedin: "LinkedIn",
+    vendor_professional_profile: "Professional profile",
     institution: "Institution",
     orcid: "ORCID",
     source_native_id: "Source ID",
@@ -1893,6 +1945,236 @@ function renderApprovedTable() {
     .join("");
 }
 
+function renderEligibleLinkedInUrlControl(entity, vendorState, selectedUrl) {
+  const urls = eligibleLinkedInUrlsForVendorState(vendorState);
+  if (!urls.length) {
+    return `
+      <div class="subtle-callout">
+        No LinkedIn profile URL is available from this candidate's approved source/evidence lineage.
+      </div>
+    `;
+  }
+
+  const selectedLineage = urls.find((entry) => entry.url === selectedUrl) || urls[0];
+  return `
+    <div class="vendor-url-control">
+      <label class="field" for="vendorLinkedInUrl_${escapeHtml(entity.id)}">
+        <span>LinkedIn URL</span>
+        <select id="vendorLinkedInUrl_${escapeHtml(entity.id)}" data-vendor-linkedin-select="${escapeHtml(entity.id)}">
+          ${urls.map((entry) => `<option value="${escapeHtml(entry.url)}" ${entry.url === selectedUrl ? "selected" : ""}>${escapeHtml(entry.url)}</option>`).join("")}
+        </select>
+      </label>
+      <div class="vendor-url-meta">
+        <div>${renderTextWithLinks(selectedLineage?.url || selectedUrl)}</div>
+        <div class="inline-list">
+          ${arrayValue(selectedLineage?.sourceRecordIds).map((id) => renderPill(id, "neutral")).join("")}
+          ${arrayValue(selectedLineage?.evidenceIds).map((id) => renderPill(id, "accent")).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function vendorLookupButtonLabel({ latestRun, hasReusableRun }) {
+  if (state.vendorLookupSubmitting) {
+    return "Fetching profile...";
+  }
+  if (latestRun?.status === "failed") {
+    return "Retry LinkedIn profile";
+  }
+  if (hasReusableRun) {
+    return "Lookup already fetched";
+  }
+  return "Fetch LinkedIn profile";
+}
+
+function renderVendorRunCards(entityId, runs) {
+  if (!runs.length) {
+    return `<p class="empty-detail">No lookup run exists for the selected LinkedIn URL.</p>`;
+  }
+
+  return `
+    <div class="vendor-card-list">
+      ${runs
+        .map((run) => {
+          const isPendingSnapshot = run.status === "async_snapshot_pending";
+          const isRefreshing = state.vendorRefreshSubmittingId === run.id;
+          return `
+            <article class="vendor-card">
+              <div class="vendor-card__head">
+                <div>
+                  <div class="vendor-card__title">${escapeHtml(displayLabel(run.provider || "vendor"))} lookup</div>
+                  <div class="vendor-card__meta">${escapeHtml(formatDateTime(run.updatedAt || run.createdAt))}</div>
+                </div>
+                ${renderPill(displayLabel(run.status || "unknown"), statusVariant(run.status || "unknown"))}
+              </div>
+              <div class="fact-grid">
+                <div class="fact-row"><span class="fact-label">URL</span><div class="fact-value">${renderTextWithLinks(run.selectedLinkedInUrl)}</div></div>
+                <div class="fact-row"><span class="fact-label">Dataset</span><div class="fact-value mono">${escapeHtml(run.datasetId || "—")}</div></div>
+                <div class="fact-row"><span class="fact-label">Snapshot</span><div class="fact-value mono">${escapeHtml(run.snapshotId || "—")}</div></div>
+                ${run.error ? `<div class="fact-row"><span class="fact-label">Error</span><div class="fact-value">${escapeHtml(run.error)}</div></div>` : ""}
+              </div>
+              ${
+                isPendingSnapshot
+                  ? `
+                    <div class="action-row">
+                      <button
+                        type="button"
+                        class="button-muted"
+                        data-refresh-vendor-run="${escapeHtml(run.id)}"
+                        data-approved-id="${escapeHtml(entityId)}"
+                        ${isRefreshing ? "disabled" : ""}
+                      >${escapeHtml(isRefreshing ? "Checking..." : "Check snapshot")}</button>
+                    </div>
+                  `
+                  : ""
+              }
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderVendorProfileField(label, value, isList = false) {
+  const values = isList ? arrayValue(value) : [stringValue(value)].filter(Boolean);
+  if (!values.length) {
+    return "";
+  }
+  return `
+    <div class="fact-row">
+      <span class="fact-label">${escapeHtml(label)}</span>
+      <div class="fact-value">${isList ? values.map((entry) => escapeHtml(entry)).join("<br />") : renderTextWithLinks(values[0])}</div>
+    </div>
+  `;
+}
+
+function renderVendorProfileMatchCards(matches) {
+  if (!matches.length) {
+    return `<p class="empty-detail">No profile match card exists for the selected LinkedIn URL.</p>`;
+  }
+
+  return `
+    <div class="vendor-card-list">
+      ${matches
+        .map((match) => {
+          const profile = match.normalizedProfile || {};
+          const pending = match.reviewStatus === "pending_review";
+          const deciding = state.vendorDecisionSubmittingId === match.id;
+          return `
+            <article class="vendor-card">
+              <div class="vendor-card__head">
+                <div>
+                  <div class="vendor-card__title">${escapeHtml(profile.name || match.providerProfileUrl || "Professional profile")}</div>
+                  <div class="vendor-card__meta">${renderTextWithLinks(match.providerProfileUrl || profile.profileUrl || match.selectedLinkedInUrl)}</div>
+                </div>
+                ${renderPill(displayLabel(match.reviewStatus || "pending_review"), statusVariant(match.reviewStatus || "pending_review"))}
+              </div>
+              <div class="fact-grid">
+                ${renderVendorProfileField("Headline", profile.headline)}
+                ${renderVendorProfileField("Company", profile.currentCompany)}
+                ${renderVendorProfileField("Location", profile.location)}
+                ${renderVendorProfileField("Education", profile.educationSummary, true)}
+                ${renderVendorProfileField("Experience", profile.experienceSummary, true)}
+                ${renderVendorProfileField("Skills", profile.skills, true)}
+                ${renderVendorProfileField("About", profile.aboutSummary)}
+                ${renderVendorProfileField("Projects", profile.projectsPublications, true)}
+              </div>
+              ${
+                pending
+                  ? `
+                    <div class="action-row">
+                      <button type="button" data-vendor-match-action="approve" data-vendor-match-id="${escapeHtml(match.id)}" ${deciding ? "disabled" : ""}>Approve profile</button>
+                      <button type="button" class="button-muted" data-vendor-match-action="reject" data-vendor-match-id="${escapeHtml(match.id)}" ${deciding ? "disabled" : ""}>Reject</button>
+                      <button type="button" class="button-muted" data-vendor-match-action="ignore" data-vendor-match-id="${escapeHtml(match.id)}" ${deciding ? "disabled" : ""}>Ignore</button>
+                    </div>
+                  `
+                  : `
+                    <div class="meta-strip">
+                      <span><strong>Reviewer</strong> ${escapeHtml(match.reviewerId || "—")}</span>
+                      <span><strong>Reviewed</strong> ${escapeHtml(formatDateTime(match.reviewedAt))}</span>
+                    </div>
+                  `
+              }
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderProfessionalProfileLookupSection(entity, hasPendingMergeBlockers) {
+  const vendorState = vendorStateForEntity(entity.id);
+  const isLoading = state.vendorLookupLoadingId === entity.id;
+
+  if (!vendorState) {
+    return `
+      <section class="detail-section">
+        <h4>LinkedIn profile enrichment</h4>
+        <p class="empty-detail">${isLoading ? "Loading LinkedIn profile lookup state..." : "LinkedIn profile lookup state has not loaded yet."}</p>
+      </section>
+    `;
+  }
+
+  const selectedUrl = selectedVendorLinkedInUrl(entity.id, vendorState);
+  if (selectedUrl) {
+    setSelectedVendorLinkedInUrl(entity.id, selectedUrl);
+  }
+  const urls = eligibleLinkedInUrlsForVendorState(vendorState);
+  const runsForUrl = vendorRunsForUrl(vendorState, selectedUrl);
+  const matchesForUrl = vendorMatchesForUrl(vendorState, selectedUrl);
+  const latestRun = runsForUrl[0] || null;
+  const hasReusableRun = runsForUrl.some((run) => isReusableVendorRun(run));
+  const lookupDisabled = hasPendingMergeBlockers ||
+    !selectedUrl ||
+    state.vendorLookupSubmitting ||
+    isLoading ||
+    hasReusableRun;
+  const lookupDisabledReason = hasPendingMergeBlockers
+    ? "Resolve pending merge reviews before lookup."
+    : hasReusableRun
+      ? "This LinkedIn URL already has a lookup result or no-match state."
+      : "";
+
+  return `
+    <section class="detail-section">
+      <h4>LinkedIn profile enrichment</h4>
+      ${renderEligibleLinkedInUrlControl(entity, vendorState, selectedUrl)}
+      ${
+        selectedUrl
+          ? `
+            <div class="action-row">
+              <button
+                type="button"
+                class="${lookupDisabled ? "button-muted" : ""}"
+                data-run-vendor-lookup="${escapeHtml(entity.id)}"
+                data-vendor-linkedin-url="${escapeHtml(selectedUrl)}"
+                ${lookupDisabled ? "disabled" : ""}
+              >${escapeHtml(vendorLookupButtonLabel({ latestRun, hasReusableRun }))}</button>
+            </div>
+            ${lookupDisabledReason ? `<p class="helper-text">${escapeHtml(lookupDisabledReason)}</p>` : ""}
+          `
+          : ""
+      }
+      <p class="detail-result" data-status="${escapeHtml(state.approvedMessageStatus)}">${escapeHtml(state.approvedMessage)}</p>
+      <div class="detail-section">
+        <h4>Lookup runs</h4>
+        ${renderVendorRunCards(entity.id, runsForUrl)}
+      </div>
+      <div class="detail-section">
+        <h4>Profile match review</h4>
+        ${
+          latestRun?.status === "no_match"
+            ? `<div class="subtle-callout">Bright Data returned no profile match for this LinkedIn URL.</div>`
+            : renderVendorProfileMatchCards(matchesForUrl)
+        }
+      </div>
+    </section>
+  `;
+}
+
 function renderApprovedDetail() {
   const entity = getSelectedApprovedEntity();
 
@@ -1942,6 +2224,8 @@ function renderApprovedDetail() {
         <div class="fact-row"><span class="fact-label">Updated</span><div class="fact-value">${escapeHtml(formatDateTime(entity.updatedAt || entity.createdAt))}</div></div>
       </div>
     </section>
+
+    ${renderProfessionalProfileLookupSection(entity, hasPendingMergeBlockers)}
 
     <section class="detail-section">
       <h4>Enrichment</h4>
@@ -2497,6 +2781,7 @@ async function loadData() {
     state.enrichmentItems = normalizeListPayload(enrichmentPayload);
     state.profiles = normalizeListPayload(profilesPayload);
     state.profileDetails = {};
+    state.vendorProfileStates = {};
     state.selectedJobRunId = previousJobRunId;
     state.reviewRunId = previousReviewRunId;
     state.selectedCandidateId = previousCandidateId;
@@ -2505,6 +2790,9 @@ async function loadData() {
     state.selectedProfileId = previousProfileId;
     ensureSelections();
     await loadSelectedProfileDetails();
+    if (state.page === "approved") {
+      await loadSelectedVendorProfileState();
+    }
     setConnectionStatus("Ready", "ready");
     render();
   } catch (error) {
@@ -2512,6 +2800,37 @@ async function loadData() {
     elements.reviewResult.textContent = error.message;
     elements.reviewResult.dataset.status = "error";
   }
+}
+
+async function loadVendorProfileState(approvedEntityId, force = false) {
+  if (!approvedEntityId || (!force && state.vendorProfileStates[approvedEntityId])) {
+    return;
+  }
+  state.vendorLookupLoadingId = approvedEntityId;
+  renderApprovedDetail();
+
+  try {
+    const payload = await requestJson(`/approved-entities/${encodeURIComponent(approvedEntityId)}/vendor-profile-matches`);
+    if (payload?.data) {
+      state.vendorProfileStates[approvedEntityId] = payload.data;
+      const selectedUrl = selectedVendorLinkedInUrl(approvedEntityId, payload.data);
+      if (selectedUrl) {
+        setSelectedVendorLinkedInUrl(approvedEntityId, selectedUrl);
+      }
+    }
+  } catch (error) {
+    state.approvedMessage = error.message;
+    state.approvedMessageStatus = "error";
+  } finally {
+    if (state.vendorLookupLoadingId === approvedEntityId) {
+      state.vendorLookupLoadingId = "";
+    }
+    renderApprovedDetail();
+  }
+}
+
+async function loadSelectedVendorProfileState(force = false) {
+  await loadVendorProfileState(state.selectedApprovedId, force);
 }
 
 async function loadProfileDetails(profileId) {
@@ -2668,6 +2987,105 @@ async function generateEnrichment(approvedEntityId) {
   }
 }
 
+async function runVendorProfileLookup(approvedEntityId, selectedLinkedInUrl) {
+  if (!approvedEntityId || !selectedLinkedInUrl || state.vendorLookupSubmitting) {
+    return;
+  }
+
+  state.vendorLookupSubmitting = true;
+  state.approvedMessage = "Fetching LinkedIn profile...";
+  state.approvedMessageStatus = "";
+  renderApprovedDetail();
+
+  try {
+    const payload = await requestJson(`/approved-entities/${encodeURIComponent(approvedEntityId)}/vendor-profile-lookup:run`, {
+      method: "POST",
+      body: JSON.stringify({ selectedLinkedInUrl }),
+    });
+    if (payload?.data) {
+      state.vendorProfileStates[approvedEntityId] = payload.data;
+    }
+    const runStatus = stringValue(payload?.data?.run?.status);
+    state.approvedMessage = runStatus === "async_snapshot_pending"
+      ? "LinkedIn profile lookup is pending. Check the snapshot when it is ready."
+      : runStatus === "no_match"
+        ? "LinkedIn profile lookup returned no match."
+        : payload?.data?.reusedExisting
+          ? "Existing LinkedIn profile lookup loaded."
+          : "LinkedIn profile lookup created.";
+    state.approvedMessageStatus = "success";
+    await loadVendorProfileState(approvedEntityId, true);
+  } catch (error) {
+    state.approvedMessage = error.message;
+    state.approvedMessageStatus = "error";
+  } finally {
+    state.vendorLookupSubmitting = false;
+    renderApprovedDetail();
+  }
+}
+
+async function refreshVendorProfileRun(approvedEntityId, runId) {
+  if (!approvedEntityId || !runId || state.vendorRefreshSubmittingId) {
+    return;
+  }
+
+  state.vendorRefreshSubmittingId = runId;
+  state.approvedMessage = "Checking Bright Data snapshot...";
+  state.approvedMessageStatus = "";
+  renderApprovedDetail();
+
+  try {
+    const payload = await requestJson(`/vendor-enrichment-runs/${encodeURIComponent(runId)}/refresh`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (payload?.data) {
+      state.vendorProfileStates[approvedEntityId] = payload.data;
+    }
+    const runStatus = stringValue(payload?.data?.run?.status);
+    state.approvedMessage = runStatus === "async_snapshot_pending"
+      ? "Snapshot is still pending."
+      : "Snapshot check completed.";
+    state.approvedMessageStatus = "success";
+  } catch (error) {
+    state.approvedMessage = error.message;
+    state.approvedMessageStatus = "error";
+  } finally {
+    state.vendorRefreshSubmittingId = "";
+    renderApprovedDetail();
+  }
+}
+
+async function decideVendorProfileMatch(matchId, action) {
+  if (!matchId || !action || state.vendorDecisionSubmittingId) {
+    return;
+  }
+  const approvedEntityId = state.selectedApprovedId;
+  state.vendorDecisionSubmittingId = matchId;
+  state.approvedMessage = "Saving professional profile decision...";
+  state.approvedMessageStatus = "";
+  renderApprovedDetail();
+
+  try {
+    await requestJson(`/vendor-profile-matches/${encodeURIComponent(matchId)}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+    state.approvedMessage = "Professional profile decision saved";
+    state.approvedMessageStatus = "success";
+    await loadData();
+    if (approvedEntityId) {
+      await loadVendorProfileState(approvedEntityId, true);
+    }
+  } catch (error) {
+    state.approvedMessage = error.message;
+    state.approvedMessageStatus = "error";
+  } finally {
+    state.vendorDecisionSubmittingId = "";
+    renderApprovedDetail();
+  }
+}
+
 function buildDraftFromEnrichmentForm(item) {
   const draft = item?.draft || {};
   const primaryTrack = elements.enrichmentDetailBody.querySelector("[data-enrichment-primary-track]")?.value || draft.primaryTrack || "unknown_other";
@@ -2767,6 +3185,9 @@ function setPage(page, updateHash = true) {
   state.page = normalizePage(page);
   if (state.page === "profiles") {
     void loadSelectedProfileDetails().then(() => renderProfileDetail());
+  }
+  if (state.page === "approved") {
+    void loadSelectedVendorProfileState().then(() => renderApprovedDetail());
   }
   if (updateHash) {
     const nextHash = `#${state.page}`;
@@ -2894,6 +3315,7 @@ function bindEvents() {
     state.selectedApprovedId = button.getAttribute("data-approved-id") || "";
     renderApprovedTable();
     renderApprovedDetail();
+    void loadSelectedVendorProfileState().then(() => renderApprovedDetail());
   });
 
   elements.enrichmentTableBody.addEventListener("click", (event) => {
@@ -2915,6 +3337,33 @@ function bindEvents() {
   });
 
   document.addEventListener("click", (event) => {
+    const vendorLookupButton = event.target.closest("[data-run-vendor-lookup]");
+    if (vendorLookupButton) {
+      void runVendorProfileLookup(
+        vendorLookupButton.getAttribute("data-run-vendor-lookup") || "",
+        vendorLookupButton.getAttribute("data-vendor-linkedin-url") || "",
+      );
+      return;
+    }
+
+    const vendorRefreshButton = event.target.closest("[data-refresh-vendor-run]");
+    if (vendorRefreshButton) {
+      void refreshVendorProfileRun(
+        vendorRefreshButton.getAttribute("data-approved-id") || state.selectedApprovedId,
+        vendorRefreshButton.getAttribute("data-refresh-vendor-run") || "",
+      );
+      return;
+    }
+
+    const vendorDecisionButton = event.target.closest("[data-vendor-match-action]");
+    if (vendorDecisionButton) {
+      void decideVendorProfileMatch(
+        vendorDecisionButton.getAttribute("data-vendor-match-id") || "",
+        vendorDecisionButton.getAttribute("data-vendor-match-action") || "ignore",
+      );
+      return;
+    }
+
     const generateButton = event.target.closest("[data-generate-enrichment]");
     if (generateButton) {
       void generateEnrichment(generateButton.getAttribute("data-generate-enrichment") || "");
@@ -2947,6 +3396,14 @@ function bindEvents() {
   });
 
   document.addEventListener("change", (event) => {
+    const vendorUrlSelect = event.target.closest("[data-vendor-linkedin-select]");
+    if (vendorUrlSelect) {
+      const approvedEntityId = vendorUrlSelect.getAttribute("data-vendor-linkedin-select") || "";
+      setSelectedVendorLinkedInUrl(approvedEntityId, vendorUrlSelect.value);
+      renderApprovedDetail();
+      return;
+    }
+
     const signalInput = event.target.closest("[data-review-signal]");
     if (!signalInput) {
       return;
@@ -2970,6 +3427,9 @@ function bindEvents() {
     state.page = normalizePage(window.location.hash.replace(/^#/, ""));
     if (state.page === "profiles") {
       void loadSelectedProfileDetails().then(() => renderProfileDetail());
+    }
+    if (state.page === "approved") {
+      void loadSelectedVendorProfileState().then(() => renderApprovedDetail());
     }
     render();
   });

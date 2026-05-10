@@ -937,7 +937,9 @@ test('runProfessionalProfileLookupForApprovedEntity blocks pending merge review 
       approvedEntity.id,
       'https://www.linkedin.com/in/spencerwang1',
     ),
-    (error: unknown) => error instanceof PendingMergeReviewBlockError,
+    (error: unknown) =>
+      error instanceof PendingMergeReviewBlockError &&
+      error.message.includes('running LinkedIn profile lookup'),
   );
   assert.equal(harness.providerCalls, 0);
 });

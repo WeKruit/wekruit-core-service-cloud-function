@@ -572,9 +572,10 @@ export class PendingMergeReviewBlockError extends Error {
   constructor(
     readonly approvedEntityId: string,
     readonly blockers: PendingMergeReviewBlockerSummary[],
+    action = 'generating enrichment',
   ) {
     const label = blockers.length === 1 ? 'merge review' : 'merge reviews';
-    super(`Resolve ${blockers.length} pending ${label} before generating enrichment.`);
+    super(`Resolve ${blockers.length} pending ${label} before ${action}.`);
     this.name = 'PendingMergeReviewBlockError';
   }
 }
@@ -1228,7 +1229,7 @@ export class SourcingService {
       await this.repository.listDedupCandidates('pending_review'),
     );
     if (pendingMergeBlockers.length > 0) {
-      throw new PendingMergeReviewBlockError(approvedEntity.id, pendingMergeBlockers);
+      throw new PendingMergeReviewBlockError(approvedEntity.id, pendingMergeBlockers, 'running LinkedIn profile lookup');
     }
 
     const canonicalUrl = normalizeLinkedInProfileUrl(selectedLinkedInUrl);
