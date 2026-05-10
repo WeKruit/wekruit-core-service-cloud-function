@@ -86,10 +86,12 @@ This is the current single source of truth after the successful Phase 3.5 live s
   - Exact Firestore counts after Stanford upload: `1` source run, `1,029` source records, `4,878` evidence records, `1,010` dedup review candidates, and `0` review labels / approved entities / enrichment runs / enrichment review items / final profiles.
   - No candidate approvals, merge decisions, enrichment generation, enrichment review decisions, or profile materialization were performed during the Stanford upload.
 - Current Bright Data waiting items:
-  - User/team will provide `BRIGHTDATA_API_KEY` through `wekruit-core-service-cloud-function/.env` for local development and Firebase Secret Manager for deployed testing.
+  - Local `BRIGHTDATA_API_KEY` is present in `wekruit-core-service-cloud-function/.env` as of 2026-05-09. The value was not printed. `.env` is gitignored and untracked.
+  - Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` still must be set or confirmed before deployed live lookup verification. If the user greenlights implementation, use the local value only to set/confirm the Firebase secret without printing it.
   - Confirm the Bright Data account has access to the LinkedIn Scraper API / Profiles scraper.
   - Confirm the team-approved data-use policy for scraping LinkedIn profile URLs that already appear in Devpost/GitHub/source evidence.
   - First live Bright Data test policy is confirmed: after local fake/provider tests pass, use exactly one approved staging candidate from the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`, with a clear LinkedIn profile URL manually selected from the Approved detail panel. The exact candidate/URL remains to be chosen at test time.
+  - Read-only live check on 2026-05-09 confirmed `https://wekruit-sourcing.web.app/api/sourcing/health` is healthy and the deployed Approved tab is reachable, but the live `approved-entities` endpoint currently returns `0` approved entities. Before the one live Bright Data lookup, deliberately approve or seed exactly one staging candidate with a clear LinkedIn URL.
   - Manual-only v1 mode from the Approved detail panel is confirmed.
   - Raw vendor payload retention policy is confirmed for v1: store normalized summaries only, with no full raw Bright Data payload in hot Firestore docs.
   - Field allowlist is confirmed for v1: profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, and projects/publications if present. Contact/private/sensitive fields are excluded unless explicitly approved later.
@@ -1843,7 +1845,8 @@ Rejected or ignored matches should remain tied to the selected LinkedIn URL/quer
 
 ### Required Team Decisions
 
-- [ ] Provide `BRIGHTDATA_API_KEY` through `wekruit-core-service-cloud-function/.env` for local testing and Firebase Secret Manager for deployed testing.
+- [x] Provide `BRIGHTDATA_API_KEY` through `wekruit-core-service-cloud-function/.env` for local testing. Local presence was confirmed on 2026-05-09 without printing the value.
+- [ ] Set or confirm Firebase Secret Manager `BRIGHTDATA_API_KEY` for deployed testing in `wekruit-dev-env`.
 - [ ] Confirm Bright Data account access to the LinkedIn Scraper API and Profiles dataset.
 - [ ] Confirm allowed Bright Data use case and data-use policy for LinkedIn URLs found in Devpost/GitHub/source evidence.
 - [x] Confirm which fields may be stored/displayed: v1 allows profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, and projects/publications if present. Contact/private/sensitive fields are excluded unless explicitly approved later.
@@ -1917,6 +1920,352 @@ This section should be updated after each planning discussion so implementation 
    - Candidate policy: use one known approved staging candidate with a clear LinkedIn profile URL manually selected from the Approved detail panel. The exact candidate and URL will be chosen at test time after the local path works.
    - Boundary: do not run live Bright Data calls during planning or before local fake/provider verification passes.
    - Reason: this validates the real integration in the environment the team is currently using while keeping vendor spend, data mutation, and reviewer workflow risk tightly bounded.
+
+### Bright Data Implementation Readiness Deep Dive
+
+Last updated: 2026-05-09. Planning only; no implementation started.
+
+This section is the greenlight-ready execution plan. If context compacts during implementation, resume from the latest phase status and verification notes here.
+
+#### Current Code Map
+
+- `src/services/sourcing/functions/http/api.ts`
+  - Current state: Express routes cover source runs, source records, review labels, approved entities, candidate profiles, enrichment generation, and enrichment review decisions.
+  - Bright Data work: add route schemas and routes for listing vendor matches, running a manual approved-entity LinkedIn lookup, and deciding a vendor match.
+  - Secret work: add `defineSecret('BRIGHTDATA_API_KEY')` and include it in the `sourcingApi` secret list alongside `OPENAI_API_KEY`.
+
+- `src/services/sourcing/application/service.ts`
+  - Current state: owns approved entities, pending-merge blocker logic, enrichment generation, enrichment review, profile materialization, and Approved tab review-state summaries.
+  - Bright Data work: add service methods for `listVendorProfileMatchesForApprovedEntity`, `runProfessionalProfileLookupForApprovedEntity`, and `decideVendorProfileMatch`.
+  - Guard work: reuse `findPendingMergeBlockersForEntity` before vendor lookup, not only before OpenAI enrichment.
+  - Re-enrichment work: when a Bright Data match is approved, update the approved entity with `needsEnrichment=true`; if already enriched, preserve the existing final profile until manual re-enrichment plus enrichment HITL completes.
+
+- `src/services/sourcing/application/extraction.ts`
+  - Current state: extracts typed evidence for email, ORCID, homepage, GitHub, DBLP, OpenReview, Google Scholar, source URL/native ID, institution, DOI, and name.
+  - Bright Data work: add `linkedin` as a first-class evidence type for display, reviewer selection, vendor lookup seeds, and lineage.
+  - Dedup boundary: do not add LinkedIn to `strongExactEvidenceTypes` in `dedup.ts`; it must not create strong automatic merge candidates in v1.
+
+- `src/services/sourcing/application/enrichment.ts`
+  - Current state: builds an evidence pack from approved source records, source evidence, and review labels; validation allows only approved evidence IDs.
+  - Bright Data work: include only reviewer-approved vendor profile summaries as evidence-like context in the evidence pack.
+  - Lineage rule: approved Bright Data summaries need stable vendor evidence IDs, for example `vendor_profile_match:<matchId>`, so enrichment validation, review field evidence, and final profile lineage can reference them without storing raw vendor payloads.
+
+- `src/services/sourcing/domain/records.ts`
+  - Current state: stores source/evidence/review/approved/enrichment/profile schemas and taxonomy enums.
+  - Bright Data work: add schemas and types for vendor lookup runs, vendor profile matches, vendor reviewer decisions, normalized professional summaries, and `linkedin` evidence.
+  - Storage boundary: normalized summaries only; no full raw Bright Data payload in hot Firestore docs.
+
+- `src/shared/firestore/collections.ts` and `src/services/sourcing/repositories/sourcingRepository.ts`
+  - Current state: collection constants and repository methods cover source runs, source records, evidence, dedup candidates, review labels, approved entities, enrichment runs/items, and candidate profiles.
+  - Bright Data work: add `sourcing-vendor-enrichment-runs` and `sourcing-vendor-profile-matches`, plus list/get/upsert/update methods needed by the service.
+  - Query-hash rule: rejected and ignored matches are remembered by selected LinkedIn URL/query hash and approved evidence lineage to avoid repeated spend and repeated bad-match display.
+
+- `web/app.js`
+  - Current state: dashboard has Jobs, Review, Approved, Enrichment, and Profiles tabs. Approved detail already has a manual `Generate enrichment` action and pending-merge disabled state.
+  - Bright Data work: add an Approved-detail professional profile section showing known LinkedIn URLs, manual fetch action, vendor result cards, and approve/reject/ignore controls.
+  - UI boundary: disable lookup when pending merge blockers exist, when no LinkedIn URL is available/selected, or while lookup is in progress.
+
+- `firebase.sourcing.json` and `scripts/build-sourcing-functions-bundle.mjs`
+  - Current state: deployment targets the dedicated `wekruit-sourcing` Hosting site and sourcing-only function bundle.
+  - Bright Data work: no new deploy target should be added. Continue deploying only `functions:core-service:sourcing.api` and Hosting site `wekruit-sourcing`.
+
+#### Bright Data API Assumptions Rechecked
+
+- Official docs still identify LinkedIn Profiles dataset ID `gd_l1viktl72bvl7bjuj0`.
+- Official docs still recommend synchronous `/datasets/v3/scrape` for real-time single/manual lookups and asynchronous `/datasets/v3/trigger` for batch, 20+ URL, discovery, webhook, or large production flows.
+- Synchronous requests use bearer authentication and JSON input containing LinkedIn profile URLs. The docs show both a direct array body and an API-reference `input` wrapper. Implementation should isolate this in `BrightDataLinkedInProvider` and cover the exact request payload with provider tests before any live call.
+- Sync calls can return a `snapshot_id` if the request exceeds the sync timeout. V1 should store that run as `async_snapshot_pending` or `failed_async_required` and show a reviewer-safe message rather than silently polling indefinitely.
+
+#### Evidence And Lineage Design
+
+Bright Data output must not be stored as a raw source record. It should be stored as a vendor profile match and projected into enrichment as approved evidence-like context only after reviewer approval.
+
+Implementation rule:
+
+1. Store the normalized vendor match in `sourcing-vendor-profile-matches`.
+2. When the reviewer approves a match, create or expose a stable vendor evidence ID derived from the match ID, for example `vendor_profile_match:<matchId>`.
+3. Extend the enrichment evidence pack so `evidence` contains both approved source evidence and approved vendor evidence-like entries.
+4. Validate LLM/reviewer field evidence against the full evidence-pack ID set, not only `approvedEntity.evidenceIds`.
+5. Extend profile-detail lineage so field evidence can resolve both source evidence records and vendor profile-match evidence entries.
+6. Keep OpenAI enrichment HITL unchanged: Bright Data adds evidence; it does not assign final labels, materialize profiles, or bypass review.
+
+This design is necessary because current enrichment validation rejects field evidence IDs that are not in the approved evidence pack, and current profile details resolve field evidence IDs for display.
+
+#### Greenlight Implementation Phases
+
+Each phase must end by updating this plan document with:
+
+- code paths changed;
+- tests run and exact result;
+- any browser/Ruflo screenshots or deployed URLs checked;
+- remaining blockers before the next phase.
+
+Do not continue to the next phase if a phase verification fails.
+
+##### Phase 6.5A: Preflight And Safety Check
+
+Scope:
+
+- Re-check `git status --short --branch` in both repos.
+- Confirm both plan docs match.
+- Confirm local `BRIGHTDATA_API_KEY` presence without printing the value.
+- Confirm `.env` is ignored and untracked.
+- Confirm the active dashboard/API remains `https://wekruit-sourcing.web.app` / Firebase project `wekruit-dev-env`.
+- Read-only check current live queue state before any mutation.
+
+Verification:
+
+- `diff -q` between both plan docs returns clean.
+- `git status --short --branch` shows only expected work before edits.
+- `BRIGHTDATA_API_KEY present` check prints only presence, not value.
+- `git check-ignore -v .env` confirms ignore rule.
+- Read-only `GET /api/sourcing/health` returns healthy.
+- Browser/Ruflo opens `https://wekruit-sourcing.web.app/#approved` and confirms the dashboard loads.
+
+Current preflight findings from 2026-05-09:
+
+- Local `BRIGHTDATA_API_KEY` is present.
+- `.env` is ignored and untracked.
+- Live health endpoint is healthy.
+- Live Approved tab is reachable with Ruflo.
+- Live approved entities currently total `0`, so a live Bright Data lookup requires deliberately approving or seeding exactly one staging candidate after local verification.
+
+##### Phase 6.5B: Domain, Provider Contract, And Fake Provider
+
+Scope:
+
+- Add `linkedin` to sourcing evidence types and extraction normalization.
+- Keep LinkedIn out of strong dedup evidence.
+- Add vendor run/match/decision schemas and TypeScript types.
+- Add `ProfessionalProfileLookupPort`.
+- Add deterministic fake provider fixtures for local tests.
+- Add Bright Data provider implementation behind the port, but do not wire live calls into UI until fake-provider tests pass.
+
+Verification:
+
+- Unit tests prove LinkedIn URLs are extracted as `linkedin` evidence.
+- Unit tests prove LinkedIn evidence does not create strong dedup candidates.
+- Unit tests prove fake provider returns only normalized allowed fields.
+- Unit tests prove Bright Data provider builds the expected endpoint, auth header, dataset ID, and request body without printing the API key.
+- `npm run build` passes.
+
+Plan update required before Phase 6.5C:
+
+- Record exact files changed.
+- Record focused test command and result.
+- Record whether provider request-body shape followed direct-array or `input` wrapper after test implementation.
+
+##### Phase 6.5C: Firestore Repository And Backend Service Flow
+
+Scope:
+
+- Add collection constants for `sourcing-vendor-enrichment-runs` and `sourcing-vendor-profile-matches`.
+- Add repository methods for vendor runs and matches.
+- Add service method to list vendor matches for an approved entity.
+- Add service method to run a manual lookup for an approved entity and selected LinkedIn URL.
+- Enforce pending-merge guard before lookup.
+- Enforce LinkedIn-URL-only input.
+- Enforce query hash duplicate-spend guard.
+- Store lookup runs and normalized matches only.
+- Add service method to approve, reject, or ignore a vendor match.
+- On approval, set or preserve `needsEnrichment=true`.
+
+Verification:
+
+- Unit tests cover missing approved entity.
+- Unit tests cover inactive/merged approved entity.
+- Unit tests cover missing LinkedIn URL.
+- Unit tests cover pending merge blocker.
+- Unit tests cover fake lookup success.
+- Unit tests cover duplicate rejected/ignored query hash behavior.
+- Unit tests cover approve/reject/ignore decisions.
+- Unit tests cover approved match sets/preserves `needsEnrichment=true`.
+- `node --test lib/services/sourcing/**/*.test.js` passes after build.
+
+Plan update required before Phase 6.5D:
+
+- Record run/match document shapes actually implemented.
+- Record duplicate-spend behavior and status names.
+- Record exact test command and result.
+
+##### Phase 6.5D: API Routes And Error Contract
+
+Scope:
+
+- Add GET route for vendor matches by approved entity.
+- Add POST route to run Bright Data lookup for an approved entity with selected LinkedIn URL.
+- Add POST route to decide a vendor profile match.
+- Return `409` with the existing pending-merge error shape when lookup is blocked by merge review.
+- Return `422` for validation errors such as missing/invalid LinkedIn URL.
+- Keep route payloads small and normalized.
+
+Recommended route shape:
+
+- `GET /api/sourcing/approved-entities/:approvedEntityId/vendor-profile-matches`
+- `POST /api/sourcing/approved-entities/:approvedEntityId/vendor-profile-lookup:run`
+- `POST /api/sourcing/vendor-profile-matches/:matchId/decision`
+
+Verification:
+
+- Route schema tests or service-backed API tests cover happy path and error shape.
+- `npm run build` passes.
+- Focused sourcing tests pass.
+
+Plan update required before Phase 6.5E:
+
+- Record final route names and request/response shapes.
+- Record exact test command and result.
+
+##### Phase 6.5E: Enrichment Pack And Profile Lineage Integration
+
+Scope:
+
+- Extend enrichment pack builder to include only approved Bright Data vendor evidence.
+- Allow enrichment draft validation to reference both source evidence IDs and approved vendor evidence IDs.
+- Keep unapproved/rejected/ignored vendor matches out of enrichment evidence packs.
+- Ensure generated enrichment review items and final profiles preserve vendor evidence IDs where used.
+- Extend profile detail lineage so vendor evidence IDs resolve to reviewer-readable vendor evidence rows.
+
+Verification:
+
+- Unit tests prove pending/rejected/ignored vendor matches are excluded from evidence packs.
+- Unit tests prove approved vendor summaries are included in evidence packs.
+- Unit tests prove validation accepts approved vendor evidence IDs.
+- Unit tests prove profile details can display vendor evidence lineage after profile materialization.
+- Existing OpenAI enrichment HITL tests still pass with source-only evidence.
+
+Plan update required before Phase 6.5F:
+
+- Record exact evidence-pack schema extension.
+- Record profile lineage behavior.
+- Record exact test command and result.
+
+##### Phase 6.5F: Approved Tab Dashboard UX
+
+Scope:
+
+- Load vendor matches for approved entities.
+- Show known LinkedIn URLs from approved entity evidence/source summaries.
+- Add a single manual fetch action in the Approved detail panel.
+- Disable fetch when pending merge blockers exist.
+- Disable fetch when no LinkedIn URL is selected.
+- Show lookup run/match states: not checked, blocked, pending review, approved, rejected, ignored, failed/no match.
+- Show normalized allowed fields only.
+- Add approve/reject/ignore controls for pending vendor matches.
+- Preserve existing enrichment controls and OpenAI enrichment HITL unchanged.
+
+Verification:
+
+- `node --check web/app.js` passes.
+- `npm run build` passes.
+- Local emulator full dashboard starts.
+- Browser/Ruflo verifies Approved tab:
+  - LinkedIn URLs render and are clickable/selectable.
+  - Fetch button is disabled with pending merge blockers.
+  - Fake lookup creates a pending vendor match card.
+  - Approve/reject/ignore controls update card state.
+  - Approved vendor match makes the candidate need enrichment without silently changing final profile data.
+
+Plan update required before Phase 6.5G:
+
+- Record browser/Ruflo URL used.
+- Record screenshot path(s) if captured.
+- Record exact local verification steps and result.
+
+##### Phase 6.5G: Local End-To-End Verification
+
+Scope:
+
+- Use local emulator only.
+- Create or upload a tiny controlled candidate with a LinkedIn URL.
+- Approve identity/relevance locally.
+- Run fake Bright Data lookup locally.
+- Approve vendor match locally.
+- Generate enrichment locally.
+- Approve enrichment locally.
+- Verify final profile includes correct source and vendor lineage.
+
+Verification:
+
+- Focused sourcing tests pass.
+- `npm run build` passes.
+- Local browser/Ruflo walk-through passes from Approved to Enrichment to Profiles.
+- No live Bright Data call has happened.
+
+Plan update required before Phase 6.5H:
+
+- Record local run IDs or fixture IDs.
+- Record evidence counts and match IDs if useful.
+- Record browser/Ruflo screenshot paths.
+
+##### Phase 6.5H: Live Bright Data Provider And Staging Deploy
+
+Scope:
+
+- Confirm or set Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` without printing the value.
+- Deploy only the sourcing API function and `wekruit-sourcing` Hosting site using `firebase.sourcing.json`.
+- Do not deploy unrelated functions or the default `wekruit-dev-env` Hosting site.
+- Verify deployed health and read-only endpoints.
+- Do not run a live Bright Data lookup until the dashboard and backend are deployed and the team deliberately chooses a candidate.
+
+Verification:
+
+- `npm run build:sourcing-bundle` passes.
+- Scoped Firebase deploy succeeds for `functions:core-service:sourcing.api`.
+- Scoped Firebase deploy succeeds for Hosting site `wekruit-sourcing`.
+- Read-only checks pass:
+  - `/api/sourcing/health`
+  - `/api/sourcing/approved-entities`
+  - vendor match list endpoint for a known or empty approved entity state
+- Browser/Ruflo verifies `https://wekruit-sourcing.web.app` loads the new Approved tab UI.
+
+Plan update required before Phase 6.5I:
+
+- Record deployed project, function, hosting site, and timestamp.
+- Record whether deployed `BRIGHTDATA_API_KEY` was set or already present without exposing value.
+- Record read-only endpoint checks.
+
+##### Phase 6.5I: One Live Staging Lookup
+
+Scope:
+
+- Use exactly one approved staging candidate with a clear LinkedIn profile URL.
+- If no approved staging candidate exists, deliberately approve or seed one candidate only after user/team confirmation.
+- Manually select the LinkedIn URL in the Approved detail panel.
+- Run exactly one Bright Data lookup.
+- Review the normalized result.
+- Approve, reject, or ignore based on reviewer judgment.
+- If approved, generate enrichment only if the user/team wants the full live chain exercised.
+
+Verification:
+
+- Lookup run and vendor match documents are created in Firestore.
+- No raw vendor payload is stored in hot Firestore docs.
+- Reviewer decision is persisted.
+- Re-running unchanged rejected/ignored input does not spend another lookup.
+- Approved vendor evidence appears in the next enrichment evidence pack.
+- Browser/Ruflo verifies the deployed UI state after the live lookup.
+
+Plan update required after Phase 6.5I:
+
+- Record exact candidate ID, selected LinkedIn URL, vendor run ID, vendor match ID, reviewer decision, and whether enrichment was generated.
+- Record any Bright Data account/API errors.
+- Record whether implementation is ready to hand off.
+
+#### Immediate Blockers Before Full Live Completion
+
+- Deployed Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` is not yet confirmed. Local `.env` has the key, but live Functions need the Firebase secret.
+- The active live dashboard currently has zero approved entities. A live Bright Data lookup needs one intentionally approved or seeded staging candidate with a clear LinkedIn URL.
+- Bright Data account access to the LinkedIn Profiles scraper cannot be proven without one live call. If the first live lookup returns an auth/account/access error, stop and document it before any retry.
+- Team data-use policy for using Bright Data on LinkedIn URLs from source evidence is still listed as a confirmation item. The implementation can be built against the approved product boundaries, but live lookup should proceed only if the team accepts that policy.
+
+#### Verification Tooling
+
+- Use automated tests for backend correctness and evidence invariants.
+- Use local emulator plus Browser/Ruflo for UI behavior before deployment.
+- Use Ruflo browser open/screenshot for deployed `https://wekruit-sourcing.web.app` verification when possible.
+- Use read-only `curl` checks for health and endpoint payloads.
+- Do not use live Bright Data for local fake/provider tests.
 
 ### Coresignal Planning Archive (Paused)
 
