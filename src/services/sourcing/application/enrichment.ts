@@ -6,6 +6,7 @@ import {
   type EvidenceRecord,
   type ReviewLabelRecord,
   type SourceRecord,
+  type VendorProfileMatch,
 } from '../domain/records';
 
 function sortedUnique(values: string[]): string[] {
@@ -105,6 +106,21 @@ export interface EnrichmentEvidencePack {
     sourcePath: string;
     sourceUrl: string | null;
   }>;
+  professionalProfileFacts: Array<{
+    evidenceId: string;
+    matchId: string;
+    provider: string;
+    profileUrl: string;
+    name: string | null;
+    headline: string | null;
+    currentCompany: string | null;
+    location: string | null;
+    educationSummary: string[];
+    experienceSummary: string[];
+    skills: string[];
+    aboutSummary: string | null;
+    projectsPublications: string[];
+  }>;
   reviewLabels: Array<{
     id: string;
     candidateDecision: string;
@@ -115,17 +131,61 @@ export interface EnrichmentEvidencePack {
   }>;
 }
 
+export function vendorProfileMatchEvidenceId(matchId: string): string {
+  return `vendor_profile_match:${matchId}`;
+}
+
+function compactVendorProfileSummary(match: VendorProfileMatch): string {
+  const profile = match.normalizedProfile;
+  return [
+    profile.name,
+    profile.headline,
+    profile.currentCompany ? `Current company: ${profile.currentCompany}` : null,
+    profile.location ? `Location: ${profile.location}` : null,
+    profile.skills.length ? `Skills: ${profile.skills.join(', ')}` : null,
+    profile.experienceSummary.length ? `Experience: ${profile.experienceSummary.join('; ')}` : null,
+    profile.educationSummary.length ? `Education: ${profile.educationSummary.join('; ')}` : null,
+    profile.aboutSummary ? `About: ${profile.aboutSummary}` : null,
+    profile.projectsPublications.length ? `Projects/publications: ${profile.projectsPublications.join('; ')}` : null,
+  ].filter(Boolean).join(' | ');
+}
+
+function vendorProfileMatchToEvidenceRow(match: VendorProfileMatch): EnrichmentEvidencePack['evidence'][number] {
+  const profileUrl = match.providerProfileUrl ?? match.normalizedProfile.profileUrl;
+  const summary = compactVendorProfileSummary(match);
+  return {
+    id: match.approvedEvidenceId ?? vendorProfileMatchEvidenceId(match.id),
+    sourceRecordId: `vendor:${match.id}`,
+    sourceName: match.provider,
+    sourceDomain: 'professional_profile_vendor',
+    evidenceType: 'vendor_professional_profile',
+    normalizedValue: summary,
+    rawValue: summary,
+    quality: 'medium',
+    sourcePath: `vendorProfileMatches.${match.id}.normalizedProfile`,
+    sourceUrl: profileUrl,
+  };
+}
+
 export function buildEnrichmentEvidencePack(input: {
   approvedEntity: ApprovedEntity;
   sourceRecords: SourceRecord[];
   evidence: EvidenceRecord[];
   reviewLabels: ReviewLabelRecord[];
+  vendorProfileMatches?: VendorProfileMatch[];
 }): EnrichmentEvidencePack {
   const approvedEvidenceIds = new Set(input.approvedEntity.evidenceIds);
   const approvedSourceRecordIds = new Set(input.approvedEntity.sourceRecordIds);
   const evidence = input.evidence.filter((entry) =>
     approvedEvidenceIds.has(entry.id) && approvedSourceRecordIds.has(entry.sourceRecordId),
   );
+  const vendorProfileMatches = (input.vendorProfileMatches ?? [])
+    .filter((match) => match.reviewStatus === 'approved')
+    .filter((match) => match.approvedEntityId === input.approvedEntity.id)
+    .sort((left, right) =>
+      (left.approvedEvidenceId ?? vendorProfileMatchEvidenceId(left.id))
+        .localeCompare(right.approvedEvidenceId ?? vendorProfileMatchEvidenceId(right.id)),
+    );
   const sourceRecords = input.sourceRecords.filter((record) => approvedSourceRecordIds.has(record.id));
   const reviewLabelIds = new Set(input.approvedEntity.reviewLabelIds);
 
@@ -159,17 +219,35 @@ export function buildEnrichmentEvidencePack(input: {
       rawSummary: compactObject(record.rawSummary),
       display: compactObject(record.display),
     })),
-    evidence: evidence.map((entry) => ({
-      id: entry.id,
-      sourceRecordId: entry.sourceRecordId,
-      sourceName: entry.sourceName,
-      sourceDomain: entry.sourceDomain,
-      evidenceType: entry.evidenceType,
-      normalizedValue: entry.normalizedValue,
-      rawValue: entry.rawValue,
-      quality: entry.quality,
-      sourcePath: entry.extractedFrom.sourcePath,
-      sourceUrl: entry.extractedFrom.sourceUrl,
+    evidence: [
+      ...evidence.map((entry) => ({
+        id: entry.id,
+        sourceRecordId: entry.sourceRecordId,
+        sourceName: entry.sourceName,
+        sourceDomain: entry.sourceDomain,
+        evidenceType: entry.evidenceType,
+        normalizedValue: entry.normalizedValue,
+        rawValue: entry.rawValue,
+        quality: entry.quality,
+        sourcePath: entry.extractedFrom.sourcePath,
+        sourceUrl: entry.extractedFrom.sourceUrl,
+      })),
+      ...vendorProfileMatches.map((match) => vendorProfileMatchToEvidenceRow(match)),
+    ],
+    professionalProfileFacts: vendorProfileMatches.map((match) => ({
+      evidenceId: match.approvedEvidenceId ?? vendorProfileMatchEvidenceId(match.id),
+      matchId: match.id,
+      provider: match.provider,
+      profileUrl: match.providerProfileUrl ?? match.normalizedProfile.profileUrl,
+      name: match.normalizedProfile.name,
+      headline: match.normalizedProfile.headline,
+      currentCompany: match.normalizedProfile.currentCompany,
+      location: match.normalizedProfile.location,
+      educationSummary: match.normalizedProfile.educationSummary,
+      experienceSummary: match.normalizedProfile.experienceSummary,
+      skills: match.normalizedProfile.skills,
+      aboutSummary: match.normalizedProfile.aboutSummary,
+      projectsPublications: match.normalizedProfile.projectsPublications,
     })),
     reviewLabels: input.reviewLabels
       .filter((label) => reviewLabelIds.has(label.id))

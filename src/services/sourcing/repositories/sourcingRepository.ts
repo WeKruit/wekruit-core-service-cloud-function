@@ -444,6 +444,16 @@ export class SourcingRepository {
     return snapshot.exists ? (snapshot.data() as VendorProfileMatch) : null;
   }
 
+  async getVendorProfileMatchesByIds(ids: string[]): Promise<VendorProfileMatch[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    const snapshots = await Promise.all(ids.map((id) => this.vendorProfileMatchCollection.doc(id).get()));
+    return snapshots
+      .filter((snapshot) => snapshot.exists)
+      .map((snapshot) => snapshot.data() as VendorProfileMatch);
+  }
+
   async listVendorProfileMatchesForApprovedEntity(approvedEntityId: string): Promise<VendorProfileMatch[]> {
     const snapshot = await this.vendorProfileMatchCollection
       .where('approvedEntityId', '==', approvedEntityId)

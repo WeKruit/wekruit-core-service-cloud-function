@@ -8,6 +8,11 @@ import {
   VendorProfileLookupValidationError,
   type SourcingRepositoryPort,
 } from './service';
+import {
+  buildEnrichmentEvidencePack,
+  buildEvidencePackHash,
+  vendorProfileMatchEvidenceId,
+} from './enrichment';
 import type {
   ProfessionalProfileLookupPort,
   ProfessionalProfileLookupResult,
@@ -489,6 +494,8 @@ function buildVendorLookupHarness(input: {
       return matches;
     },
     getVendorProfileMatch: async (id: string) => vendorMatchesById.get(id) ?? null,
+    getVendorProfileMatchesByIds: async (ids: string[]) =>
+      ids.map((id) => vendorMatchesById.get(id)).filter((match): match is VendorProfileMatch => Boolean(match)),
     listVendorProfileMatchesForApprovedEntity: async (approvedEntityId: string) =>
       [...vendorMatchesById.values()]
         .filter((match) => match.approvedEntityId === approvedEntityId)
@@ -1199,6 +1206,8 @@ test('generateEnrichmentForApprovedEntity creates review item and approval mater
     getSourceRecordsByIds: async (ids: string[]) => [sourceRecord].filter((record) => ids.includes(record.id)),
     getEvidenceByIds: async (ids: string[]) => [evidence].filter((entry) => ids.includes(entry.id)),
     getReviewLabelsByIds: async (ids: string[]) => [reviewLabel].filter((label) => ids.includes(label.id)),
+    listVendorProfileMatchesForApprovedEntity: async () => [],
+    getVendorProfileMatchesByIds: async () => [],
     listEnrichmentReviewItemsForApprovedEntity: async (approvedEntityId: string) =>
       [...enrichmentItemsById.values()].filter((item) => item.approvedEntityId === approvedEntityId),
     createEnrichmentRun: async (run: CandidateEnrichmentRun) => {
@@ -1251,13 +1260,228 @@ test('generateEnrichmentForApprovedEntity creates review item and approval mater
   assert.equal(approvedEntitiesById.get(approvedEntity.id)?.needsEnrichment, false);
 });
 
+test('generateEnrichmentForApprovedEntity includes approved vendor profile evidence in review and profile lineage', async () => {
+  const approvedEntity = buildApprovedEntity();
+  const sourceRecord = buildSourceRecord();
+  const evidence = buildEvidence();
+  const reviewLabel = buildReviewLabel();
+  const vendorEvidenceId = vendorProfileMatchEvidenceId('vendor_match_approved_alex');
+  const approvedVendorMatch = buildVendorMatch({
+    id: 'vendor_match_approved_alex',
+    approvedEntityId: approvedEntity.id,
+    reviewStatus: 'approved',
+    approvedEvidenceId: vendorEvidenceId,
+  });
+  const draft = buildEnrichmentDraft({
+    skills: [
+      {
+        skill: 'candidate sourcing',
+        confidence: 0.82,
+        evidenceIds: [vendorEvidenceId],
+      },
+    ],
+    fieldEvidence: {
+      primaryTrack: ['evidence_github_alex'],
+      scoredTracks: ['evidence_github_alex'],
+      specializations: ['evidence_github_alex'],
+      skills: [vendorEvidenceId],
+      industryDomainInterests: ['evidence_github_alex'],
+      careerStage: [],
+      contactability: ['evidence_github_alex'],
+      matchingSummary: ['evidence_github_alex', vendorEvidenceId],
+    },
+  });
+  const enrichmentRuns: CandidateEnrichmentRun[] = [];
+  const enrichmentItemsById = new Map<string, CandidateEnrichmentReviewItem>();
+  const profilesById = new Map<string, CandidateProfile>();
+  const approvedEntitiesById = new Map([[approvedEntity.id, approvedEntity]]);
+
+  const repository = {
+    getApprovedEntity: async (id: string) => approvedEntitiesById.get(id) ?? null,
+    listDedupCandidates: async () => [],
+    getSourceRecordsByIds: async (ids: string[]) => [sourceRecord].filter((record) => ids.includes(record.id)),
+    getEvidenceByIds: async (ids: string[]) => [evidence].filter((entry) => ids.includes(entry.id)),
+    getReviewLabelsByIds: async (ids: string[]) => [reviewLabel].filter((label) => ids.includes(label.id)),
+    listVendorProfileMatchesForApprovedEntity: async (approvedEntityId: string) =>
+      [approvedVendorMatch].filter((match) => match.approvedEntityId === approvedEntityId),
+    getVendorProfileMatchesByIds: async (ids: string[]) =>
+      [approvedVendorMatch].filter((match) => ids.includes(match.id)),
+    listEnrichmentReviewItemsForApprovedEntity: async (approvedEntityId: string) =>
+      [...enrichmentItemsById.values()].filter((item) => item.approvedEntityId === approvedEntityId),
+    createEnrichmentRun: async (run: CandidateEnrichmentRun) => {
+      enrichmentRuns.push(run);
+      return run;
+    },
+    createEnrichmentReviewItem: async (item: CandidateEnrichmentReviewItem) => {
+      enrichmentItemsById.set(item.id, item);
+      return item;
+    },
+    getEnrichmentReviewItem: async (id: string) => enrichmentItemsById.get(id) ?? null,
+    updateEnrichmentReviewItem: async (item: CandidateEnrichmentReviewItem) => {
+      enrichmentItemsById.set(item.id, item);
+      return item;
+    },
+    upsertApprovedEntity: async (entity: ApprovedEntity) => {
+      approvedEntitiesById.set(entity.id, entity);
+      return entity;
+    },
+    getCandidateProfileByApprovedEntityId: async (approvedEntityId: string) =>
+      [...profilesById.values()].find((profile) => profile.approvedEntityId === approvedEntityId) ?? null,
+    upsertCandidateProfile: async (profile: CandidateProfile) => {
+      profilesById.set(profile.id, profile);
+      return profile;
+    },
+  } as Partial<SourcingRepositoryPort> as SourcingRepositoryPort;
+
+  const service = new SourcingService(repository, {
+    inferCandidateProfile: async ({ evidencePack }) => {
+      assert.ok(evidencePack.evidence.some((entry) => entry.id === vendorEvidenceId));
+      assert.equal(evidencePack.professionalProfileFacts[0]?.matchId, approvedVendorMatch.id);
+      return draft;
+    },
+  });
+
+  const generated = await service.generateEnrichmentForApprovedEntity(approvedEntity.id);
+  assert.ok(generated.reviewItem.evidenceIds.includes(vendorEvidenceId));
+  assert.equal(enrichmentRuns[0]?.evidencePack.professionalProfileFacts instanceof Array, true);
+
+  const approved = await service.submitEnrichmentReviewDecision(generated.reviewItem.id, {
+    action: 'approve',
+    reviewerId: 'phase65e-test',
+    notes: 'Vendor-supported enrichment is correct.',
+  });
+
+  assert.ok(approved.candidateProfile?.evidenceIds.includes(vendorEvidenceId));
+  assert.deepEqual(approved.candidateProfile?.fieldEvidence.skills, [vendorEvidenceId]);
+});
+
+test('submitEnrichmentReviewDecision blocks approval when new vendor evidence makes the draft stale', async () => {
+  const approvedEntity = buildApprovedEntity();
+  const sourceRecord = buildSourceRecord();
+  const evidence = buildEvidence();
+  const reviewLabel = buildReviewLabel();
+  const oldPackHash = buildEvidencePackHash(
+    buildEnrichmentEvidencePack({
+      approvedEntity,
+      sourceRecords: [sourceRecord],
+      evidence: [evidence],
+      reviewLabels: [reviewLabel],
+      vendorProfileMatches: [],
+    }),
+  );
+  const approvedVendorMatch = buildVendorMatch({
+    id: 'vendor_match_new_alex',
+    approvedEntityId: approvedEntity.id,
+    reviewStatus: 'approved',
+    approvedEvidenceId: vendorProfileMatchEvidenceId('vendor_match_new_alex'),
+  });
+  const reviewItem: CandidateEnrichmentReviewItem = {
+    id: 'enrich_review_stale_alex',
+    approvedEntityId: approvedEntity.id,
+    enrichmentRunId: 'enrich_run_stale_alex',
+    status: 'pending_review',
+    evidencePackHash: oldPackHash,
+    sourceRecordIds: approvedEntity.sourceRecordIds,
+    evidenceIds: approvedEntity.evidenceIds,
+    reviewLabelIds: approvedEntity.reviewLabelIds,
+    displayName: approvedEntity.displayName,
+    draft: buildEnrichmentDraft(),
+    validationWarnings: [],
+    reviewerId: null,
+    reviewNote: '',
+    reviewedDraft: null,
+    reviewedAt: null,
+    createdAt: '2026-04-28T00:00:00.000Z',
+    updatedAt: '2026-04-28T00:00:00.000Z',
+  };
+
+  const repository = {
+    getEnrichmentReviewItem: async (id: string) => id === reviewItem.id ? reviewItem : null,
+    getApprovedEntity: async (id: string) => id === approvedEntity.id ? approvedEntity : null,
+    getSourceRecordsByIds: async (ids: string[]) => [sourceRecord].filter((record) => ids.includes(record.id)),
+    getEvidenceByIds: async (ids: string[]) => [evidence].filter((entry) => ids.includes(entry.id)),
+    getReviewLabelsByIds: async (ids: string[]) => [reviewLabel].filter((label) => ids.includes(label.id)),
+    listVendorProfileMatchesForApprovedEntity: async (approvedEntityId: string) =>
+      [approvedVendorMatch].filter((match) => match.approvedEntityId === approvedEntityId),
+  } as Partial<SourcingRepositoryPort> as SourcingRepositoryPort;
+
+  const service = new SourcingService(repository);
+
+  await assert.rejects(
+    service.submitEnrichmentReviewDecision(reviewItem.id, {
+      action: 'approve',
+      reviewerId: 'phase65e-test',
+      notes: 'Old draft.',
+    }),
+    /stale because approved evidence changed/,
+  );
+});
+
+test('listEnrichmentReviewItems resolves approved vendor profile evidence summaries', async () => {
+  const approvedEntity = buildApprovedEntity();
+  const sourceRecord = buildSourceRecord();
+  const evidence = buildEvidence();
+  const vendorEvidenceId = vendorProfileMatchEvidenceId('vendor_match_approved_alex');
+  const approvedVendorMatch = buildVendorMatch({
+    id: 'vendor_match_approved_alex',
+    approvedEntityId: approvedEntity.id,
+    reviewStatus: 'approved',
+    approvedEvidenceId: vendorEvidenceId,
+  });
+  const reviewItem: CandidateEnrichmentReviewItem = {
+    id: 'enrich_review_alex',
+    approvedEntityId: approvedEntity.id,
+    enrichmentRunId: 'enrich_run_alex',
+    status: 'pending_review',
+    evidencePackHash: 'pack-hash',
+    sourceRecordIds: approvedEntity.sourceRecordIds,
+    evidenceIds: ['evidence_github_alex', vendorEvidenceId],
+    reviewLabelIds: approvedEntity.reviewLabelIds,
+    displayName: approvedEntity.displayName,
+    draft: buildEnrichmentDraft(),
+    validationWarnings: [],
+    reviewerId: null,
+    reviewNote: '',
+    reviewedDraft: null,
+    reviewedAt: null,
+    createdAt: '2026-04-28T00:00:00.000Z',
+    updatedAt: '2026-04-28T00:00:00.000Z',
+  };
+  const repository = {
+    listEnrichmentReviewItems: async () => [reviewItem],
+    getSourceRecordsByIds: async (ids: string[]) => [sourceRecord].filter((record) => ids.includes(record.id)),
+    getEvidenceByIds: async (ids: string[]) => [evidence].filter((entry) => ids.includes(entry.id)),
+    getVendorProfileMatchesByIds: async (ids: string[]) =>
+      [approvedVendorMatch].filter((match) => ids.includes(match.id)),
+  } as Partial<SourcingRepositoryPort> as SourcingRepositoryPort;
+
+  const [item] = await new SourcingService(repository).listEnrichmentReviewItems('pending_review');
+
+  assert.deepEqual(item?.evidence.map((entry) => entry.id), ['evidence_github_alex', vendorEvidenceId]);
+  assert.equal(item?.evidence[1]?.evidenceType, 'vendor_professional_profile');
+  assert.equal(item?.evidence[1]?.extractedFrom.sourceUrl, 'https://www.linkedin.com/in/spencerwang1');
+});
+
 test('candidate profile listing filters matching-ready profiles and details preserve clean lineage', async () => {
-  const profile = buildCandidateProfile();
+  const vendorEvidenceId = vendorProfileMatchEvidenceId('vendor_match_profile_alex');
+  const profile = buildCandidateProfile({
+    evidenceIds: ['evidence_github_alex', vendorEvidenceId],
+    fieldEvidence: {
+      primaryTrack: ['evidence_github_alex'],
+      skills: [vendorEvidenceId],
+    },
+  });
   const sourceRecord = buildSourceRecord({
     raw: { largePayload: true },
     rawSummary: { github: 'https://github.com/alex', nestedPayload: true },
   });
   const evidence = buildEvidence();
+  const approvedVendorMatch = buildVendorMatch({
+    id: 'vendor_match_profile_alex',
+    approvedEntityId: profile.approvedEntityId,
+    reviewStatus: 'approved',
+    approvedEvidenceId: vendorEvidenceId,
+  });
   const reviewLabel = buildReviewLabel();
   const enrichmentReview: CandidateEnrichmentReviewItem = {
     id: profile.enrichmentReviewItemId,
@@ -1285,6 +1509,8 @@ test('candidate profile listing filters matching-ready profiles and details pres
     getApprovedEntity: async (id: string) => id === profile.approvedEntityId ? buildApprovedEntity() : null,
     getSourceRecordsByIds: async (ids: string[]) => [sourceRecord].filter((record) => ids.includes(record.id)),
     getEvidenceByIds: async (ids: string[]) => [evidence].filter((entry) => ids.includes(entry.id)),
+    getVendorProfileMatchesByIds: async (ids: string[]) =>
+      [approvedVendorMatch].filter((match) => ids.includes(match.id)),
     getReviewLabelsByIds: async (ids: string[]) => [reviewLabel].filter((label) => ids.includes(label.id)),
     getEnrichmentReviewItem: async (id: string) => id === enrichmentReview.id ? enrichmentReview : null,
   } as Partial<SourcingRepositoryPort> as SourcingRepositoryPort;
@@ -1308,6 +1534,8 @@ test('candidate profile listing filters matching-ready profiles and details pres
   assert.equal('rawSummary' in details.sourceRecords[0], false);
   assert.equal(details.fieldEvidence[0].field, 'primaryTrack');
   assert.deepEqual(details.fieldEvidence[0].evidence.map((entry) => entry.id), [evidence.id]);
+  assert.equal(details.fieldEvidence[1].field, 'skills');
+  assert.deepEqual(details.fieldEvidence[1].evidence.map((entry) => entry.id), [vendorEvidenceId]);
   assert.equal(details.reviewLabels[0].notes, reviewLabel.notes);
   assert.equal(details.enrichmentReview?.reviewNote, 'Approved labels.');
 });

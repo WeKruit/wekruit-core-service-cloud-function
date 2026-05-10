@@ -71,6 +71,7 @@ Last updated: 2026-05-09.
 - [x] Phase 6.5B added the Bright Data LinkedIn evidence/provider foundation: `linkedin` evidence normalization, vendor profile schemas/types, `ProfessionalProfileLookupPort`, deterministic fake provider fixtures, and a real Bright Data provider contract behind tests. No live Bright Data call, Firestore mutation, route wiring, UI wiring, deploy, approval, enrichment, or profile materialization was performed in Phase 6.5B.
 - [x] Phase 6.5C added backend Firestore/service flow for vendor lookup runs and profile matches: collection constants, repository persistence/reservation methods, eligible LinkedIn URL derivation, pending-merge and lineage gates, deterministic duplicate-spend protection, no-match/failed retry behavior, and approve/reject/ignore service decisions. No API routes, dashboard UI, deploy, Firestore mutation outside tests, or live Bright Data call was performed in Phase 6.5C.
 - [x] Phase 6.5D added normalized HTTP routes and error mapping for vendor profile match list, manual LinkedIn lookup run, async snapshot refresh, and vendor match decisions. The sourcing function now declares `BRIGHTDATA_API_KEY` as a Firebase secret for deployed lookup use. No dashboard UI, deploy, live Firestore mutation, approval/enrichment/profile materialization, or live Bright Data call was performed in Phase 6.5D.
+- [x] Phase 6.5E wired approved vendor profile matches into enrichment evidence packs, enrichment draft validation, enrichment review lineage, final profile lineage, and stale review approval protection. Only approved vendor profile summaries can become enrichment context. No dashboard UI, deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5E.
 
 ## Current Open Decisions And Waiting State
 
@@ -118,7 +119,7 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, and Phase 6.5D API routes/error contract are complete.
+   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, and Phase 6.5E enrichment/profile lineage integration are complete.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
    - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
@@ -1823,21 +1824,21 @@ flowchart LR
 
 ### Future Implementation Tasks
 
-- [ ] Add a provider interface such as `ProfessionalProfileLookupPort` in core-service.
-- [ ] Add a Bright Data provider implementation behind that interface, with `BRIGHTDATA_API_KEY` read only by core-service.
-- [ ] Add an emulator-only fake Bright Data provider with deterministic LinkedIn profile fixture responses. No live vendor calls in the first local tests.
-- [ ] Add Firestore storage for vendor lookup runs and candidate professional-profile matches.
+- [x] Add a provider interface such as `ProfessionalProfileLookupPort` in core-service.
+- [x] Add a Bright Data provider implementation behind that interface, with `BRIGHTDATA_API_KEY` read only by core-service.
+- [x] Add an emulator-only fake Bright Data provider with deterministic LinkedIn profile fixture responses. No live vendor calls in the first local tests.
+- [x] Add Firestore storage for vendor lookup runs and candidate professional-profile matches.
 - [ ] Add a manual dashboard action from the Approved detail panel after merge blockers are clear.
-- [ ] Show all known LinkedIn URLs found on the approved candidate's source/evidence records and require the reviewer to choose exactly one eligible LinkedIn profile URL per lookup.
-- [ ] Hide or disable any Bright Data fetch action when the approved candidate has no eligible LinkedIn URL in its source/evidence lineage. Do not provide a freeform URL entry box in v1.
-- [ ] Treat LinkedIn profile URLs as first-class evidence for display, reviewer selection, Bright Data query seeds, and lineage, but not as strong dedup evidence in v1.
-- [ ] Use synchronous Bright Data `/scrape` for the first manual single-candidate path. Support the returned `snapshot_id` case if Bright Data automatically switches to async.
-- [ ] Normalize the returned LinkedIn profile into a compact professional summary using only the approved v1 field allowlist: profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, projects/publications if present, and source lineage.
-- [ ] Let the reviewer approve, reject, or ignore a Bright Data profile summary before it becomes enrichment context.
-- [ ] Feed approved Bright Data evidence into the existing enrichment evidence pack.
-- [ ] If approved Bright Data evidence is added after a final profile already exists, set or preserve `needsEnrichment=true` and allow manual re-enrichment without complex diffing/versioning in v1.
-- [ ] Keep OpenAI taxonomy generation and enrichment HITL unchanged: Bright Data adds evidence; it does not assign final labels by itself.
-- [ ] Add focused tests for merge-blocked candidates, missing API key behavior, no-match results, rejected vendor matches, approved vendor matches, and enrichment evidence-pack inclusion.
+- [x] Show all known LinkedIn URLs found on the approved candidate's source/evidence records and require the reviewer to choose exactly one eligible LinkedIn profile URL per lookup. Backend support is complete; dashboard rendering remains in Phase 6.5F.
+- [x] Hide or disable any Bright Data fetch action when the approved candidate has no eligible LinkedIn URL in its source/evidence lineage. Backend rejection is complete; dashboard rendering remains in Phase 6.5F.
+- [x] Treat LinkedIn profile URLs as first-class evidence for display, reviewer selection, Bright Data query seeds, and lineage, but not as strong dedup evidence in v1.
+- [x] Use synchronous Bright Data `/scrape` for the first manual single-candidate path. Support the returned `snapshot_id` case if Bright Data automatically switches to async.
+- [x] Normalize the returned LinkedIn profile into a compact professional summary using only the approved v1 field allowlist: profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, projects/publications if present, and source lineage.
+- [x] Let the reviewer approve, reject, or ignore a Bright Data profile summary before it becomes enrichment context. Backend/API support is complete; dashboard controls remain in Phase 6.5F.
+- [x] Feed approved Bright Data evidence into the existing enrichment evidence pack.
+- [x] If approved Bright Data evidence is added after a final profile already exists, set or preserve `needsEnrichment=true` and allow manual re-enrichment without complex diffing/versioning in v1.
+- [x] Keep OpenAI taxonomy generation and enrichment HITL unchanged: Bright Data adds evidence; it does not assign final labels by itself.
+- [x] Add focused tests for merge-blocked candidates, missing API key behavior, no-match results, rejected vendor matches, approved vendor matches, and enrichment evidence-pack inclusion.
 - [ ] Run the full local emulator workflow before any live Bright Data call.
 - [ ] After local fake verification, run exactly one live staging lookup from `https://wekruit-sourcing.web.app` / Firebase project `wekruit-dev-env` against the isolated synthetic approved candidate with a clear eligible LinkedIn profile URL from source/evidence lineage.
 
@@ -2459,6 +2460,65 @@ Plan update required before Phase 6.5F:
 - Record exact evidence-pack schema extension.
 - Record profile lineage behavior.
 - Record exact test command and result.
+
+Phase 6.5E execution findings from 2026-05-10 00:36 PDT:
+
+- Phase status: completed after full-plan greenlight. This phase implemented backend enrichment/profile lineage integration only. It did not add dashboard UI, deploy Firebase, mutate live Firestore, approve/enrich/materialize live profiles, or call live Bright Data.
+- Files changed in `wekruit-core-service-cloud-function`:
+  - `src/services/sourcing/application/enrichment.ts`
+    - Extended `EnrichmentEvidencePack` with `professionalProfileFacts`.
+    - Added stable vendor evidence IDs shaped as `vendor_profile_match:<matchId>`.
+    - Converts approved vendor profile matches into evidence rows with `sourceDomain=professional_profile_vendor` and `evidenceType=vendor_professional_profile`.
+    - Filters vendor evidence strictly to matches where `reviewStatus=approved` and `approvedEntityId` matches the approved entity.
+    - Sorts approved vendor evidence by evidence ID before hashing so stale-review checks are deterministic.
+  - `src/services/sourcing/application/service.ts`
+    - Generates enrichment from a current evidence pack that includes source evidence plus approved vendor profile matches.
+    - Validates LLM draft evidence references against the actual evidence-pack evidence IDs, not only `approvedEntity.evidenceIds`.
+    - Stores review item `evidenceIds` from the full evidence pack so approved vendor evidence can survive into final candidate profile lineage.
+    - Resolves vendor evidence IDs into reviewer-readable evidence summaries for enrichment review list/detail responses and candidate profile details.
+    - Rejects approving stale enrichment review items when the current approved entity evidence pack hash differs from the review item's original hash. This catches the case where Bright Data evidence is approved after an older source-only enrichment draft was generated.
+  - `src/services/sourcing/repositories/sourcingRepository.ts`
+    - Added `getVendorProfileMatchesByIds` so review/profile lineage can resolve virtual vendor evidence IDs back to normalized vendor match summaries.
+  - `src/services/sourcing/application/enrichment.test.ts`
+    - Added evidence-pack and validation tests for approved vendor evidence.
+  - `src/services/sourcing/application/service.test.ts`
+    - Added service tests for vendor evidence reaching enrichment reviews and final profile lineage, stale review approval protection, enrichment review evidence resolution, and profile detail evidence resolution.
+- Evidence-pack schema extension:
+  - `professionalProfileFacts[]` contains only the v1 allowed normalized fields: `evidenceId`, `matchId`, `provider`, `profileUrl`, `name`, `headline`, `currentCompany`, `location`, `educationSummary`, `experienceSummary`, `skills`, `aboutSummary`, and `projectsPublications`.
+  - The normal `evidence[]` list now includes vendor evidence rows for approved vendor matches. Each vendor row uses:
+    - `id`: `vendor_profile_match:<matchId>` unless a stored `approvedEvidenceId` is present.
+    - `sourceRecordId`: `vendor:<matchId>`.
+    - `sourceName`: vendor provider, currently `fake` or `brightdata`.
+    - `sourceDomain`: `professional_profile_vendor`.
+    - `evidenceType`: `vendor_professional_profile`.
+    - `normalizedValue` / `rawValue`: compact normalized professional summary only, not raw vendor JSON.
+    - `sourcePath`: `vendorProfileMatches.<matchId>.normalizedProfile`.
+    - `sourceUrl`: provider profile URL / normalized LinkedIn URL.
+- Profile and enrichment lineage behavior:
+  - Generated enrichment review items store full evidence-pack evidence IDs, including approved vendor evidence IDs.
+  - Final candidate profiles materialized from those review items preserve the same evidence IDs and field-evidence IDs.
+  - Candidate profile details and enrichment review item responses resolve both source evidence and vendor evidence into a single `CandidateEvidenceSummary` shape for dashboard display.
+  - Vendor evidence IDs are virtual lineage rows; they do not create source evidence records and do not become strong dedup evidence.
+- Stale review protection:
+  - Approval of an enrichment review item now recomputes the current evidence pack from approved source evidence, review labels, and approved vendor matches.
+  - If the recomputed hash differs from the review item's stored `evidencePackHash`, approval is rejected with a stale-draft error and the reviewer must generate a fresh enrichment draft.
+  - This prevents approving an old source-only enrichment draft after Bright Data evidence was approved.
+- Verification evidence:
+  - `npm run build` passed.
+  - Focused command passed: `node --test lib/services/sourcing/application/enrichment.test.js lib/services/sourcing/application/service.test.js` -> `22` tests, `22` pass, `0` fail.
+  - Broad sourcing command passed: `find lib/services/sourcing -name '*.test.js' -print0 | xargs -0 node --test` -> `42` tests, `42` pass, `0` fail.
+  - `git diff --check` passed.
+- Behavior verified by tests:
+  - Pending/rejected/ignored vendor matches are excluded from enrichment evidence packs.
+  - Approved vendor matches are included in both `evidence[]` and `professionalProfileFacts[]`.
+  - Enrichment draft validation accepts approved vendor evidence IDs.
+  - Generated enrichment review items can cite approved vendor evidence.
+  - Final profiles preserve vendor evidence and field-evidence lineage after enrichment approval.
+  - Old enrichment review items cannot be approved after new vendor evidence changes the evidence pack.
+  - Enrichment review list responses and profile detail responses resolve vendor evidence rows for reviewer display.
+- Phase 6.5E conclusion:
+  - Preconditions are good for Phase 6.5F.
+  - Phase 6.5F should add the Approved tab dashboard UX against the already-tested API/service surfaces, using only backend-derived eligible LinkedIn URLs and normalized vendor match/run state.
 
 ##### Phase 6.5F: Approved Tab Dashboard UX
 

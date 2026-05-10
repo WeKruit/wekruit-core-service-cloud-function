@@ -21,6 +21,8 @@ import {
   deriveDraftFieldEvidence,
   extractDeterministicFeatures,
   validateCandidateEnrichmentDraft,
+  vendorProfileMatchEvidenceId,
+  type EnrichmentEvidencePack,
 } from './enrichment';
 import {
   getOpenAISourcingEnrichmentConfig,
@@ -119,7 +121,13 @@ function valuesFromEvidence(evidence: EvidenceRecord[], type: EvidenceRecord['ev
 }
 
 function evidenceLikeIdForVendorMatch(matchId: string): string {
-  return `vendor_profile_match:${matchId}`;
+  return vendorProfileMatchEvidenceId(matchId);
+}
+
+function vendorMatchIdFromEvidenceId(evidenceId: string): string | null {
+  return evidenceId.startsWith('vendor_profile_match:')
+    ? evidenceId.slice('vendor_profile_match:'.length)
+    : null;
 }
 
 const urlRegex = /https?:\/\/[^\s"'<>]+/gi;
@@ -412,6 +420,7 @@ export type SourcingRepositoryPort = Pick<
   | 'updateVendorEnrichmentRun'
   | 'upsertVendorProfileMatches'
   | 'getVendorProfileMatch'
+  | 'getVendorProfileMatchesByIds'
   | 'listVendorProfileMatchesForApprovedEntity'
   | 'listVendorProfileMatchesByInputHash'
   | 'updateVendorProfileMatch'
@@ -466,6 +475,21 @@ export type CandidateProfileReviewSummary = Pick<
   | 'updatedAt'
 >;
 
+export type CandidateEvidenceSummary = {
+  id: string;
+  sourceRecordId: string;
+  sourceName: string;
+  sourceDomain: string;
+  evidenceType: string;
+  rawValue: string;
+  normalizedValue: string;
+  quality: string;
+  extractedFrom: {
+    sourcePath: string;
+    sourceUrl: string | null;
+  };
+};
+
 export type CandidateProfileEnrichmentReviewSummary = Pick<
   CandidateEnrichmentReviewItem,
   | 'id'
@@ -485,11 +509,11 @@ export type CandidateProfileDetails = {
   profile: CandidateProfile;
   approvedEntity: ApprovedEntity | null;
   sourceRecords: CandidateProfileSourceSummary[];
-  evidence: EvidenceRecord[];
+  evidence: CandidateEvidenceSummary[];
   fieldEvidence: Array<{
     field: string;
     evidenceIds: string[];
-    evidence: EvidenceRecord[];
+    evidence: CandidateEvidenceSummary[];
   }>;
   reviewLabels: CandidateProfileReviewSummary[];
   enrichmentReview: CandidateProfileEnrichmentReviewSummary | null;
@@ -539,7 +563,7 @@ export type VendorProfileLookupRunResult = VendorProfileLookupState & {
 
 export type CandidateEnrichmentReviewItemWithEvidence = CandidateEnrichmentReviewItem & {
   sourceRecordSummaries: CandidateProfileSourceSummary[];
-  evidence: EvidenceRecord[];
+  evidence: CandidateEvidenceSummary[];
 };
 
 export class PendingMergeReviewBlockError extends Error {
@@ -805,6 +829,53 @@ function summarizeEnrichmentReview(
     validationWarnings: item.validationWarnings,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
+  };
+}
+
+function summarizeEvidenceRecord(entry: EvidenceRecord): CandidateEvidenceSummary {
+  return {
+    id: entry.id,
+    sourceRecordId: entry.sourceRecordId,
+    sourceName: entry.sourceName,
+    sourceDomain: entry.sourceDomain,
+    evidenceType: entry.evidenceType,
+    rawValue: entry.rawValue,
+    normalizedValue: entry.normalizedValue,
+    quality: entry.quality,
+    extractedFrom: entry.extractedFrom,
+  };
+}
+
+function compactVendorProfileSummary(match: VendorProfileMatch): string {
+  const profile = match.normalizedProfile;
+  return [
+    profile.name,
+    profile.headline,
+    profile.currentCompany ? `Current company: ${profile.currentCompany}` : null,
+    profile.location ? `Location: ${profile.location}` : null,
+    profile.skills.length ? `Skills: ${profile.skills.join(', ')}` : null,
+    profile.experienceSummary.length ? `Experience: ${profile.experienceSummary.join('; ')}` : null,
+    profile.educationSummary.length ? `Education: ${profile.educationSummary.join('; ')}` : null,
+    profile.aboutSummary ? `About: ${profile.aboutSummary}` : null,
+    profile.projectsPublications.length ? `Projects/publications: ${profile.projectsPublications.join('; ')}` : null,
+  ].filter(Boolean).join(' | ');
+}
+
+function summarizeVendorProfileMatch(match: VendorProfileMatch): CandidateEvidenceSummary {
+  const summary = compactVendorProfileSummary(match);
+  return {
+    id: match.approvedEvidenceId ?? evidenceLikeIdForVendorMatch(match.id),
+    sourceRecordId: `vendor:${match.id}`,
+    sourceName: match.provider,
+    sourceDomain: 'professional_profile_vendor',
+    evidenceType: 'vendor_professional_profile',
+    rawValue: summary,
+    normalizedValue: summary,
+    quality: 'medium',
+    extractedFrom: {
+      sourcePath: `vendorProfileMatches.${match.id}.normalizedProfile`,
+      sourceUrl: match.providerProfileUrl ?? match.normalizedProfile.profileUrl ?? match.selectedLinkedInUrl,
+    },
   };
 }
 
@@ -1469,7 +1540,7 @@ export class SourcingService {
     const [approvedEntity, sourceRecords, evidence, reviewLabels, enrichmentReview] = await Promise.all([
       this.repository.getApprovedEntity(profile.approvedEntityId),
       this.repository.getSourceRecordsByIds(profile.sourceRecordIds),
-      this.repository.getEvidenceByIds(profile.evidenceIds),
+      this.resolveEvidenceSummaries(profile.evidenceIds),
       this.repository.getReviewLabelsByIds(profile.reviewLabelIds),
       this.repository.getEnrichmentReviewItem(profile.enrichmentReviewItemId),
     ]);
@@ -1485,7 +1556,9 @@ export class SourcingService {
         .map(([field, evidenceIds]) => ({
           field,
           evidenceIds,
-          evidence: evidenceIds.map((id) => evidenceById.get(id)).filter((entry): entry is EvidenceRecord => Boolean(entry)),
+          evidence: evidenceIds
+            .map((id) => evidenceById.get(id))
+            .filter((entry): entry is CandidateEvidenceSummary => Boolean(entry)),
         })),
       reviewLabels: reviewLabels.map((label) => summarizeReviewLabel(label)),
       enrichmentReview: enrichmentReview ? summarizeEnrichmentReview(enrichmentReview) : null,
@@ -1521,17 +1594,7 @@ export class SourcingService {
       throw new PendingMergeReviewBlockError(approvedEntity.id, pendingMergeBlockers);
     }
 
-    const [sourceRecords, evidence, reviewLabels] = await Promise.all([
-      this.repository.getSourceRecordsByIds(approvedEntity.sourceRecordIds),
-      this.repository.getEvidenceByIds(approvedEntity.evidenceIds),
-      this.repository.getReviewLabelsByIds(approvedEntity.reviewLabelIds),
-    ]);
-    const evidencePack = buildEnrichmentEvidencePack({
-      approvedEntity,
-      sourceRecords,
-      evidence,
-      reviewLabels,
-    });
+    const evidencePack = await this.buildCurrentEnrichmentEvidencePack(approvedEntity);
     const evidencePackHash = buildEvidencePackHash(evidencePack);
     const existingReviewItem = (await this.repository.listEnrichmentReviewItemsForApprovedEntity(approvedEntity.id))
       .find((item) => item.status === 'pending_review' && item.evidencePackHash === evidencePackHash);
@@ -1552,9 +1615,10 @@ export class SourcingService {
         evidencePack,
         deterministicFeatures,
       });
+      const evidencePackEvidenceIds = evidencePack.evidence.map((entry) => entry.id);
       const { draft, warnings } = validateCandidateEnrichmentDraft(
         deriveDraftFieldEvidence(rawDraft),
-        approvedEntity.evidenceIds,
+        evidencePackEvidenceIds,
       );
       const enrichmentRun: CandidateEnrichmentRun = {
         id: runId,
@@ -1580,7 +1644,7 @@ export class SourcingService {
         status: 'pending_review',
         evidencePackHash,
         sourceRecordIds: approvedEntity.sourceRecordIds,
-        evidenceIds: approvedEntity.evidenceIds,
+        evidenceIds: evidencePackEvidenceIds,
         reviewLabelIds: approvedEntity.reviewLabelIds,
         displayName: approvedEntity.displayName,
         draft,
@@ -1633,7 +1697,7 @@ export class SourcingService {
     const evidenceIds = sortedUnique(items.flatMap((item) => item.evidenceIds));
     const [sourceRecords, evidence] = await Promise.all([
       this.repository.getSourceRecordsByIds(sourceRecordIds),
-      this.repository.getEvidenceByIds(evidenceIds),
+      this.resolveEvidenceSummaries(evidenceIds),
     ]);
     const sourceRecordsById = new Map(sourceRecords.map((record) => [record.id, record]));
     const evidenceById = new Map(evidence.map((entry) => [entry.id, entry]));
@@ -1646,7 +1710,7 @@ export class SourcingService {
         .map((record) => summarizeSourceRecord(record)),
       evidence: item.evidenceIds
         .map((evidenceId) => evidenceById.get(evidenceId))
-        .filter((entry): entry is EvidenceRecord => Boolean(entry)),
+        .filter((entry): entry is CandidateEvidenceSummary => Boolean(entry)),
     }));
   }
 
@@ -1693,6 +1757,19 @@ export class SourcingService {
       };
     }
 
+    const approvedEntity = await this.repository.getApprovedEntity(reviewItem.approvedEntityId);
+    if (!approvedEntity) {
+      throw new Error(`Approved entity "${reviewItem.approvedEntityId}" was not found.`);
+    }
+    const currentEvidencePackHash = buildEvidencePackHash(
+      await this.buildCurrentEnrichmentEvidencePack(approvedEntity),
+    );
+    if (currentEvidencePackHash !== reviewItem.evidencePackHash) {
+      throw new Error(
+        `Enrichment review item "${reviewItemId}" is stale because approved evidence changed. Generate a fresh enrichment draft.`,
+      );
+    }
+
     const { draft, warnings } = validateCandidateEnrichmentDraft(
       deriveDraftFieldEvidence(input.reviewedDraft ?? reviewItem.draft),
       reviewItem.evidenceIds,
@@ -1710,7 +1787,6 @@ export class SourcingService {
     };
     await this.repository.updateEnrichmentReviewItem(updatedReviewItem);
 
-    const approvedEntity = await this.repository.getApprovedEntity(reviewItem.approvedEntityId);
     if (approvedEntity) {
       await this.repository.upsertApprovedEntity({
         ...approvedEntity,
@@ -1724,6 +1800,53 @@ export class SourcingService {
       reviewItem: updatedReviewItem,
       candidateProfile,
     };
+  }
+
+  private async buildCurrentEnrichmentEvidencePack(approvedEntity: ApprovedEntity): Promise<EnrichmentEvidencePack> {
+    const [sourceRecords, evidence, reviewLabels, vendorProfileMatches] = await Promise.all([
+      this.repository.getSourceRecordsByIds(approvedEntity.sourceRecordIds),
+      this.repository.getEvidenceByIds(approvedEntity.evidenceIds),
+      this.repository.getReviewLabelsByIds(approvedEntity.reviewLabelIds),
+      this.repository.listVendorProfileMatchesForApprovedEntity(approvedEntity.id),
+    ]);
+    return buildEnrichmentEvidencePack({
+      approvedEntity,
+      sourceRecords,
+      evidence,
+      reviewLabels,
+      vendorProfileMatches,
+    });
+  }
+
+  private async resolveEvidenceSummaries(evidenceIds: string[]): Promise<CandidateEvidenceSummary[]> {
+    const uniqueEvidenceIds = sortedUnique(evidenceIds);
+    const sourceEvidenceIds: string[] = [];
+    const vendorMatchIds: string[] = [];
+    for (const evidenceId of uniqueEvidenceIds) {
+      const vendorMatchId = vendorMatchIdFromEvidenceId(evidenceId);
+      if (vendorMatchId) {
+        vendorMatchIds.push(vendorMatchId);
+      } else {
+        sourceEvidenceIds.push(evidenceId);
+      }
+    }
+
+    const [sourceEvidence, vendorMatches] = await Promise.all([
+      this.repository.getEvidenceByIds(sourceEvidenceIds),
+      this.repository.getVendorProfileMatchesByIds(sortedUnique(vendorMatchIds)),
+    ]);
+    const summariesById = new Map<string, CandidateEvidenceSummary>();
+    for (const entry of sourceEvidence) {
+      summariesById.set(entry.id, summarizeEvidenceRecord(entry));
+    }
+    for (const match of vendorMatches) {
+      const summary = summarizeVendorProfileMatch(match);
+      summariesById.set(summary.id, summary);
+    }
+
+    return evidenceIds
+      .map((evidenceId) => summariesById.get(evidenceId))
+      .filter((entry): entry is CandidateEvidenceSummary => Boolean(entry));
   }
 
   private resolveEnrichmentInference(): {
