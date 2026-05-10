@@ -74,6 +74,7 @@ Last updated: 2026-05-10.
 - [x] Phase 6.5E wired approved vendor profile matches into enrichment evidence packs, enrichment draft validation, enrichment review lineage, final profile lineage, and stale review approval protection. Only approved vendor profile summaries can become enrichment context. No dashboard UI, deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5E.
 - [x] Phase 6.5F added the Approved tab Bright Data/LinkedIn lookup UI: backend-derived LinkedIn URL selection, manual fetch, duplicate-spend reuse display, no-URL gate, pending-merge disabled state, lookup run cards, async snapshot check control, normalized match cards, and approve/reject/ignore controls. Verification used only the local emulator and fake/provider-seeded fixtures. No deploy, live Firestore mutation, OpenAI enrichment, final profile materialization, or live Bright Data call was performed in Phase 6.5F.
 - [x] Phase 6.5G completed local emulator end-to-end verification: API-seeded synthetic candidates, API approval, dashboard fake Bright Data lookup, dashboard vendor approval, OpenAI enrichment generation, dashboard enrichment approval, final profile materialization with vendor lineage, no-LinkedIn negative gate, and stale enrichment approval blocking after vendor evidence changed. No deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5G.
+- [x] Phase 6.5H set Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env`, ran scoped build/dry-run/deploy, deployed only `functions:core-service:sourcing.api` and Hosting site `wekruit-sourcing`, and verified deployed read-only endpoints plus the Approved tab UI on `https://wekruit-sourcing.web.app`. No live Bright Data lookup was performed in Phase 6.5H.
 
 ## Current Open Decisions And Waiting State
 
@@ -121,7 +122,7 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, and Phase 6.5G local end-to-end verification are complete.
+   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, and Phase 6.5H scoped deploy/read-only staging verification are complete.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
    - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
@@ -2743,6 +2744,40 @@ Plan update required before Phase 6.5I:
 - Record deployed project, function, hosting site, and timestamp.
 - Record whether deployed `BRIGHTDATA_API_KEY` was set or already present without exposing value.
 - Record read-only endpoint checks.
+
+Phase 6.5H execution findings from 2026-05-10 01:20 PDT:
+
+- Phase status: completed after Phase 6.5G was committed and pushed. This phase deployed the implementation to the staging sourcing dashboard/API only. It did not create the live synthetic Spencer candidate, approve live candidates, generate live enrichment, materialize live profiles, or call live Bright Data.
+- Secret handling:
+  - Local `.env` was read only by a one-way stdin pipe into Firebase CLI. The `BRIGHTDATA_API_KEY` value was not printed or placed directly in the shell command.
+  - Command shape used: local `.env` parser streamed the value to `npx -y firebase-tools functions:secrets:set BRIGHTDATA_API_KEY --project wekruit-dev-env --data-file - --force`.
+  - Firebase CLI reported: `Created a new secret version projects/526256649094/secrets/BRIGHTDATA_API_KEY/versions/1`.
+  - Metadata-only confirmation via `functions:secrets:get BRIGHTDATA_API_KEY --project wekruit-dev-env` showed version `1` state `ENABLED`. No secret value was accessed or printed.
+- Build and deploy:
+  - `npm run build:sourcing-bundle` passed.
+  - Scoped dry run passed with `--config firebase.sourcing.json --project wekruit-dev-env --only functions:core-service:sourcing.api,hosting:wekruit-sourcing --dry-run`.
+  - Scoped deploy command succeeded with `--config firebase.sourcing.json --project wekruit-dev-env --only functions:core-service:sourcing.api,hosting:wekruit-sourcing`.
+  - Firebase project: `wekruit-dev-env`.
+  - Function deployed: `core-service:sourcing-api(us-central1)`, entry point `sourcing.api`, function URL `https://sourcing-api-s4zwoc37yq-uc.a.run.app`.
+  - Hosting site deployed: `wekruit-sourcing`, URL `https://wekruit-sourcing.web.app`.
+  - Deploy output confirmed `roles/secretmanager.secretAccessor` was granted on `projects/wekruit-dev-env/secrets/BRIGHTDATA_API_KEY` to service account `526256649094-compute@developer.gserviceaccount.com`.
+  - Deploy warnings noted existing platform maintenance items: Node.js 20 runtime deprecation/decommission timing and an outdated `firebase-functions` package. These are not Bright Data blockers for the current smoke test but should be handled in future platform maintenance.
+- Live read-only endpoint verification:
+  - `GET https://wekruit-sourcing.web.app/api/sourcing/health` returned `200` with `{ ok: true, service: "sourcing", runtime: "firebase-functions" }`.
+  - `GET https://wekruit-sourcing.web.app/api/sourcing/approved-entities` returned `200`, `total=0`, `data.length=0`.
+  - This matches the expected live staging state before the synthetic Spencer test: TreeHacks review data exists, but there are still no approved live entities.
+  - `GET https://wekruit-sourcing.web.app/api/sourcing/approved-entities/phase65h-readonly-probe/vendor-profile-matches` returned expected validation status `422` with message `Approved entity "phase65h-readonly-probe" was not found.` This verified the deployed vendor route is present without creating or mutating a live approved entity.
+  - `GET https://wekruit-sourcing.web.app/app.js` returned `200`, `131602` bytes, and contained the deployed Bright Data UI strings/routes: `LinkedIn profile enrichment`, `vendor-profile-lookup:run`, and `No LinkedIn profile URL is available`.
+- Browser/Ruflo deployment verification:
+  - Browser/Ruflo opened `https://wekruit-sourcing.web.app/#approved`.
+  - Page title was `WeKruit Sourcing Review`.
+  - Dashboard showed `Jobs 1`, `Review 1,010`, `Approved 0`, `Enrichment 0`, `Profiles 0`, `Ready`.
+  - Approved tab empty state showed `No approved entities found`, which is expected before Phase 6.5I creates the isolated live synthetic candidate.
+  - Screenshot: `/tmp/wekruit-phase65h-approved-deployed.png`.
+- Phase 6.5H conclusion:
+  - Preconditions are good for Phase 6.5I.
+  - Phase 6.5I should now create only the isolated live synthetic `Spencer Wang` source run/candidate in `wekruit-dev-env`, approve only that synthetic candidate by source-record ID through the API, then perform the first and only live Bright Data lookup from the deployed dashboard UI.
+  - Broader Bright Data usage remains blocked until after the isolated live smoke test and an explicit team decision on access/spend controls.
 
 ##### Phase 6.5I: One Live Staging Lookup
 
