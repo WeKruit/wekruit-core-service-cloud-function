@@ -1919,6 +1919,7 @@ This section should be updated after each planning discussion so implementation 
 11. **What should the first live Bright Data test candidate/environment be?**
    - Answer recorded 2026-05-09 and refined after user clarification: after local fake/provider tests pass and the staging deploy is complete, run exactly one live staging lookup through the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`.
    - Candidate policy: create an isolated synthetic source run/job containing one fake test candidate, `Spencer Wang`, with fake non-sensitive source context and reviewer-provided LinkedIn URL `https://www.linkedin.com/in/spencerwang1`. Approve only this synthetic singleton candidate, then manually select that LinkedIn URL in the Approved detail panel for the one live Bright Data lookup.
+   - Verification policy refined after user clarification: approving the synthetic Spencer singleton through the review-label API is acceptable because candidate approval is already proven. The new Bright Data lookup button must be clicked through the deployed dashboard, and the live smoke should continue through Bright Data match approval, enrichment generation, enrichment approval, and final profile verification.
    - Isolation boundary: do not approve, merge, enrich, or run Bright Data lookup against the existing TreeHacks staging dataset as part of the Bright Data smoke test.
    - Boundary: do not run live Bright Data calls during planning or before local fake/provider verification passes.
    - Reason: this validates the real integration in the environment the team is currently using while keeping vendor spend, data mutation, and reviewer workflow risk tightly bounded.
@@ -2248,12 +2249,18 @@ Scope:
   - Candidate LinkedIn URL: `https://www.linkedin.com/in/spencerwang1`.
   - Use fake non-sensitive supporting info only, such as test institution/company/project labels. Do not add real private/contact data.
 - Prefer the existing sourcing API/source-record ingestion path to create the synthetic run and source record, so the test follows the same `source record -> dedup candidate -> review -> approved entity` lifecycle as real data.
-- Approve only the synthetic Spencer singleton candidate through the dashboard or review-label API.
-- Manually select the Spencer LinkedIn URL in the Approved detail panel.
-- Run exactly one Bright Data lookup.
-- Review the normalized result.
-- Approve, reject, or ignore based on reviewer judgment.
-- If approved, generate enrichment only if the user/team wants the full live chain exercised.
+- Approve only the synthetic Spencer singleton candidate through the review-label API. This is acceptable because the core candidate approval mechanism is already proven and is not the new surface under test.
+- Verify the new Bright Data flow through the deployed dashboard, not by directly calling the Bright Data API route:
+  - Open `https://wekruit-sourcing.web.app/#approved` with Browser/Ruflo.
+  - Select the approved synthetic Spencer candidate.
+  - Manually select the Spencer LinkedIn URL in the Approved detail panel.
+  - Click the Bright Data lookup/fetch button in the dashboard exactly once.
+  - Review the normalized Bright Data result card in the dashboard.
+  - Approve the Bright Data match from the dashboard so the UI decision flow is verified.
+- Continue through the full live chain after the Bright Data match is approved:
+  - Generate enrichment for the synthetic Spencer candidate.
+  - Review and approve the enrichment.
+  - Open the final Profiles tab/detail view and verify the final profile is materialized with proper source/vendor lineage.
 - Do not approve, merge, enrich, or run Bright Data lookup against TreeHacks candidates as part of this smoke test.
 
 Planned synthetic run lifecycle:
@@ -2277,8 +2284,9 @@ Planned synthetic run lifecycle:
    - Fake non-sensitive fields may include `rawSummary.testRole`, `rawSummary.testProject`, and `rawSummary.suggestedSignals`.
 3. Complete the source run through the sourcing API.
 4. Confirm exactly one singleton review candidate was created for the synthetic run.
-5. Approve only that singleton as a real candidate through the dashboard or review-label API.
-6. Run the Bright Data lookup only from the approved synthetic candidate's Approved detail panel.
+5. Approve only that singleton as a real candidate through the review-label API.
+6. Use Browser/Ruflo on the deployed dashboard to run the new Bright Data lookup from the approved synthetic candidate's Approved detail panel.
+7. Use Browser/Ruflo on the deployed dashboard to approve the Bright Data match, generate enrichment, approve enrichment, and inspect the final profile.
 
 This lifecycle intentionally uses the existing pipeline instead of direct Firestore insertion so review, evidence extraction, approved-entity materialization, and lineage are all exercised.
 
@@ -2286,14 +2294,17 @@ Verification:
 
 - Lookup run and vendor match documents are created in Firestore.
 - No raw vendor payload is stored in hot Firestore docs.
-- Reviewer decision is persisted.
+- Bright Data lookup was triggered by clicking the deployed dashboard button, not by direct API call.
+- Bright Data reviewer decision is persisted after dashboard approval.
 - Re-running unchanged rejected/ignored input does not spend another lookup.
 - Approved vendor evidence appears in the next enrichment evidence pack.
-- Browser/Ruflo verifies the deployed UI state after the live lookup.
+- Enrichment generation and enrichment approval complete for the synthetic Spencer candidate.
+- Final profile is materialized and visible in the deployed Profiles tab.
+- Browser/Ruflo verifies the deployed UI state after Bright Data lookup, Bright Data approval, enrichment approval, and final profile materialization.
 
 Plan update required after Phase 6.5I:
 
-- Record exact synthetic source run ID, source record ID, dedup candidate ID, approved entity ID, selected LinkedIn URL, vendor run ID, vendor match ID, reviewer decision, and whether enrichment was generated.
+- Record exact synthetic source run ID, source record ID, dedup candidate ID, approved entity ID, selected LinkedIn URL, vendor run ID, vendor match ID, Bright Data reviewer decision, enrichment run ID, enrichment review item ID, final profile ID, and screenshot paths from Browser/Ruflo verification.
 - Record any Bright Data account/API errors.
 - Record whether implementation is ready to hand off.
 
