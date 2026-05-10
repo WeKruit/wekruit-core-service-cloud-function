@@ -3319,6 +3319,73 @@ Recommended next diagnostic plan before another implementation/deploy:
    - evaluate another approved professional-data provider for richer profile detail.
 7. Any live Bright Data diagnostic call should require explicit user approval because it may spend credits. Do not run it silently.
 
+Phase 6.5K implementation/diagnostic slice from 2026-05-10:
+
+- User greenlit careful investigation and improvement work for Bright Data profile richness.
+- Clarification on "LinkedIn block page":
+  - The earlier block-page result was from an anonymous server-side fetch of `https://www.linkedin.com/in/spencerwang1/`, not from the user's normal logged-in browser.
+  - LinkedIn can show a public-looking profile to a normal browser while returning reduced or blocked HTML to anonymous/scripted/data-center requests. This is why Bright Data itself must be tested directly before drawing conclusions.
+- Added local diagnostic script `scripts/brightdata-linkedin-field-inventory.mjs`.
+  - The script requires `CONFIRM_BRIGHTDATA_LIVE_DIAGNOSTIC=1` before making a live provider call.
+  - It reads `BRIGHTDATA_API_KEY` from environment/local `.env` without printing it.
+  - It does not write raw Bright Data payloads to Firestore or repo files.
+  - It prints a redacted field inventory: response status, record count, top-level keys, selected string lengths/previews for allowlisted fields, array counts/sample keys for professional lists, and the normalized profile that WeKruit would store.
+- Ran one controlled live Bright Data diagnostic call for the approved synthetic test URL `https://www.linkedin.com/in/spencerwang1/` using the API-reference canonical body shape `{ "input": [{ "url": "..." }] }`.
+  - Output was written to `/tmp/wekruit-brightdata-spencer-input-inventory.json` for local inspection only.
+  - Response status: `200 OK`.
+  - Record count: `1`.
+  - Dataset ID: `gd_l1viktl72bvl7bjuj0`.
+  - Normalized profile remained thin:
+    - name `Spencer Wang`;
+    - current company `WeKruit` with public LinkedIn company URL;
+    - location `Los Angeles`;
+    - one normalized education summary;
+    - about length `89`, text `I am a dedicated Computer Science student at UCLA's Samueli School of Engineering with a…`;
+    - `experienceSummary: []`;
+    - `skills: []`;
+    - `projectsPublications: []`.
+  - Redacted field inventory confirmed:
+    - top-level `experience` existed but was `null`;
+    - `projects`, `publications`, `patents`, `skills`, `certifications`, `courses`, `organizations`, and `volunteer_experience` were absent;
+    - `honors_and_awards` was `null`;
+    - `education` was an array with `2` items, but descriptions were `null`;
+    - `educations_details` was a short string;
+    - `activity` was an array with `9` items, but public activity/post payloads remain outside the current v1 allowlist and should not be silently used as experience enrichment context without a product/data-use decision.
+- Conclusion from the live diagnostic:
+  - The canonical Bright Data request shape works, but it does not make the Spencer profile richer.
+  - For this URL/provider/account/dataset, Bright Data is not returning experience/project/skill/publication detail that WeKruit can preserve in the approved v1 fields.
+  - The Spencer thinness is therefore not caused by the dashboard hiding details, nor by the current normalizer dropping documented `experience` rows. Bright Data returned `experience: null` for the canonical diagnostic call.
+- Code improvement patch added after the diagnostic:
+  - `BrightDataLinkedInProvider.lookupLinkedInProfile` now sends the API-reference canonical body `{ input: [{ url }] }`.
+  - `normalizeBrightDataLinkedInProfile` now reads extra documented/safe aliases:
+    - `current_company_name` when `current_company` is absent;
+    - `occupation` / `sub_title` as headline fallbacks;
+    - `educations_details` as an education-summary source;
+    - `experiences` and `volunteer_experience` as experience-summary sources;
+    - `skill` as a skills fallback;
+    - `about_html`, `summary_html`, and `description_html` as about-summary fallbacks.
+  - The patch does not store raw payloads and does not start using `activity`, `posts`, people-also-viewed, contact fields, follower/connection counts, media, or social graph data.
+- Automated verification completed after the patch:
+  - `node --check scripts/brightdata-linkedin-field-inventory.mjs` passed.
+  - `npm run build` passed.
+  - `node --test lib/services/sourcing/integrations/brightdata.test.js` passed: `7` tests, `7` pass.
+  - `node --test lib/services/sourcing/application/enrichment.test.js lib/services/sourcing/application/service.test.js` passed: `23` tests, `23` pass.
+  - `node --test lib/services/sourcing/**/*.test.js` passed: `45` tests, `45` pass.
+  - `npm run build:sourcing-bundle` passed.
+  - `git diff --check` passed.
+- Scoped staging deploy completed:
+  - Command: `npx -y firebase-tools deploy --config firebase.sourcing.json --project wekruit-dev-env --only functions:core-service:sourcing.api`.
+  - Deploy result: `functions[core-service:sourcing-api(us-central1)] Successful update operation`.
+  - Hosting was not redeployed because Phase 6.5K did not change `web/app.js` or `web/index.html`.
+  - Firebase warnings observed but not blocking: Node.js 20 runtime deprecation/decommission timing and outdated `firebase-functions` package.
+- Read-only post-deploy verification completed:
+  - `GET https://wekruit-sourcing.web.app/api/sourcing/health` returned `200` with `{ "ok": true, "service": "sourcing", "runtime": "firebase-functions" }`.
+  - Existing synthetic Spencer vendor-match endpoint for `cand_2eef60785b010df078cb8cec` returned `200`, with `1` eligible LinkedIn URL, `1` lookup run, `1` match, match ID `vendor_match_2ec44fc517ca281fdd854def`, review status `approved`, `experienceSummary.length = 0`, `projectsPublications.length = 0`, and `aboutSummary.length = 89`.
+- Final Phase 6.5K state:
+  - The deployed backend now uses the canonical Bright Data request body and broader safe alias normalization.
+  - The diagnostic established that Bright Data's current response for `https://www.linkedin.com/in/spencerwang1/` does not include experience/project/skill/publication data in the profile endpoint response, so no code-only patch can manufacture that missing professional context without violating the evidence-grounded design.
+  - The next product decision is whether to keep LinkedIn profile scraping as a sometimes-thin supplemental source, explicitly allow public LinkedIn activity/post summaries into the field policy, test another approved LinkedIn URL known to expose public work-history details, add website/GitHub/project-page enrichment, or evaluate another professional-data provider.
+
 #### Immediate Blockers Before Full Live Completion
 
 - Deployed Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` is now set and metadata-confirmed as version `1` / `ENABLED`; the value was not exposed.

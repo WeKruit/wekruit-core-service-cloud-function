@@ -429,6 +429,18 @@ function listFromUnknown(
   return compactList((expandEntry ? expandEntry(value) : [value]).map((entry) => summarizer(entry)), maxItems);
 }
 
+function mergeListValues(
+  values: unknown[],
+  summarizer: (entry: unknown) => string | null,
+  maxItems: number,
+  expandEntry?: (entry: unknown) => unknown[],
+): string[] {
+  return compactList(
+    values.flatMap((value) => listFromUnknown(value, summarizer, maxItems, expandEntry)),
+    maxItems,
+  );
+}
+
 function parseJsonText(text: string): unknown {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -489,18 +501,29 @@ export function normalizeBrightDataLinkedInProfile(
       ].filter(Boolean).join(' '),
       160,
     );
-  const currentCompany = summarizeCompany(record.current_company ?? record.company ?? record.company_name);
+  const currentCompany = summarizeCompany(
+    record.current_company ?? record.current_company_name ?? record.company ?? record.company_name,
+  );
 
   return normalizedProfessionalProfileSummarySchema.parse({
     profileUrl,
     name,
-    headline: firstString(record, ['headline', 'position', 'title'], headlineMaxLength),
+    headline: firstString(record, ['headline', 'position', 'title', 'occupation', 'sub_title'], headlineMaxLength),
     currentCompany,
     location: summarizeLocation(record),
-    educationSummary: listFromUnknown(record.education, summarizeEducationItem, 10),
-    experienceSummary: listFromUnknown(record.experience, summarizeExperienceItem, 10, expandExperienceEntry),
-    skills: listFromUnknown(record.skills, summarizeSkillItem, 40),
-    aboutSummary: firstString(record, ['about', 'summary', 'description'], aboutSummaryMaxLength),
+    educationSummary: mergeListValues([record.education, record.educations_details], summarizeEducationItem, 10),
+    experienceSummary: mergeListValues(
+      [record.experience, record.experiences, record.volunteer_experience],
+      summarizeExperienceItem,
+      10,
+      expandExperienceEntry,
+    ),
+    skills: mergeListValues([record.skills, record.skill], summarizeSkillItem, 40),
+    aboutSummary: firstString(
+      record,
+      ['about', 'about_html', 'summary', 'summary_html', 'description', 'description_html'],
+      aboutSummaryMaxLength,
+    ),
     projectsPublications: compactList(
       [
         ...listFromUnknown(record.projects, summarizeProjectItem, 12),
@@ -642,7 +665,7 @@ export class BrightDataLinkedInProvider implements ProfessionalProfileLookupPort
         Authorization: `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify([{ url: canonicalUrl }]),
+      body: JSON.stringify({ input: [{ url: canonicalUrl }] }),
     });
     if (!response.ok) {
       throw new Error(`Bright Data LinkedIn lookup failed with status ${response.status}.`);

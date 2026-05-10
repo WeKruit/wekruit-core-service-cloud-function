@@ -193,6 +193,59 @@ test('normalizeBrightDataLinkedInProfile preserves rich allowed public context',
   assert.equal(serialized.includes('100000'), false);
 });
 
+test('normalizeBrightDataLinkedInProfile reads documented Bright Data aliases without raw retention', () => {
+  const profile = normalizeBrightDataLinkedInProfile(
+    {
+      input_url: 'https://www.linkedin.com/in/spencerwang1/',
+      first_name: 'Spencer',
+      last_name: 'Wang',
+      occupation: 'Founder and product engineer',
+      current_company: null,
+      current_company_name: 'WeKruit',
+      location: 'Los Angeles',
+      about: null,
+      about_html: '<p>Builds reviewer-centered sourcing and enrichment systems.</p>',
+      experience: null,
+      experiences: [
+        {
+          title: 'Founder',
+          company_name: 'WeKruit',
+          description_html: '<div>Designs and ships candidate sourcing workflows with human review.</div>',
+        },
+      ],
+      volunteer_experience: [
+        {
+          role: 'Hackathon mentor',
+          organization: 'Synthetic Builder Club',
+          description: 'Helped teams scope product demos and technical architecture.',
+        },
+      ],
+      education: null,
+      educations_details: 'UCLA Henry Samueli School of Engineering and Applied Science',
+      skill: ['TypeScript'],
+      activity: [
+        {
+          post_text: 'Should not be stored in normalized profile without a field policy decision.',
+        },
+      ],
+    },
+    'https://www.linkedin.com/in/spencerwang1',
+  );
+
+  const serialized = JSON.stringify(profile);
+  assert.equal(profile.profileUrl, 'https://www.linkedin.com/in/spencerwang1');
+  assert.equal(profile.name, 'Spencer Wang');
+  assert.equal(profile.headline, 'Founder and product engineer');
+  assert.equal(profile.currentCompany, 'WeKruit');
+  assert.deepEqual(profile.educationSummary, ['UCLA Henry Samueli School of Engineering and Applied Science']);
+  assert.ok(profile.experienceSummary.some((entry) => entry.includes('candidate sourcing workflows')));
+  assert.ok(profile.experienceSummary.some((entry) => entry.includes('Hackathon mentor')));
+  assert.deepEqual(profile.skills, ['TypeScript']);
+  assert.equal(profile.aboutSummary, 'Builds reviewer-centered sourcing and enrichment systems.');
+  assert.equal(serialized.includes('post_text'), false);
+  assert.equal(serialized.includes('field policy decision'), false);
+});
+
 test('BrightDataLinkedInProvider builds the sync LinkedIn scraper request safely', async () => {
   const captured: {
     url?: string;
@@ -235,7 +288,7 @@ test('BrightDataLinkedInProvider builds the sync LinkedIn scraper request safely
   assert.equal(captured.init.method, 'POST');
   assert.equal(captured.init.headers.Authorization, 'Bearer test-brightdata-key');
   assert.equal(captured.init.headers['Content-Type'], 'application/json');
-  assert.equal(captured.init.body, JSON.stringify([{ url: 'https://www.linkedin.com/in/spencerwang1' }]));
+  assert.equal(captured.init.body, JSON.stringify({ input: [{ url: 'https://www.linkedin.com/in/spencerwang1' }] }));
   assert.equal(result.provider, 'brightdata');
   assert.equal(result.datasetId, brightDataLinkedInProfilesDatasetId);
   assert.equal(result.inputUrl, 'https://www.linkedin.com/in/spencerwang1');
