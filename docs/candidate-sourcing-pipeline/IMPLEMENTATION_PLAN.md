@@ -3541,6 +3541,7 @@ Shared tag package findings:
   - Accept recommendation for new shared-label field shape in principle: add a dedicated `canonicalTags` or `sharedTags` object to enrichment drafts and final profiles with evidence/confidence preserved, rather than replacing existing fields immediately.
   - Accept recommendation to represent unknown/uncertain shared classifications as empty/null canonical fields plus UI/reviewer state, not fake `unknown` shared-package tokens.
   - Accept recommendation to start with old labels plus deterministic mapping first, then move OpenAI to direct canonical output after the bridge is proven.
+  - User decision on 2026-05-12: accept the remaining shared-tag recommendations unless explicitly overridden later, including the proposed `canonicalTags` shape, deterministic mapping policy, and transition UI strategy.
 
 Shared tag migration analysis:
 
@@ -3585,6 +3586,7 @@ Shared tag migration analysis:
   - Canonical tag entries should preserve `value`, `confidence`, `evidenceIds`, and, during migration, `mappedFrom` / `mappingSource` so reviewers and tests can trace how a legacy label became a shared label.
   - `unmappedLegacyLabels`: optional diagnostics-only object during migration that records current sourcing values that could not be mapped cleanly, so reviewers/developers can see coverage gaps without polluting canonical labels.
 - Proposed deterministic legacy-to-canonical mapping policy:
+  - User decision: accept this recommendation as the v1 migration policy unless package validation reveals a concrete incompatibility.
   - Do not force inaccurate hard-filter `roleFunction` values just because the legacy schema required a `primaryTrack`.
   - Preserve every canonical value's evidence lineage and confidence from the legacy source field when mapping.
   - Map `unknown_other` / `unknown` to no canonical value and record it only in `unmappedLegacyLabels` or UI status.
@@ -3627,12 +3629,19 @@ Shared tag migration analysis:
   - `founder` -> `founder`.
   - `academic_researcher` -> no canonical career stage; use `relevantTags: ["academic_researcher"]` if needed.
   - `unknown` -> `null`.
-- Current open questions before implementation planning can be considered complete:
+- Reviewer UI transition decision:
+  - Recommendation accepted on 2026-05-12: during the additive migration, keep existing labels as the primary reviewer-facing labels and show `canonicalTags` in a secondary/diagnostic detail area such as "Canonical tags preview".
+  - Reason: this lets reviewers and developers compare old labels to mapped shared labels without disrupting the existing enrichment review workflow or making reviewers trust a new mapping before it has production evidence.
+  - Promotion path: after tests and reviewer checks show the mapping is reliable, canonical labels can move into primary pills/filters and old labels can be retired.
+- Shared tag architecture status:
+  - Conceptual decisions are settled enough to start detailed implementation planning when greenlit.
+  - Implementation itself is not greenlit yet.
+  - The first implementation plan should include package publishing/auth preflight, schema/mapping validation, additive `canonicalTags` persistence, taxonomy API endpoint, secondary UI display, and verification before any old fields are removed.
+- Remaining preflight checks before implementation planning can be considered fully executable:
   - Confirm `@wekruit/shared-tags` GitHub Packages publication path, package visibility, package access, and local/CI/deploy auth mechanics.
   - Validate the proposed `canonicalTags` field shape against the actual `@wekruit/shared-tags` TypeScript exports and local zod schemas.
   - Validate the proposed deterministic mapping table against the shared package's validators, especially `relevantTags` no-abbreviation rules.
-  - Decide whether reviewer UI should display both old labels and canonical labels during the additive migration window, or keep canonical labels in a secondary diagnostics/detail area until confidence is high.
-- Example mapping questions to resolve before implementation:
+- Historical mapping questions, now answered by the accepted recommendation unless validation fails:
   - Should `ai_research` become `roleFunction=data_analysis` plus `industrySector=artificial_intelligence_and_machine_learning` plus `relevantTags=["artificial_intelligence_research"]`, or should research remain only a tag/sector signal?
   - Should `business_founder` be represented by `careerStage=founder` and `roleFunction=management_and_executive`, or by a relevant tag plus founder stage only?
   - Should `academic_research` map to `industrySector=research_and_academia` with no forced role function?
