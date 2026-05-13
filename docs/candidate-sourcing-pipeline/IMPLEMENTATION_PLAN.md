@@ -118,7 +118,8 @@ This is the current single source of truth after the successful Phase 3.5 live s
 - Current tag-system integration item:
   - The teammate-owned unified tag package is now confirmed present and considered ready for integration planning in the permanent sibling clone `/Users/spencerwang/Documents/GitHub/wekruit-pa`.
   - Package location: `/Users/spencerwang/Documents/GitHub/wekruit-pa/packages/shared-tags`; package name: `@wekruit/shared-tags`; current version: `0.1.0`.
-  - The remaining work is not "create the package"; it is to choose the dependency/distribution path, map sourcing's existing enrichment taxonomy to the shared axes, and remove the hardcoded `records.ts` / `web/app.js` duplication without breaking existing candidate profile reads.
+  - Dependency/distribution decision as of 2026-05-12: prefer GitHub Packages/private registry over dev-only sibling path so deploy/CI does not depend on one local checkout.
+  - The remaining work is not "create the package"; it is to confirm package publishing/auth, map sourcing's existing enrichment taxonomy to the shared axes, add a taxonomy API endpoint for the static dashboard, and remove the hardcoded `records.ts` / `web/app.js` duplication without breaking existing candidate profile reads.
 - Current reviewer workflow caution:
   - Do not approve, merge, enrich, materialize profiles, or run Bright Data lookup against the TreeHacks staging dataset unless the user/team intentionally starts a separate validation pass.
   - The Bright Data live smoke and Phase 6.5J verification should use only isolated synthetic `Spencer Wang` test run/job candidates with LinkedIn URL `https://www.linkedin.com/in/spencerwang1`. Do not use TreeHacks Devpost source data as the verification basis for the normalization patch.
@@ -144,9 +145,11 @@ Current priority order:
    - Migration should make the shared package the source of valid tags and keep Firestore as the source of candidate-specific tag assignments.
    - Confirmed package location: `wekruit-pa/packages/shared-tags`, package name `@wekruit/shared-tags`, version `0.1.0`, currently `private: true` / workspace-internal.
    - Confirmed browser-safe export exists at `@wekruit/shared-tags/canonical` for bundled browser consumers.
-   - Important dashboard constraint: the current sourcing dashboard is plain static `web/app.js`, not an npm-bundled app. A browser-safe package export is useful, but the dashboard still needs either a build step or a backend taxonomy endpoint before it can stop duplicating arrays.
-   - Confirmed Python package exists at `wekruit-pa/packages/shared-tags-py`; its README describes the scraping-side tag-event/idempotency write contract. Before changing `wekruit-scraping`, verify whether the teammate-finished package now intentionally covers canonical vocab consumption for Python, or whether scraping should keep emitting source records without canonical tag validation for this phase.
+   - 2026-05-12 decision: use GitHub Packages/private registry if possible for the real integration path; do not rely on a dev-only sibling path as the production/deploy dependency model.
+   - Important dashboard constraint: the current sourcing dashboard is plain static `web/app.js`, not an npm-bundled app. Decision for v1: expose canonical vocab through a backend taxonomy endpoint rather than adding a dashboard build step solely for shared labels.
+   - Confirmed Python package exists at `wekruit-pa/packages/shared-tags-py`; its README describes the scraping-side tag-event/idempotency write contract. Decision for v1: do not change `wekruit-scraping` for shared labels unless source adapters start emitting canonical tags/tag events.
    - Migration must be a deliberate schema mapping, not a direct string swap: current sourcing values such as `ai_research`, `business_founder`, `academic_research`, `healthcare_ai`, and `ai_infrastructure` do not all match the shared package's `roleFunction` / `industrySector` axes one-for-one.
+   - Migration should be additive first: preserve existing profile fields while adding shared canonical fields, then fully move UI/consumers to shared package labels after compatibility is proven.
 
 3. **Large queue handling / pagination.**
    - The live Devpost import proved that the backend can ingest a broad run, but the current review UI intentionally loads a capped review set.
@@ -178,6 +181,7 @@ Current priority order:
      - V1 should require reviewer approval of extracted website facts before they enter OpenAI enrichment context.
      - Suggested normalized fields: `profileUrl`, `pageTitle`, `siteName`, `aboutSummary`, `projectSummaries`, `experienceHighlights`, `skills`, `educationHighlights`, `contactLinks`, `sourcePages`, `extractedAt`, `contentHash`.
      - First implementation should start with fake provider fixtures and local emulator/browser verification before any live website crawl.
+     - Topic status: conceptually settled; future work can move to implementation planning when greenlit, starting from the documented Crawl4AI + Bright Data-style HITL architecture.
 
 6. **LinkedIn/social profile handling.**
    - For v1, preserve LinkedIn/Twitter/social URLs as clickable reviewer context and optional enrichment context.
@@ -3457,8 +3461,9 @@ User prompts for this planning slice:
   - Website lookup should be hidden/disabled when no eligible personal website/project URL exists in approved evidence lineage.
   - Website lookup must exclude LinkedIn URLs and leave LinkedIn to Bright Data.
   - Crawl4AI is the preferred real extraction engine for the website path.
+  - Topic 1 conceptual decision is settled: future planning can proceed from the WebsiteProfileLookupPort + Crawl4AI worker + Bright Data-style HITL architecture below.
   - Bright Data should remain as currently implemented for now; do not expand to LinkedIn posts/activity or further Bright Data richness experiments unless explicitly reopened later.
-  - Shared tag migration needs further architecture discussion before implementation.
+  - Shared tag migration needs further architecture discussion before implementation, but user accepts the current recommendations: core-service first, no initial scraping changes, taxonomy API endpoint over dashboard build step for v1, additive migration before full label cutover, and GitHub Packages/private registry rather than a dev-only sibling-path dependency.
 
 Personal website enrichment recommendation:
 
@@ -3496,6 +3501,10 @@ Personal website enrichment recommendation:
   - local emulator/browser flow using a synthetic approved candidate with a local/static test website URL;
   - one explicit user-approved public website smoke after fake-provider verification;
   - no TreeHacks candidate approvals or broad crawls during the first website test.
+- Topic status:
+  - Conceptually settled as of 2026-05-12.
+  - Not greenlit for implementation yet.
+  - Remaining work before implementation is execution planning: Cloud Run worker packaging, Crawl4AI extraction contract, provider/run/match schema reuse or extension, URL eligibility extraction rules, and exact verification phases.
 
 Shared tag package findings:
 
@@ -3521,10 +3530,11 @@ Shared tag package findings:
 - `packages/shared-tags-py` exists and is useful for Python tag-event writes. Its README currently emphasizes idempotent tag-event parity, not the same per-axis canonical vocab export used by the TypeScript package. Treat Python canonical-vocab support as a verification item before changing `wekruit-scraping`.
 - Teammate signal: the package is finished and ready from the package-owner side. WeKruit sourcing should now plan integration, not wait for package creation.
 - User preference as of 2026-05-12:
-  - Use a dev-only sibling path install if that keeps the first integration simple.
+  - Do not use a dev-only sibling path as the real integration path. Prefer private registry/GitHub Packages, likely GitHub Packages, so deploy/CI does not depend on one developer's local sibling checkout.
   - Fully move sourcing labels toward shared package labels eventually, but discuss the migration carefully before implementation because this is a larger architecture change.
-  - Clarify why `wekruit-scraping` would or would not need changes before touching it.
-  - Decide between a taxonomy API endpoint and dashboard JS build step based on what is best for this codebase, not just what is quickest.
+  - Accept recommendation that `wekruit-scraping` should not change in the first shared-tag migration unless source adapters start emitting final canonical tags/tag events.
+  - Accept recommendation that the static sourcing dashboard should use a backend taxonomy API endpoint for v1 rather than introducing a JS build step just to share arrays.
+  - Accept recommendation that migration should be additive first, preserving current profile fields until shared canonical fields, UI reads, and downstream consumers are proven.
 
 Shared tag migration analysis:
 
@@ -3536,22 +3546,30 @@ Shared tag migration analysis:
   - `contactability` has no shared axis and should remain a sourcing-specific field unless the package owner adds a contactability axis later.
 - Migration should be an adapter/schema migration, not a blind enum replacement.
 - Recommended migration shape:
-  1. Start with a dev-only sibling path install if implementation is greenlit, because `wekruit-pa` is now a permanent sibling clone and the user prefers keeping the first integration local/simple.
-     - Production deploy still needs a follow-up decision because Firebase deploys cannot depend on an uncommitted local sibling path unless the package is bundled/copied/published during build.
-     - Private registry/GitHub Packages remains the clean production path once the team wants this dependency stable outside one developer machine.
+  1. Use a private package distribution path, likely GitHub Packages, for `@wekruit/shared-tags` before core-service depends on it.
+     - The package currently declares `private: true`, so package-owner/publish setup is a prerequisite before production dependency wiring.
+     - Core-service will need npm auth configuration for local install, CI/deploy, and Firebase function bundling without committing secrets.
      - Avoid long-term hand-copying of vocab arrays unless it is explicitly a generated artifact with a drift check.
   2. Add a sourcing-owned mapping layer that converts current enrichment outputs into shared canonical axes and validates them against the package.
   3. Preserve existing candidate profile fields during migration so already-materialized profiles and dashboard filters do not break.
   4. Add new canonical/shared tag fields alongside existing fields first, then migrate reads/UI filters after data compatibility is proven.
   5. Update the OpenAI enrichment schema/prompt only after the adapter and tests prove the shared axes can represent current sourcing use cases.
-  6. Replace hardcoded dashboard arrays only after deciding whether the static dashboard gets a build step or fetches a backend taxonomy endpoint.
-  7. Decide separately whether `wekruit-scraping` should consume Python canonical vocab support, emit tag events only, or continue producing source records without labeling-package coupling for this phase.
+  6. Replace hardcoded dashboard arrays through a backend taxonomy endpoint for v1, because the dashboard is currently static and unbundled.
+  7. Keep `wekruit-scraping` unchanged for the first shared-tag migration unless a separate decision is made to emit adapter-side canonical tags/tag events.
 - Current architecture discussion notes:
   - `wekruit-scraping` may not need changes for the first shared-tag migration if it continues to produce source records only and does not assign final candidate labels. The labeling/final taxonomy currently happens in core-service during enrichment, so core-service is the natural first consumer.
   - `wekruit-scraping` would need changes only if source adapters begin emitting canonical tags/tag events directly, or if the team wants adapter-side validation against shared vocab before upload.
   - A taxonomy API endpoint is likely the smallest dashboard change because `web/app.js` is currently static and unbundled. The backend can expose the canonical vocab/options, and the dashboard can fetch them at startup.
   - A JS build step is cleaner if the dashboard is going to grow into a real frontend app, but it introduces bundling/deployment complexity just to share arrays.
-  - Current leaning for first implementation: backend taxonomy endpoint for the static dashboard; revisit a build step only if broader dashboard modernization starts.
+  - Decision for first implementation: backend taxonomy endpoint for the static dashboard; revisit a build step only if broader dashboard modernization starts.
+  - Decision for first implementation: core-service is the first shared-tags consumer because it owns enrichment and final profile labeling.
+  - Decision for first implementation: migration is additive first, with eventual full move to shared package labels after compatibility is proven.
+- Current open questions before implementation planning can be considered complete:
+  - Confirm `@wekruit/shared-tags` publication path and package auth mechanics, preferably GitHub Packages.
+  - Decide the exact new core-service field name/shape for shared canonical tags on enrichment review drafts and final candidate profiles.
+  - Finalize mapping policy for current sourcing labels that do not have one-to-one shared-axis equivalents.
+  - Decide how to represent uncertain/unknown classifications when the shared package intentionally avoids ambiguous canonical tokens.
+  - Decide whether reviewer UI should display only shared labels immediately, or display old labels plus shared labels during the additive migration window.
 - Example mapping questions to resolve before implementation:
   - Should `ai_research` become `roleFunction=data_analysis` plus `industrySector=artificial_intelligence_and_machine_learning` plus `relevantTags=["artificial_intelligence_research"]`, or should research remain only a tag/sector signal?
   - Should `business_founder` be represented by `careerStage=founder` and `roleFunction=management_and_executive`, or by a relevant tag plus founder stage only?
