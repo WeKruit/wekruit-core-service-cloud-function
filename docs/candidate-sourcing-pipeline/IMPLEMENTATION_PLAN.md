@@ -3531,12 +3531,16 @@ Shared tag package findings:
 - Teammate signal: the package is finished and ready from the package-owner side. WeKruit sourcing should now plan integration, not wait for package creation.
 - User preference as of 2026-05-12:
   - Do not use a dev-only sibling path as the real integration path. Prefer private registry/GitHub Packages, likely GitHub Packages, so deploy/CI does not depend on one developer's local sibling checkout.
+  - User concern clarified on 2026-05-12: the package must remain private to WeKruit, not public to everyone. GitHub Packages remains acceptable only if package visibility/access is private/internal to the WeKruit org/team and verified after first publish.
+  - User asked whether a PAT should go in `.env`. Recommendation: do not use app runtime `.env` as the default npm registry auth mechanism. Prefer user-level `~/.npmrc` for local installs, GitHub Actions `GITHUB_TOKEN` where package access permits, or a secret-backed `NODE_AUTH_TOKEN` / PAT for CI/deploy. If a local deploy helper later reads an ignored env file, treat that as package-manager auth only and never as a committed/runtime secret.
+  - User accepts `canonicalTags` as the field name.
   - Fully move sourcing labels toward shared package labels eventually, but discuss the migration carefully before implementation because this is a larger architecture change.
   - Accept recommendation that `wekruit-scraping` should not change in the first shared-tag migration unless source adapters start emitting final canonical tags/tag events.
   - Accept recommendation that the static sourcing dashboard should use a backend taxonomy API endpoint for v1 rather than introducing a JS build step just to share arrays.
   - Accept recommendation that migration should be additive first, preserving current profile fields until shared canonical fields, UI reads, and downstream consumers are proven.
   - Accept recommendation for new shared-label field shape in principle: add a dedicated `canonicalTags` or `sharedTags` object to enrichment drafts and final profiles with evidence/confidence preserved, rather than replacing existing fields immediately.
   - Accept recommendation to represent unknown/uncertain shared classifications as empty/null canonical fields plus UI/reviewer state, not fake `unknown` shared-package tokens.
+  - Accept recommendation to start with old labels plus deterministic mapping first, then move OpenAI to direct canonical output after the bridge is proven.
 
 Shared tag migration analysis:
 
@@ -3571,19 +3575,63 @@ Shared tag migration analysis:
   - Decision for first implementation: core-service is the first shared-tags consumer because it owns enrichment and final profile labeling.
   - Decision for first implementation: migration is additive first, with eventual full move to shared package labels after compatibility is proven.
 - Proposed `canonicalTags` / `sharedTags` v1 field shape:
+  - Field name decision: `canonicalTags`.
+  - `schemaVersion`: string, initially something like `shared-tags-v1`.
   - `roleFunctions`: array of shared `roleFunction` values with confidence and evidence IDs.
   - `industrySectors`: array of shared `industrySector` values with confidence and evidence IDs.
   - `careerStage`: nullable shared `careerStage` value with confidence and evidence IDs.
   - `relevantTags`: array of shared-package-valid relevant tags with confidence and evidence IDs.
-  - `skills`: array of shared `SkillSchema` objects, preserving evidence count/evidence IDs where possible.
+  - `skills`: array of shared `SkillSchema`-compatible objects, wrapped or extended with evidence IDs where possible.
+  - Canonical tag entries should preserve `value`, `confidence`, `evidenceIds`, and, during migration, `mappedFrom` / `mappingSource` so reviewers and tests can trace how a legacy label became a shared label.
   - `unmappedLegacyLabels`: optional diagnostics-only object during migration that records current sourcing values that could not be mapped cleanly, so reviewers/developers can see coverage gaps without polluting canonical labels.
-  - The exact field name remains to be finalized, but `canonicalTags` is the current leaning because it matches the package language and reads naturally on candidate profiles.
+- Proposed deterministic legacy-to-canonical mapping policy:
+  - Do not force inaccurate hard-filter `roleFunction` values just because the legacy schema required a `primaryTrack`.
+  - Preserve every canonical value's evidence lineage and confidence from the legacy source field when mapping.
+  - Map `unknown_other` / `unknown` to no canonical value and record it only in `unmappedLegacyLabels` or UI status.
+  - Keep `contactability` outside `canonicalTags`; it remains a sourcing-specific operational field.
+  - Treat research-oriented labels as sector/tag signals unless there is evidence for a concrete job function.
+  - Treat specific technologies/domains as `relevantTags` and/or `skills`, not as `roleFunction`, unless the shared `roleFunction` axis has a clean match.
+- Proposed `primaryTrack` mapping:
+  - `software_engineering` -> `roleFunctions: ["software_engineering"]`.
+  - `data_science` -> `roleFunctions: ["data_analysis"]` plus `relevantTags: ["data_science"]`.
+  - `product_design` -> `roleFunctions: ["creatives_and_design"]` plus `relevantTags: ["product_design"]`.
+  - `product_management` -> `roleFunctions: ["product_management"]`.
+  - `marketing_growth` -> `roleFunctions: ["marketing"]` plus `relevantTags: ["growth_marketing"]`.
+  - `hardware_mechanical` -> `roleFunctions: ["engineering_and_development"]` plus `industrySectors: ["hardware_and_semiconductors"]`.
+  - `business_founder` -> `careerStage: "founder"` plus `roleFunctions: ["management_and_executive"]` only when founder/operator evidence supports it; otherwise use `relevantTags: ["startup_founder"]`.
+  - `academic_research` -> `industrySectors: ["research_and_academia"]` plus `relevantTags: ["academic_research"]`; do not force `roleFunction`.
+  - `ai_research` -> `industrySectors: ["artificial_intelligence_and_machine_learning"]` plus `relevantTags: ["artificial_intelligence_research"]`; do not force `roleFunction` unless evidence supports software/data work.
+  - `unknown_other` -> no canonical value.
+- Proposed `industryDomainInterests` mapping:
+  - `artificial_intelligence` -> `industrySectors: ["artificial_intelligence_and_machine_learning"]`.
+  - `ai_infrastructure` -> `industrySectors: ["artificial_intelligence_and_machine_learning"]` plus `relevantTags: ["artificial_intelligence_infrastructure"]`.
+  - `developer_tools` -> `relevantTags: ["developer_tools"]` and optionally `industrySectors: ["software_and_saas"]` only when the evidence is company/product-domain, not just a tooling skill.
+  - `healthcare_ai` -> `industrySectors: ["healthcare_and_life_sciences", "artificial_intelligence_and_machine_learning"]` plus `relevantTags: ["healthcare_artificial_intelligence"]`.
+  - `robotics` -> `industrySectors: ["robotics_and_automation"]`.
+  - `education_technology` -> `industrySectors: ["education_technology"]`.
+  - `climate_energy` -> `industrySectors: ["clean_energy_and_climate_tech"]`.
+  - `finance_fintech` -> `industrySectors: ["financial_technology"]`.
+  - `biotech_life_sciences` -> `industrySectors: ["biotechnology_and_pharmaceuticals", "healthcare_and_life_sciences"]`.
+  - `enterprise_saas` -> `industrySectors: ["software_and_saas"]` plus `relevantTags: ["enterprise_software"]`.
+  - `cybersecurity` -> `industrySectors: ["cybersecurity"]`.
+  - `gaming_media` -> `industrySectors: ["gaming_and_esports", "media_and_entertainment"]`.
+  - `accessibility_assistive_technology` -> `industrySectors: ["accessibility_and_assistive_technology"]`.
+  - `research_tools` -> `industrySectors: ["research_and_academia"]` plus `relevantTags: ["research_tools"]`.
+  - `open_source` -> `relevantTags: ["open_source"]`, not an industry sector.
+  - `unknown_other` -> no canonical value.
+- Proposed `careerStage` mapping:
+  - `student` -> `student`.
+  - `early_career` -> `entry_level`.
+  - `mid_career` -> `mid_level`.
+  - `senior` -> `senior`.
+  - `founder` -> `founder`.
+  - `academic_researcher` -> no canonical career stage; use `relevantTags: ["academic_researcher"]` if needed.
+  - `unknown` -> `null`.
 - Current open questions before implementation planning can be considered complete:
   - Confirm `@wekruit/shared-tags` GitHub Packages publication path, package visibility, package access, and local/CI/deploy auth mechanics.
-  - Decide the exact new core-service field name/shape for shared canonical tags on enrichment review drafts and final candidate profiles.
-  - Finalize mapping policy for current sourcing labels that do not have one-to-one shared-axis equivalents.
-  - Decide how to represent uncertain/unknown classifications when the shared package intentionally avoids ambiguous canonical tokens.
-  - Decide whether reviewer UI should display only shared labels immediately, or display old labels plus shared labels during the additive migration window.
+  - Validate the proposed `canonicalTags` field shape against the actual `@wekruit/shared-tags` TypeScript exports and local zod schemas.
+  - Validate the proposed deterministic mapping table against the shared package's validators, especially `relevantTags` no-abbreviation rules.
+  - Decide whether reviewer UI should display both old labels and canonical labels during the additive migration window, or keep canonical labels in a secondary diagnostics/detail area until confidence is high.
 - Example mapping questions to resolve before implementation:
   - Should `ai_research` become `roleFunction=data_analysis` plus `industrySector=artificial_intelligence_and_machine_learning` plus `relevantTags=["artificial_intelligence_research"]`, or should research remain only a tag/sector signal?
   - Should `business_founder` be represented by `careerStage=founder` and `roleFunction=management_and_executive`, or by a relevant tag plus founder stage only?
