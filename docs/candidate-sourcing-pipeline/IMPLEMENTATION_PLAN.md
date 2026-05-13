@@ -113,6 +113,14 @@ This section is the authoritative "where are we now?" view. Historical phase not
   - The shared package registry key is `skillBucket`; sourcing can still expose user-facing `canonicalTags.skills` as objects with validated `bucket` values.
   - Proposed deterministic mappings were read-only checked against shared package source arrays/no-abbreviation rules and produced `failures: []`.
   - Fresh clone package tests could not run yet because dependencies are not installed in `wekruit-pa` (`tsc` / `tsx` missing). This is an environment/install preflight item, not a package logic failure.
+  - 2026-05-13 teammate clarification/investigation: teammate showed that the `WeKruit/wekruit-pa` repository is public, but that does not prove the npm/GitHub Packages package is published. Read-only checks from this machine found:
+    - `gh repo view WeKruit/wekruit-pa` reports repository visibility `PUBLIC`.
+    - `npm view @wekruit/shared-tags` against the public npm registry returns `404 Not Found`.
+    - `npm view @wekruit/shared-tags --registry=https://npm.pkg.github.com` returns `404` / package does not exist under owner `wekruit`.
+    - `gh api /orgs/WeKruit/packages?package_type=npm` cannot list packages with the current GitHub token because it lacks `read:packages`.
+    - Exact GitHub package lookup for `/orgs/WeKruit/packages/npm/%40wekruit%2Fshared-tags` returns `404 Package not found`.
+    - Core-service currently has no project-level `@wekruit:registry=https://npm.pkg.github.com` mapping; user-level npm config has a protected GitHub Packages token, but the package still could not be found.
+  - Current conclusion: `wekruit-pa` is public, but `@wekruit/shared-tags` is not confirmed as an installable npm/GitHub Packages dependency. Treat package publication/install access as unresolved until teammate provides a package URL/install command/version or authorizes publishing.
 - Waiting on teammate response:
   - Is `@wekruit/shared-tags` already published privately to GitHub Packages, and which version should core-service use?
   - If not published, should Codex prepare a `wekruit-pa` publish-metadata branch/PR or should the teammate publish it?
