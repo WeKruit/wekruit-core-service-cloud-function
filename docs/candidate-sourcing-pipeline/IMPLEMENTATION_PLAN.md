@@ -40,7 +40,7 @@ Use a conservative productization path:
 
 ## Current Execution State
 
-Last updated: 2026-05-10.
+Last updated: 2026-05-12.
 
 - [x] PRD, architecture, and implementation plan documents are drafted.
 - [x] Firebase/Firestore remains the v1 operational source of truth.
@@ -65,7 +65,7 @@ Last updated: 2026-05-10.
 - [x] Capped review-count copy is implemented so the dashboard can distinguish loaded review rows from total pending review candidates.
 - [x] Staging Firestore was reset/reseeded to a single Stanford-related Devpost competition, `TreeHacks 2026`, after explicit user/team direction.
 - [x] The TreeHacks `Weak` match-strength concern was investigated and documented as expected singleton-review behavior, with a remaining UI wording cleanup recommended.
-- [x] Current active planning branch is `codex/brightdata-integration-plan` in both active implementation repos, branched from `codex/clickable-evidence-lifecycle` through the prior Coresignal planning branch.
+- [x] Bright Data implementation branch `codex/brightdata-integration-plan` is preserved as the perfected Bright Data baseline. New website-enrichment/shared-tags planning and future implementation work is branched from it on `codex/website-shared-tags-integration-plan` in both active implementation repos.
 - [x] Coresignal integration planning is preserved in this document as a paused archive. No Coresignal implementation has started.
 - [x] Bright Data is now the active vendor direction for professional LinkedIn profile enrichment planning.
 - [x] Phase 6.5B added the Bright Data LinkedIn evidence/provider foundation: `linkedin` evidence normalization, vendor profile schemas/types, `ProfessionalProfileLookupPort`, deterministic fake provider fixtures, and a real Bright Data provider contract behind tests. No live Bright Data call, Firestore mutation, route wiring, UI wiring, deploy, approval, enrichment, or profile materialization was performed in Phase 6.5B.
@@ -80,10 +80,15 @@ Last updated: 2026-05-10.
 
 ## Current Open Decisions And Waiting State
 
-Last updated: 2026-05-10.
+Last updated: 2026-05-12.
 
 This is the current single source of truth after the successful Phase 3.5 live smoke, real source adapters, clickable evidence/lifecycle deployment, TreeHacks staging reseed, Coresignal planning archive, and Bright Data planning pivot:
 
+- Current active planning/implementation branch for the next workstream:
+  - `wekruit-core-service-cloud-function`: `codex/website-shared-tags-integration-plan`.
+  - `wekruit-scraping`: `codex/website-shared-tags-integration-plan`.
+  - This branch was created from `codex/brightdata-integration-plan` specifically so the completed Bright Data baseline remains untouched.
+  - `/Users/spencerwang/Documents/GitHub/wekruit-pa` remains on `main` for inspection only until the user explicitly authorizes package repo changes or package-owner publish changes.
 - Not waiting on Phase 3.5 access anymore. Firebase CLI access, live sourcing API deploy, live dashboard deploy, and tiny live workflow verification all succeeded.
 - Not waiting on clickable evidence/source links or lifecycle callouts. Those are implemented, verified, and deployed.
 - Current active staging dataset:
@@ -119,7 +124,15 @@ This is the current single source of truth after the successful Phase 3.5 live s
   - The teammate-owned unified tag package is now confirmed present and considered ready for integration planning in the permanent sibling clone `/Users/spencerwang/Documents/GitHub/wekruit-pa`.
   - Package location: `/Users/spencerwang/Documents/GitHub/wekruit-pa/packages/shared-tags`; package name: `@wekruit/shared-tags`; current version: `0.1.0`.
   - Dependency/distribution decision as of 2026-05-12: prefer GitHub Packages/private registry over dev-only sibling path so deploy/CI does not depend on one local checkout.
+  - Deep preflight finding on 2026-05-12: the local package is still `private: true`, which is correct for workspace-only use but blocks npm publishing until a package-owner/publish step flips publishability and adds registry metadata. This does not mean GitHub Packages must be public; it means npm publish is currently disabled.
+  - Deep preflight finding on 2026-05-12: the shared package registry key is `skillBucket` even though the README describes the broader axis as `skills`. Sourcing should store user-facing canonical `skills` as objects with a validated shared `bucket`, but taxonomy endpoints should expose the package registry accurately.
+  - Deep preflight finding on 2026-05-12: proposed deterministic mappings for role functions, industry sectors, career stages, and planned `relevantTags` were checked against the shared package source arrays/no-abbreviation list with a read-only script and produced `failures: []`.
+  - Deep preflight finding on 2026-05-12: `npm --workspace=@wekruit/shared-tags run typecheck` and `npm --workspace=@wekruit/shared-tags run test` were attempted in the fresh `wekruit-pa` clone, but dependencies are not installed there yet (`tsc` / `tsx` not found). This is not a package logic failure; implementation preflight should run `pnpm install --frozen-lockfile` or the package-owner's preferred install before treating package tests as meaningful.
   - The remaining work is not "create the package"; it is to confirm package publishing/auth, map sourcing's existing enrichment taxonomy to the shared axes, add a taxonomy API endpoint for the static dashboard, and remove the hardcoded `records.ts` / `web/app.js` duplication without breaking existing candidate profile reads.
+- Current personal-website enrichment item:
+  - Conceptual decisions are settled: website enrichment is a separate evidence source, mirrors the Bright Data HITL flow, excludes LinkedIn URLs, uses eligible URLs already found in approved source/evidence lineage, and should prefer Crawl4AI for the real open-source extraction engine.
+  - Deep preflight finding on 2026-05-12: existing source-record link grouping already exposes `Website` and `Projects/demos` URL groups from Devpost/GitHub/generic records, and `wekruit-scraping/scripts/sourcing_upload_file.py` already preserves Devpost `member_website`, project URLs, demo links, and all-links in source records. The first website enrichment implementation should live in core-service and should not require a scraping repo source-record format change.
+  - First local verification candidate for website enrichment is now fixed by user direction: create an isolated fake authentic `Sunwoo` candidate in the Firebase emulator with personal website `https://swkang73.github.io/`. Use the emulator/dashboard for verification before any staging/live dashboard work. Do not use TreeHacks data as the verification basis.
 - Current reviewer workflow caution:
   - Do not approve, merge, enrich, materialize profiles, or run Bright Data lookup against the TreeHacks staging dataset unless the user/team intentionally starts a separate validation pass.
   - The Bright Data live smoke and Phase 6.5J verification should use only isolated synthetic `Spencer Wang` test run/job candidates with LinkedIn URL `https://www.linkedin.com/in/spencerwang1`. Do not use TreeHacks Devpost source data as the verification basis for the normalization patch.
@@ -131,14 +144,20 @@ The core v1 workflow is proven locally and against the live `wekruit-dev-env` Fi
 Current priority order:
 
 1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: active implementation on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, Phase 6.5H scoped deploy/read-only staging verification, Phase 6.5I isolated live staging smoke, and Phase 6.5J rich-normalization implementation/local/staging verification are complete.
+   - Status: completed baseline on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, Phase 6.5H scoped deploy/read-only staging verification, Phase 6.5I isolated live staging smoke, and Phase 6.5J rich-normalization implementation/local/staging verification are complete.
    - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
    - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
    - Phase 6.5J resolved the known normalization/display issue: the deployed integration now preserves richer normalized public professional context from Bright Data's allowed fields when returned. Remaining quality risk: Bright Data may still return a thin public payload for some LinkedIn profiles, as happened with the fresh synthetic Spencer live verification.
    - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
-   - Team input required: Bright Data API key, account access to the LinkedIn Profiles scraper, allowed fields, lookup policy, budget expectations, and retention policy.
+   - Remaining stance: keep Bright Data as a useful but variable LinkedIn enrichment signal. Do not reopen Bright Data richness experiments unless the team explicitly chooses that later.
 
-2. **Unified tag package migration.**
+2. **Personal website enrichment.**
+   - Status: conceptually settled and execution-planned on `codex/website-shared-tags-integration-plan`; implementation is not greenlit yet.
+   - Goal: add a separate reviewer-approved enrichment source for public personal websites/project/demo pages so OpenAI enrichment gets richer evidence than LinkedIn alone can reliably provide.
+   - Recommended path: Bright Data-style HITL flow in core-service, fake provider first, local emulator/browser verification with synthetic Sunwoo candidate and `https://swkang73.github.io/`, then a real Crawl4AI Cloud Run worker after the fake workflow is proven.
+   - Guardrails: no broad web search, no freeform URL input, no LinkedIn scraping on this path, no TreeHacks verification, no raw HTML in Firestore, and no approved website evidence entering enrichment until reviewer approval.
+
+3. **Unified tag package migration.**
    - Status: package confirmed and planning resumed after 2026-05-12 inspection of teammate-owned package in `/Users/spencerwang/Documents/GitHub/wekruit-pa`.
    - Current hardcoded taxonomy source remains `wekruit-core-service-cloud-function/src/services/sourcing/domain/records.ts`.
    - The dashboard currently mirrors values in `wekruit-core-service-cloud-function/web/app.js`.
@@ -151,7 +170,7 @@ Current priority order:
    - Migration must be a deliberate schema mapping, not a direct string swap: current sourcing values such as `ai_research`, `business_founder`, `academic_research`, `healthcare_ai`, and `ai_infrastructure` do not all match the shared package's `roleFunction` / `industrySector` axes one-for-one.
    - Migration should be additive first: preserve existing profile fields while adding shared canonical fields, then fully move UI/consumers to shared package labels after compatibility is proven.
 
-3. **Large queue handling / pagination.**
+4. **Large queue handling / pagination.**
    - The live Devpost import proved that the backend can ingest a broad run, but the current review UI intentionally loads a capped review set.
    - The dashboard now displays the total review-candidate count separately from the currently loaded candidates, but true cursor pagination / next-page review navigation is still future work.
    - Before another broad import, the team should decide whether reviewers need pagination, source filters, search-first review, or a smaller curated import batch.
@@ -3663,6 +3682,156 @@ Bright Data `about` length / richness analysis:
   2. Test Bright Data LinkedIn Posts by profile URL as a separate evidence type only if the team approves public activity/post content as enrichment context.
   3. Test one more explicitly approved LinkedIn URL known to have public projects/experience, using the existing redacted field-inventory script and no Firestore writes.
   4. Prioritize personal-website/project-page extraction for consistent richness instead of expecting LinkedIn to carry the full enrichment burden.
+
+#### 2026-05-12 Execution Planning: Website Enrichment And Shared Tags
+
+Status: planning/deep-dive only. Branching and plan-document updates are authorized; product implementation, package publishing, live provider calls, Firestore writes, staging deploys, candidate approval, enrichment approval, and final profile materialization are not authorized by this section until the user gives an implementation greenlight.
+
+Branching state:
+
+- Created new workstream branch `codex/website-shared-tags-integration-plan` from the completed Bright Data branch `codex/brightdata-integration-plan`.
+- Verified `wekruit-core-service-cloud-function` and `wekruit-scraping` are on `codex/website-shared-tags-integration-plan`.
+- Verified `wekruit-pa` is on `main`; no branch or file change was made there during this planning pass.
+- Keep the two implementation-plan copies byte-identical after every planning or architectural update.
+
+External documentation findings used for this execution plan:
+
+- Crawl4AI's quick start documents `AsyncWebCrawler`, `BrowserConfig`, `CrawlerRunConfig`, markdown generation, CSS/XPath JSON extraction, and LLM structured extraction. This confirms it can support both low-cost markdown extraction and structured profile summaries for candidate personal websites.
+- Crawl4AI's deep-crawling docs expose bounded crawl controls such as `max_depth`, `include_external`, and `max_pages`. V1 should use those controls to crawl only a small same-site set rather than wandering the open web.
+- Google Cloud Run functions install declared production dependencies from `package.json` / lockfiles during deploy, do not upload `node_modules` by default, and can use private npm modules through a `.npmrc` in the function directory. Artifact Registry has automatic Cloud Build credentials, while private modules from other registries require careful read-only token handling.
+- GitHub Packages npm docs say GitHub Packages requires a personal access token (classic) with appropriate scopes for publishing/installing private packages via npm, and first-published npm packages default to private visibility with package/repository access controls. GitHub Actions can use `GITHUB_TOKEN` to pull packages only when the package grants that repository workflow access.
+- Firebase Hosting can route HTTPS requests to Cloud Run services, but the website crawler worker does not need to be public through Hosting in v1. Core-service can call a private/internal Cloud Run worker directly later; if a Hosting rewrite is ever used, account for Hosting's request timeout and exposed surface.
+
+Website enrichment implementation plan:
+
+1. Phase W0 - Preflight and fixtures.
+   - Keep the branch clean before code edits.
+   - Define the synthetic local emulator candidate fixture: display name `Sunwoo Kang`, fake non-sensitive candidate/source context, and one eligible personal website URL `https://swkang73.github.io/`.
+   - Use API/script setup only to create the isolated source run/candidate and perform already-proven identity approval. The new website scrape trigger and website match decision must be verified through the dashboard.
+   - Do not seed, approve, merge, enrich, or crawl any TreeHacks candidate during website verification.
+
+2. Phase W1 - Website domain model, storage, and fake provider.
+   - Add a separate `WebsiteProfileLookupPort` rather than overloading the LinkedIn-specific `ProfessionalProfileLookupPort`.
+   - Add normalized bounded website summary schema with fields such as `profileUrl`, `siteName`, `pageTitle`, `aboutSummary`, `projectSummaries`, `experienceHighlights`, `skills`, `educationHighlights`, `contactLinks`, `sourcePages`, `extractedAt`, and `contentHash`.
+   - Use new website-specific Firestore collections for the shortest non-breaking path, tentatively `sourcing-website-enrichment-runs` and `sourcing-website-profile-matches`, instead of reshaping the existing LinkedIn-specific vendor run/match schemas in place.
+   - Add fake website provider fixtures that contain rich about/project/experience text for Sunwoo so local tests prove the enrichment path handles rich website evidence before any real crawl.
+
+3. Phase W2 - Eligible website URL derivation and guards.
+   - Derive eligible URLs in the backend from approved source/evidence lineage only. Inputs include approved entity `homepages`, `homepage` evidence, and approved source-record link groups/paths currently labeled `Website` or `Projects/demos`.
+   - Include personal homepages, portfolio sites, `*.github.io` pages, Vercel/Netlify/Pages-style personal sites, and external project/demo pages already present in source records.
+   - Exclude LinkedIn with the existing LinkedIn normalizer and reject any backend request for LinkedIn URLs on the website path.
+   - Exclude obvious logged-in/social/source-aggregator domains in v1, such as `linkedin.com`, `github.com` profiles/repos, `devpost.com` source/project pages, X/Twitter, Instagram, Facebook, Discord, and video-only pages, unless a later product decision explicitly expands the website scraper scope.
+   - Mirror Bright Data gates: no active button if no eligible URL exists, backend rejects unlineaged URLs, pending merge blockers prevent lookup, duplicate URL/lineage hashes reuse existing non-failed results, rejected/ignored results are remembered, and approved website evidence sets or preserves `needsEnrichment=true`.
+
+4. Phase W3 - Backend API and dashboard UI.
+   - Add API routes parallel to Bright Data, with website-specific names:
+     - `GET /api/sourcing/approved-entities/:approvedEntityId/website-profile-matches`;
+     - `POST /api/sourcing/approved-entities/:approvedEntityId/website-profile-lookup:run`;
+     - `POST /api/sourcing/website-profile-matches/:matchId/decision`.
+   - Add an Approved-detail "Website enrichment" section next to the existing "LinkedIn profile enrichment" section.
+   - Show the backend-derived eligible website URL select only when at least one eligible URL exists. Do not provide a freeform URL input in v1.
+   - The website section should display lookup runs, normalized result cards, and approve/reject/ignore controls. It should show clear empty/no-URL/no-match/blocked states without affecting the working Bright Data UI.
+
+5. Phase W4 - Enrichment evidence integration.
+   - Add approved website matches to the enrichment evidence pack only after reviewer approval.
+   - Use a new evidence-like ID prefix such as `website_profile_match:<id>` so source evidence, Bright Data evidence, and website evidence can be resolved independently.
+   - Add website facts to the OpenAI evidence pack and prompt as approved public website/project context.
+   - Preserve existing OpenAI enrichment HITL semantics, stale evidence-pack hash protection, and final profile materialization rules.
+
+6. Phase W5 - Real Crawl4AI worker.
+   - Add a small Python worker under core-service, tentatively `workers/website-crawler/`, packaged as a Cloud Run container.
+   - Keep Firebase Functions as workflow/API owner; the worker should do only URL fetch/crawl/extract and return normalized bounded JSON.
+   - Real worker policy: same-origin crawl, low `max_pages` and `max_depth`, timeout and byte caps, no raw HTML in Firestore, no cookies/login, no LinkedIn, no private IP/localhost URLs, and no broad search.
+   - Local implementation should run the worker locally first and point the core-service provider to it from the emulator. Cloud Run deployment comes only after local Browser/Ruflo verification.
+   - Use Crawl4AI markdown and structured extraction first. If LLM extraction is needed for summarization, reuse existing OpenAI secret handling deliberately and keep raw page text bounded.
+
+7. Phase W6 - Local verification, no guessing.
+   - Run unit tests for URL eligibility, no-URL/no-LinkedIn gates, pending merge guard, duplicate/rejected/ignored reuse, decision transitions, enrichment evidence inclusion, stale-review blocking, and evidence summary resolution.
+   - Run `npm run build`, targeted tests, `npm run build:sourcing-bundle`, and `git diff --check`.
+   - Start Firebase emulators with the sourcing hosting/functions/firestore config.
+   - Seed only the synthetic Sunwoo source run/candidate in the emulator with `https://swkang73.github.io/`.
+   - Approve the synthetic Sunwoo candidate via the already-proven approval API/script, then use the dashboard to click the new website scrape button, approve the website result, generate enrichment, approve enrichment only after confirming the approved website facts are in the review evidence, and verify the final profile lineage.
+   - Browser/Ruflo must also verify negative cases: a candidate with no website has no active website scrape action, a LinkedIn-only URL is excluded from website scraping, and pending merge blockers disable website lookup.
+
+8. Phase W7 - Staging verification only after local proof.
+   - Deploy only after local tests and emulator/browser verification pass.
+   - Create one isolated synthetic Sunwoo staging source run/candidate with `https://swkang73.github.io/`.
+   - Do not touch TreeHacks candidates.
+   - Use the deployed dashboard for the website scrape trigger and website approval. API-only setup is acceptable only for isolated seeding/identity approval that is already proven.
+   - Verify deployed API/dashboard/profile evidence lineage and record exact IDs/results in this plan before broad use.
+
+Shared-tags implementation plan:
+
+1. Phase T0 - Package publishing/auth preflight.
+   - Confirm whether the package owner wants Codex to modify `wekruit-pa` or whether the teammate will publish `@wekruit/shared-tags` from their own branch.
+   - Required package metadata before GitHub Packages publish likely includes changing package publishability from `private: true`, adding `publishConfig.registry = "https://npm.pkg.github.com"`, and ensuring the `repository` field associates the package with the WeKruit repo/org.
+   - Publishing to GitHub Packages should keep the package private/internal to WeKruit, but visibility and repository access must be verified immediately after first publish.
+   - Core-service local install needs a safe npm auth path. Do not commit real tokens and do not treat app runtime `.env` as the normal npm auth mechanism.
+   - Important deploy risk: the current Firebase bundle copies `package.json` and `package-lock.json` into `deploy/sourcing-functions`, ignores `node_modules`, and has no deploy-source `.npmrc`. A private GitHub package dependency will not deploy unless build/install auth is solved.
+   - Candidate deploy-auth solutions, to be tested rather than guessed:
+     - grant the core-service repository/package workflow access and use `GITHUB_TOKEN` for GitHub Actions installs where relevant;
+     - use a read-only `read:packages` PAT / `NODE_AUTH_TOKEN` for local deploy packaging without committing it;
+     - generate a safe `.npmrc` in the deploy bundle containing only registry mapping plus token environment substitution if Firebase/Cloud Build honors it;
+     - or, if GitHub Packages deploy auth proves brittle, revisit a Google Artifact Registry mirror because Google Cloud build has automatic Artifact Registry credentials.
+   - Do not add `@wekruit/shared-tags` as a production dependency in core-service until package publish/access/deploy auth has been verified.
+
+2. Phase T1 - Add dependency and canonical adapter in core-service.
+   - Add the package dependency only after T0 passes.
+   - Add a sourcing-owned adapter/mapping module, e.g. `src/services/sourcing/domain/canonicalTags.ts`, that imports and validates against `@wekruit/shared-tags/canonical`.
+   - Keep current hardcoded sourcing labels as legacy input/output during the additive migration.
+   - Add `canonicalTags` to enrichment drafts, enrichment review items, and candidate profiles without removing `primaryTrack`, `scoredTracks`, `specializations`, `industryDomainInterests`, `careerStage`, `skills`, `contactability`, or existing filters.
+   - `canonicalTags` v1 shape:
+     - `schemaVersion: "shared-tags-v1"`;
+     - `roleFunctions`: entries with `value`, `confidence`, `evidenceIds`, `mappedFrom`, `mappingSource`;
+     - `industrySectors`: same entry shape;
+     - `careerStage`: nullable same entry shape;
+     - `relevantTags`: same entry shape, capped by shared package rules;
+     - `skills`: objects with shared-package-valid `name`, shared `bucket`, `proficiency`, `confidence`, `evidenceIds`, `mappedFrom`, `mappingSource`;
+     - `unmappedLegacyLabels`: diagnostics-only migration object for legacy values that were intentionally not forced into canonical tokens.
+   - Unknown/uncertain legacy values map to null/empty canonical output plus diagnostics, not fake shared-package tokens.
+
+3. Phase T2 - Deterministic legacy mapping and validation.
+   - Compute `canonicalTags` deterministically from the already-approved enrichment draft at first. Do not ask OpenAI to output canonical tags directly until the bridge is proven.
+   - Preserve evidence IDs/confidence from legacy fields.
+   - Keep `contactability` outside `canonicalTags`; it remains sourcing-specific operational metadata.
+   - The current proposed mapping table was read-only validated against package source arrays/no-abbreviation rules with zero failures, but implementation must add tests that import the real package and assert every mapping stays valid.
+   - Add fixture tests for tricky values: `ai_research`, `academic_research`, `business_founder`, `healthcare_ai`, `ai_infrastructure`, `open_source`, `early_career`, `academic_researcher`, and `unknown_other`.
+
+4. Phase T3 - Taxonomy API for the static dashboard.
+   - Add `GET /api/sourcing/taxonomy` or equivalent to return legacy sourcing taxonomy plus shared canonical taxonomy/options from the backend.
+   - The static `web/app.js` should fetch the taxonomy from the backend rather than importing npm package code or duplicating canonical arrays.
+   - Do not add a dashboard JS build step solely for shared tags in v1.
+   - UI should fail visibly if backend taxonomy is unavailable; do not add a second divergent canonical source in the browser.
+
+5. Phase T4 - Reviewer/profile UI migration.
+   - Keep legacy labels as primary reviewer-facing labels during additive migration.
+   - Add a secondary "Canonical tags preview" area in enrichment review/profile details so reviewers can compare old labels to shared canonical output.
+   - Do not change profile filters/search to canonical fields until data compatibility is proven.
+   - After the additive phase is proven, a separate future cutover can promote canonical labels to primary pills/filters and retire old hardcoded arrays.
+
+6. Phase T5 - Verification.
+   - Install `wekruit-pa` dependencies using the package-owner's expected package manager and run `@wekruit/shared-tags` typecheck/tests before relying on it.
+   - Run core-service build/tests and a focused mapping validation test that imports the package.
+   - Run local Firebase emulator full-chain verification using a synthetic candidate. If website enrichment has landed first, use the same Sunwoo candidate so approved website facts feed enrichment, then verify `canonicalTags` on the enrichment review and final profile.
+   - Browser/Ruflo must verify the secondary canonical preview appears and that existing labels/filters remain intact.
+   - Deploy only after private package install/auth works in the same shape the Firebase deploy will use.
+
+Combined execution order recommendation:
+
+1. Keep this planning branch and commit/push plan-doc updates before implementation.
+2. When implementation is greenlit, run Phase T0 first because private package/deploy auth can block the shared-tags work independently of code quality.
+3. Implement website enrichment fake/backend/API/UI/evidence path next, because it is independent of package publishing and directly addresses the richness gap Bright Data cannot reliably solve.
+4. Add the real Crawl4AI worker after the fake HITL path is verified locally, so crawler complexity cannot obscure workflow bugs.
+5. Implement shared-tags additive core-service mapping once package publish/access/deploy auth is proven.
+6. Run a combined emulator/dashboard verification with the synthetic Sunwoo candidate: website scrape approved, enrichment generated from approved website evidence, canonical preview present, enrichment approved, final profile contains both legacy labels and `canonicalTags`.
+7. Only after local proof, do one isolated staging synthetic Sunwoo validation on `https://wekruit-sourcing.web.app`; never use TreeHacks candidates for this verification.
+
+Open blockers / human-input points before implementation can be fully complete:
+
+- Package ownership/publishing: decide whether Codex should branch and update `wekruit-pa` package publish metadata, or whether the teammate/package owner will publish `@wekruit/shared-tags` privately to GitHub Packages.
+- Private package deploy auth: if GitHub Packages is used, Codex may need a safe `read:packages` token or package/repo access configuration for local/Firebase deploy. This token must not be committed and should not be a runtime app secret.
+- Crawl4AI deployment: local worker development is self-contained, but deploying a real Cloud Run worker may require confirming the target Google Cloud project/service name/region and whether the service should be private to the core-service function.
+- Data scope: current website v1 excludes LinkedIn, social/logged-in domains, GitHub.com, and Devpost.com source pages. If the team wants Devpost project-page crawling or GitHub repo-page crawling as a website evidence source later, that should be an explicit separate decision.
 
 #### Immediate Blockers Before Full Live Completion
 
