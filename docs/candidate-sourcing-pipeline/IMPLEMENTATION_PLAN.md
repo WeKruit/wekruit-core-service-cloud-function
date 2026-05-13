@@ -3535,6 +3535,8 @@ Shared tag package findings:
   - Accept recommendation that `wekruit-scraping` should not change in the first shared-tag migration unless source adapters start emitting final canonical tags/tag events.
   - Accept recommendation that the static sourcing dashboard should use a backend taxonomy API endpoint for v1 rather than introducing a JS build step just to share arrays.
   - Accept recommendation that migration should be additive first, preserving current profile fields until shared canonical fields, UI reads, and downstream consumers are proven.
+  - Accept recommendation for new shared-label field shape in principle: add a dedicated `canonicalTags` or `sharedTags` object to enrichment drafts and final profiles with evidence/confidence preserved, rather than replacing existing fields immediately.
+  - Accept recommendation to represent unknown/uncertain shared classifications as empty/null canonical fields plus UI/reviewer state, not fake `unknown` shared-package tokens.
 
 Shared tag migration analysis:
 
@@ -3557,6 +3559,10 @@ Shared tag migration analysis:
   6. Replace hardcoded dashboard arrays through a backend taxonomy endpoint for v1, because the dashboard is currently static and unbundled.
   7. Keep `wekruit-scraping` unchanged for the first shared-tag migration unless a separate decision is made to emit adapter-side canonical tags/tag events.
 - Current architecture discussion notes:
+  - GitHub Packages privacy clarification from 2026-05-12: publishing `@wekruit/shared-tags` to GitHub Packages should not make it public by default. GitHub Packages defaults first-published packages to private and supports package/repository access control. The team should still verify package visibility after first publish and avoid making it public because GitHub warns public package visibility cannot be reversed.
+  - Auth clarification from 2026-05-12: "decide how deploys authenticate" means `wekruit-core-service-cloud-function` must be able to run `npm install`/`npm ci` against the private GitHub Packages registry without committing a real token. A committed `.npmrc` may contain only the safe scope mapping, e.g. `@wekruit:registry=https://npm.pkg.github.com`; the auth token itself must come from a developer's user-level `~/.npmrc`, an environment variable, GitHub Actions `GITHUB_TOKEN` if repository package access is granted, or a secret-backed PAT with `read:packages`.
+  - Package-owner prerequisite: `@wekruit/shared-tags` likely needs `private: false`, `publishConfig.registry = "https://npm.pkg.github.com"`, and a correct `repository` field before publishing. The package can still be private in GitHub Packages; `private: false` only permits npm publish.
+  - Core-service prerequisite: add the GitHub Packages scope mapping and lock the package version only after the package is actually published and package access for the core-service repo/local deploy environment is confirmed.
   - `wekruit-scraping` may not need changes for the first shared-tag migration if it continues to produce source records only and does not assign final candidate labels. The labeling/final taxonomy currently happens in core-service during enrichment, so core-service is the natural first consumer.
   - `wekruit-scraping` would need changes only if source adapters begin emitting canonical tags/tag events directly, or if the team wants adapter-side validation against shared vocab before upload.
   - A taxonomy API endpoint is likely the smallest dashboard change because `web/app.js` is currently static and unbundled. The backend can expose the canonical vocab/options, and the dashboard can fetch them at startup.
@@ -3564,8 +3570,16 @@ Shared tag migration analysis:
   - Decision for first implementation: backend taxonomy endpoint for the static dashboard; revisit a build step only if broader dashboard modernization starts.
   - Decision for first implementation: core-service is the first shared-tags consumer because it owns enrichment and final profile labeling.
   - Decision for first implementation: migration is additive first, with eventual full move to shared package labels after compatibility is proven.
+- Proposed `canonicalTags` / `sharedTags` v1 field shape:
+  - `roleFunctions`: array of shared `roleFunction` values with confidence and evidence IDs.
+  - `industrySectors`: array of shared `industrySector` values with confidence and evidence IDs.
+  - `careerStage`: nullable shared `careerStage` value with confidence and evidence IDs.
+  - `relevantTags`: array of shared-package-valid relevant tags with confidence and evidence IDs.
+  - `skills`: array of shared `SkillSchema` objects, preserving evidence count/evidence IDs where possible.
+  - `unmappedLegacyLabels`: optional diagnostics-only object during migration that records current sourcing values that could not be mapped cleanly, so reviewers/developers can see coverage gaps without polluting canonical labels.
+  - The exact field name remains to be finalized, but `canonicalTags` is the current leaning because it matches the package language and reads naturally on candidate profiles.
 - Current open questions before implementation planning can be considered complete:
-  - Confirm `@wekruit/shared-tags` publication path and package auth mechanics, preferably GitHub Packages.
+  - Confirm `@wekruit/shared-tags` GitHub Packages publication path, package visibility, package access, and local/CI/deploy auth mechanics.
   - Decide the exact new core-service field name/shape for shared canonical tags on enrichment review drafts and final candidate profiles.
   - Finalize mapping policy for current sourcing labels that do not have one-to-one shared-axis equivalents.
   - Decide how to represent uncertain/unknown classifications when the shared package intentionally avoids ambiguous canonical tokens.
