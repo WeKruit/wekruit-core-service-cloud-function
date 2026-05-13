@@ -38,250 +38,129 @@ Use a conservative productization path:
 - Do not implement full job/company matching in this phase.
 - Do not create a separate top-level dedup service.
 
-## Current Execution State
+## Current Source-Of-Truth Snapshot
 
-Last updated: 2026-05-12.
+Last cleaned: 2026-05-13.
 
-- [x] PRD, architecture, and implementation plan documents are drafted.
-- [x] Firebase/Firestore remains the v1 operational source of truth.
-- [x] Existing dashboard should be extended rather than rebuilt.
-- [x] GitHub, Devpost, and research remain the only v1 source families.
-- [x] Enrichment should include industry/domain interests in addition to role/track, specialization, skills, and contactability.
-- [x] Local `.env` files are ignored by git and must not be committed.
-- [x] Phase 0 clarified branch/deploy strategy and confirmed the sourcing dashboard/backend path.
-- [x] Phase 1 stabilized the source-run/source-record/evidence/dedup/review/approved-entity loop.
-- [x] Phase 2 unified GitHub, Devpost, and research fixture ingestion through the same source-record upload path.
-- [x] Phase 3 expanded review into structured identity/relevance decisions with confirmed signals.
-- [x] Phase 4 created the global candidate entity model and verified approved candidate growth across GitHub/Devpost while research remains in the review queue.
-- [x] Phase 5 added manual evidence-grounded enrichment generation, controlled taxonomy validation, enrichment review, and profile materialization after human approval.
-- [x] Phase 6 added final candidate profiles, profile APIs, a Profiles dashboard tab, profile filters/search, and source/evidence/review/enrichment lineage display.
-- [x] Post-Phase 6 hardening repaired tolerant-but-audited enrichment validation for common LLM shape mistakes.
-- [x] Merge-before-enrichment guard is implemented, verified locally, committed, and pushed. Enrichment is blocked when an approved candidate overlaps a pending merge review.
-- [x] Phase 3.5 real Firebase tiny-fixture smoke test passed against `wekruit-dev-env` / `wekruit-sourcing.web.app`.
-- [x] Real Devpost Google Drive exports now have a source-specific adapter path to normalized person source records.
-- [x] Real GitHub Google Drive repo exports now have a source-specific adapter path into the existing contributor extraction, scoring, and source-record upload flow.
-- [x] Real-derived Devpost/GitHub subsets passed local emulator and tiny live verification before any broad import.
-- [x] Clickable evidence/source links and derived lifecycle callouts are implemented, verified locally against the Firebase emulator, and deployed to `https://wekruit-sourcing.web.app`.
-- [x] Capped review-count copy is implemented so the dashboard can distinguish loaded review rows from total pending review candidates.
-- [x] Staging Firestore was reset/reseeded to a single Stanford-related Devpost competition, `TreeHacks 2026`, after explicit user/team direction.
-- [x] The TreeHacks `Weak` match-strength concern was investigated and documented as expected singleton-review behavior, with a remaining UI wording cleanup recommended.
-- [x] Bright Data implementation branch `codex/brightdata-integration-plan` is preserved as the perfected Bright Data baseline. New website-enrichment/shared-tags planning and future implementation work is branched from it on `codex/website-shared-tags-integration-plan` in both active implementation repos.
-- [x] Coresignal integration planning is preserved in this document as a paused archive. No Coresignal implementation has started.
-- [x] Bright Data is now the active vendor direction for professional LinkedIn profile enrichment planning.
-- [x] Phase 6.5B added the Bright Data LinkedIn evidence/provider foundation: `linkedin` evidence normalization, vendor profile schemas/types, `ProfessionalProfileLookupPort`, deterministic fake provider fixtures, and a real Bright Data provider contract behind tests. No live Bright Data call, Firestore mutation, route wiring, UI wiring, deploy, approval, enrichment, or profile materialization was performed in Phase 6.5B.
-- [x] Phase 6.5C added backend Firestore/service flow for vendor lookup runs and profile matches: collection constants, repository persistence/reservation methods, eligible LinkedIn URL derivation, pending-merge and lineage gates, deterministic duplicate-spend protection, no-match/failed retry behavior, and approve/reject/ignore service decisions. No API routes, dashboard UI, deploy, Firestore mutation outside tests, or live Bright Data call was performed in Phase 6.5C.
-- [x] Phase 6.5D added normalized HTTP routes and error mapping for vendor profile match list, manual LinkedIn lookup run, async snapshot refresh, and vendor match decisions. The sourcing function now declares `BRIGHTDATA_API_KEY` as a Firebase secret for deployed lookup use. No dashboard UI, deploy, live Firestore mutation, approval/enrichment/profile materialization, or live Bright Data call was performed in Phase 6.5D.
-- [x] Phase 6.5E wired approved vendor profile matches into enrichment evidence packs, enrichment draft validation, enrichment review lineage, final profile lineage, and stale review approval protection. Only approved vendor profile summaries can become enrichment context. No dashboard UI, deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5E.
-- [x] Phase 6.5F added the Approved tab Bright Data/LinkedIn lookup UI: backend-derived LinkedIn URL selection, manual fetch, duplicate-spend reuse display, no-URL gate, pending-merge disabled state, lookup run cards, async snapshot check control, normalized match cards, and approve/reject/ignore controls. Verification used only the local emulator and fake/provider-seeded fixtures. No deploy, live Firestore mutation, OpenAI enrichment, final profile materialization, or live Bright Data call was performed in Phase 6.5F.
-- [x] Phase 6.5G completed local emulator end-to-end verification: API-seeded synthetic candidates, API approval, dashboard fake Bright Data lookup, dashboard vendor approval, OpenAI enrichment generation, dashboard enrichment approval, final profile materialization with vendor lineage, no-LinkedIn negative gate, and stale enrichment approval blocking after vendor evidence changed. No deploy, live Firestore mutation, or live Bright Data call was performed in Phase 6.5G.
-- [x] Phase 6.5H set Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env`, ran scoped build/dry-run/deploy, deployed only `functions:core-service:sourcing.api` and Hosting site `wekruit-sourcing`, and verified deployed read-only endpoints plus the Approved tab UI on `https://wekruit-sourcing.web.app`. No live Bright Data lookup was performed in Phase 6.5H.
-- [x] Phase 6.5I completed the isolated live staging smoke test on `https://wekruit-sourcing.web.app`: created one synthetic Spencer source run/candidate, fixed and redeployed exact-ID review candidate resolution for live capped review queues, approved only that synthetic candidate, clicked the deployed dashboard Bright Data fetch button exactly once, approved the Bright Data match, generated and approved enrichment, and verified the final profile with Bright Data vendor evidence lineage. Broader Bright Data use remains blocked until explicit access/spend-control decisions.
-- [x] Phase 6.5J implementation, local fake-provider full-chain verification, scoped staging deploy, and fresh synthetic Spencer live verification are complete. Bright Data normalization now preserves richer public professional context for enrichment when the provider returns it. The live Spencer LinkedIn profile returned only thin public data, so the synthetic live enrichment review was intentionally left pending and no final profile was materialized from that thin evidence.
+This section is the authoritative "where are we now?" view. Historical phase notes, research, and implementation details are preserved below as an archive; do not treat older "planning only" text in those archive sections as current status unless this snapshot says it is still active.
 
-## Current Open Decisions And Waiting State
+**Active Branches**
 
-Last updated: 2026-05-12.
+- `wekruit-core-service-cloud-function`: `codex/website-shared-tags-integration-plan`.
+- `wekruit-scraping`: `codex/website-shared-tags-integration-plan`.
+- Both branches were created from the completed Bright Data branch `codex/brightdata-integration-plan` so the working Bright Data baseline remains untouched.
+- `/Users/spencerwang/Documents/GitHub/wekruit-pa` is currently an inspection-only clone on `main` until package repo changes are explicitly approved.
+- Keep the two implementation-plan copies byte-identical after every architectural decision or verification update.
 
-This is the current single source of truth after the successful Phase 3.5 live smoke, real source adapters, clickable evidence/lifecycle deployment, TreeHacks staging reseed, Coresignal planning archive, and Bright Data planning pivot:
+**Completed Baseline**
 
-- Current active planning/implementation branch for the next workstream:
-  - `wekruit-core-service-cloud-function`: `codex/website-shared-tags-integration-plan`.
-  - `wekruit-scraping`: `codex/website-shared-tags-integration-plan`.
-  - This branch was created from `codex/brightdata-integration-plan` specifically so the completed Bright Data baseline remains untouched.
-  - `/Users/spencerwang/Documents/GitHub/wekruit-pa` remains on `main` for inspection only until the user explicitly authorizes package repo changes or package-owner publish changes.
-- Not waiting on Phase 3.5 access anymore. Firebase CLI access, live sourcing API deploy, live dashboard deploy, and tiny live workflow verification all succeeded.
-- Not waiting on clickable evidence/source links or lifecycle callouts. Those are implemented, verified, and deployed.
-- Current active staging dataset:
-  - Firebase project: `wekruit-dev-env`.
-  - Hosting site: `https://wekruit-sourcing.web.app`.
-  - Active staging run: `stanford-treehacks-2026-20260506T030716Z`.
-  - Source: `devpost`; domain: `hackathon`; competition filter: `TreeHacks 2026`.
-  - Input workbook: `devpost/treehacks-2026.xlsx` from `/Users/spencerwang/Downloads/devpost-20260501T061334Z-3-001.zip`.
-  - Exact Firestore counts after Stanford upload: `1` source run, `1,029` source records, `4,878` evidence records, `1,010` dedup review candidates, and `0` review labels / approved entities / enrichment runs / enrichment review items / final profiles.
-  - No candidate approvals, merge decisions, enrichment generation, enrichment review decisions, or profile materialization were performed during the Stanford upload.
-- Current Bright Data waiting items:
-  - Local `BRIGHTDATA_API_KEY` is present in `wekruit-core-service-cloud-function/.env` as of 2026-05-09. The value was not printed. `.env` is gitignored and untracked.
-  - Firebase CLI access is expected to be sufficient to set/confirm Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` before deployed live lookup verification. If the user greenlights implementation, pipe the local `.env` value into `firebase functions:secrets:set BRIGHTDATA_API_KEY --project wekruit-dev-env --data-file -` without printing the value or placing it directly in the shell command.
-  - Confirm the Bright Data account has access to the LinkedIn Scraper API / Profiles scraper.
-  - Bright Data v1 data-use decision is narrowed and confirmed for implementation planning: use Bright Data only to gather professional information for enrichment evidence/context. Do not use it for broad sourcing, contact-data acquisition, automatic matching decisions, or identity/dedup approval.
-  - First live Bright Data test policy is confirmed: after local fake/provider tests pass and the staging deploy is complete, create an isolated synthetic sourcing run/job for a single fake test candidate, `Spencer Wang`, with fake non-sensitive source context and LinkedIn URL `https://www.linkedin.com/in/spencerwang1` embedded in that synthetic source record/source evidence. Approve only that synthetic candidate, then run exactly one live Bright Data lookup from the active sourcing dashboard `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`.
-  - Bright Data lookup must be hard-gated on eligible LinkedIn source/evidence lineage. If an approved candidate has no LinkedIn profile URL in its approved source/evidence records or source summaries, the dashboard must not show an active lookup button and the backend must reject lookup attempts. V1 must not provide a freeform/reviewer-supplied URL input or discover LinkedIn profiles from name/company fields.
-  - Final readiness audit on 2026-05-09 added implementation guardrails for edge cases: canonical LinkedIn `/in/...` URL validation, backend-owned eligible URL derivation, exclusion of LinkedIn URLs from strong identity hashes even when they appear as `source_url` or `homepage`, deterministic duplicate-spend/concurrency protection, bounded manual async refresh if Bright Data sync returns `snapshot_id`, stale enrichment review protection after vendor evidence changes, sanitized vendor errors/logging, and an explicit access/spend-control check before a paid live route is broadly usable.
-  - Live Bright Data smoke on 2026-05-10 created exactly one isolated synthetic approved Spencer candidate in staging, then materialized one final profile from that candidate. TreeHacks candidates remain unapproved/unmerged/unenriched by this work.
-  - Bright Data quality issue discovered after Phase 6.5I: a user-run real LinkedIn lookup showed the deployed flow was technically wired but the normalized profile could be too thin for enrichment value. The observed card had current company and location, an `aboutSummary` that was only an 89-character public excerpt with an encoded `&amp;`, zero experience rows, zero skills, and project rows that were only names. This meant the integration could succeed while still failing the product goal of giving OpenAI materially richer professional context.
-  - Phase 6.5J fixed the WeKruit normalization/display portion of that issue: richer allowed fields are now preserved when Bright Data returns them, HTML/entity cleanup is deterministic, public URLs embedded in allowed professional fields can be rendered/cited, and the dashboard linkifies richer list entries. The live Spencer verification still returned a thin Bright Data payload with no experience/project/skills rows, so the remaining limitation is provider output/public-profile availability rather than the local normalization path.
-  - Bright Data's public docs for LinkedIn profile-by-URL scraping show structured profile output can include profile details, `about`, `current_company`, `experience`, `education`, `projects`, `publications`, certifications, organizations, honors/awards, activity/posts, and media/ID fields. V1 should still keep only the approved professional-context subset and exclude contact/private/sensitive/social-graph/media fields.
-  - Bright Data is public-data limited. If Bright Data returns only a public excerpt or an already-truncated value for a restricted LinkedIn profile, WeKruit must not try to reconstruct hidden data through unofficial scraping. The target for Phase 6.5J is to preserve the full public professional text that Bright Data returns within bounded normalized fields, and to clearly document provider limitations when the returned payload itself is thin.
-  - Manual-only v1 mode from the Approved detail panel is confirmed.
-  - Raw vendor payload retention policy is confirmed for v1 and remains unchanged for Phase 6.5J: store richer normalized summaries only, with no full raw Bright Data payload in hot Firestore docs.
-  - Field allowlist is confirmed for v1 and remains unchanged for Phase 6.5J: profile URL, name, headline/position, current company, location, education summary, experience summary, skills, about summary, and projects/publications if present. Contact/private/sensitive/social-graph/media fields are excluded unless explicitly approved later.
-  - Rejected/ignored Bright Data matches should be remembered by selected LinkedIn URL/query hash and approved evidence lineage so unchanged lookups do not spend credits or show the same bad match again.
-  - If approved Bright Data evidence is added to a candidate that already has a final enriched profile, set or preserve `needsEnrichment=true` and allow manual re-enrichment; do not implement complex diffing/versioning in v1.
-  - LinkedIn URLs should become first-class evidence for display, reviewer selection, vendor lookup inputs, and lineage, but not strong dedup evidence in v1.
-- Paused Coresignal waiting items:
-  - Keep the Coresignal API key, field, retention, and budget decisions below for future reference only. Coresignal is not the active implementation path unless the team pivots back.
-- Current tag-system integration item:
-  - The teammate-owned unified tag package is now confirmed present and considered ready for integration planning in the permanent sibling clone `/Users/spencerwang/Documents/GitHub/wekruit-pa`.
-  - Package location: `/Users/spencerwang/Documents/GitHub/wekruit-pa/packages/shared-tags`; package name: `@wekruit/shared-tags`; current version: `0.1.0`.
-  - Dependency/distribution decision as of 2026-05-12: prefer GitHub Packages/private registry over dev-only sibling path so deploy/CI does not depend on one local checkout.
-  - Deep preflight finding on 2026-05-12: the local package is still `private: true`, which is correct for workspace-only use but blocks npm publishing until a package-owner/publish step flips publishability and adds registry metadata. This does not mean GitHub Packages must be public; it means npm publish is currently disabled.
-  - Deep preflight finding on 2026-05-12: the shared package registry key is `skillBucket` even though the README describes the broader axis as `skills`. Sourcing should store user-facing canonical `skills` as objects with a validated shared `bucket`, but taxonomy endpoints should expose the package registry accurately.
-  - Deep preflight finding on 2026-05-12: proposed deterministic mappings for role functions, industry sectors, career stages, and planned `relevantTags` were checked against the shared package source arrays/no-abbreviation list with a read-only script and produced `failures: []`.
-  - Deep preflight finding on 2026-05-12: `npm --workspace=@wekruit/shared-tags run typecheck` and `npm --workspace=@wekruit/shared-tags run test` were attempted in the fresh `wekruit-pa` clone, but dependencies are not installed there yet (`tsc` / `tsx` not found). This is not a package logic failure; implementation preflight should run `pnpm install --frozen-lockfile` or the package-owner's preferred install before treating package tests as meaningful.
-  - The remaining work is not "create the package"; it is to confirm package publishing/auth, map sourcing's existing enrichment taxonomy to the shared axes, add a taxonomy API endpoint for the static dashboard, and remove the hardcoded `records.ts` / `web/app.js` duplication without breaking existing candidate profile reads.
-- Current personal-website enrichment item:
-  - Conceptual decisions are settled: website enrichment is a separate evidence source, mirrors the Bright Data HITL flow, excludes LinkedIn URLs, uses eligible URLs already found in approved source/evidence lineage, and should prefer Crawl4AI for the real open-source extraction engine.
-  - Deep preflight finding on 2026-05-12: existing source-record link grouping already exposes `Website` and `Projects/demos` URL groups from Devpost/GitHub/generic records, and `wekruit-scraping/scripts/sourcing_upload_file.py` already preserves Devpost `member_website`, project URLs, demo links, and all-links in source records. The first website enrichment implementation should live in core-service and should not require a scraping repo source-record format change.
-  - First local verification candidate for website enrichment is now fixed by user direction: create an isolated fake authentic `Sunwoo` candidate in the Firebase emulator with personal website `https://swkang73.github.io/`. Use the emulator/dashboard for verification before any staging/live dashboard work. Do not use TreeHacks data as the verification basis.
-- Current reviewer workflow caution:
-  - Do not approve, merge, enrich, materialize profiles, or run Bright Data lookup against the TreeHacks staging dataset unless the user/team intentionally starts a separate validation pass.
-  - The Bright Data live smoke and Phase 6.5J verification should use only isolated synthetic `Spencer Wang` test run/job candidates with LinkedIn URL `https://www.linkedin.com/in/spencerwang1`. Do not use TreeHacks Devpost source data as the verification basis for the normalization patch.
+- Phases 0-6 are implemented and verified: source runs, source records, evidence extraction, dedup review, approved global candidates, OpenAI enrichment, enrichment HITL, final profiles, and the Jobs/Review/Approved/Enrichment/Profiles dashboard tabs.
+- Merge-before-enrichment guard is implemented and verified. OpenAI enrichment is blocked when an approved candidate overlaps unresolved pending merge review candidates.
+- Clickable evidence/source links, derived lifecycle callouts, and capped review-count copy are implemented, verified locally, and deployed to `https://wekruit-sourcing.web.app`.
+- Real Devpost and GitHub adapter paths exist in `wekruit-scraping`; Devpost flat `.xlsx` exports preserve member LinkedIn/personal website/project/demo fields for core-service ingestion.
+- Bright Data LinkedIn enrichment is implemented as the completed Phase 6.5 baseline:
+  - LinkedIn URL evidence normalization and source/evidence lineage gates are implemented.
+  - Bright Data/manual LinkedIn lookup runs from the Approved detail panel.
+  - Pending merge blockers prevent lookup.
+  - Duplicate-spend/query-hash protection exists.
+  - Reviewer approve/reject/ignore is required before Bright Data evidence enters OpenAI enrichment.
+  - Approved vendor evidence participates in evidence-pack hash/stale review protection and final profile lineage.
+  - `BRIGHTDATA_API_KEY` is set in Firebase Secret Manager for `wekruit-dev-env`; secret values were not printed or committed.
+  - Local fake-provider, scoped staging deploy, and isolated synthetic Spencer live smoke tests were completed. No TreeHacks candidates were approved, merged, enriched, or looked up during the Bright Data smoke.
+- Bright Data normalization was patched to preserve richer allowed public professional fields when the provider returns them. Remaining product limitation: Bright Data may still return thin public LinkedIn payloads, so personal websites/project pages are the next enrichment source for richer context.
+
+**Current Staging Dataset**
+
+- Firebase project: `wekruit-dev-env`.
+- Hosting site: `https://wekruit-sourcing.web.app`.
+- Active staging run: `stanford-treehacks-2026-20260506T030716Z`.
+- Source: `devpost`; domain: `hackathon`; competition filter: `TreeHacks 2026`.
+- Exact post-upload counts: `1` source run, `1,029` source records, `4,878` evidence records, `1,010` dedup review candidates, `0` review labels, `0` approved entities, `0` enrichment runs, `0` enrichment review items, and `0` final profiles.
+- Do not approve, merge, enrich, materialize profiles, or run paid/vendor lookups against TreeHacks candidates unless the user intentionally starts a separate validation pass.
+
+**Active Workstream**
+
+- Current active workstream: personal website enrichment plus shared tag package migration.
+- Current branch: `codex/website-shared-tags-integration-plan`.
+- Current status: planning is complete enough to implement later, but implementation is not greenlit as of 2026-05-13.
+- Website enrichment is not implemented yet.
+- Shared-tags migration is not implemented yet.
+- Coresignal remains a paused archive. No Coresignal implementation has started.
+
+**Website Enrichment Decisions**
+
+- Website enrichment must be a separate enrichment source, not a raw source importer and not a LinkedIn substitute.
+- It should mirror the Bright Data flow: approved candidate only, pending-merge guard, manual Approved-detail trigger, run/result cards, reviewer approve/reject/ignore, and only approved website facts enter OpenAI enrichment.
+- V1 is URL-first only. It uses eligible personal website/project/demo URLs already found in approved source/evidence lineage.
+- V1 must not scrape LinkedIn URLs and must not perform broad web discovery by name/company.
+- V1 should hide or disable the website scrape action when no eligible personal website/project URL exists.
+- Preferred real extraction engine: Crawl4AI in a separate Python Cloud Run worker, after the fake provider/workflow is proven locally.
+- Local verification candidate: isolated synthetic `Sunwoo Kang` candidate in the Firebase emulator with website `https://swkang73.github.io/`.
+- Verification rule: use API/script only for isolated setup and already-proven identity approval; click the new website scrape button and decision controls through the dashboard. Use local emulator/browser verification before staging.
+
+**Shared Tags Decisions And Waiting State**
+
+- Package location: `/Users/spencerwang/Documents/GitHub/wekruit-pa/packages/shared-tags`.
+- Package name/version: `@wekruit/shared-tags` / `0.1.0`.
+- Preferred distribution path: private GitHub Packages/private registry, not a long-term sibling path install.
+- The package must remain private/internal to WeKruit.
+- First consumer should be `wekruit-core-service-cloud-function`, because core-service owns enrichment labels and final profile materialization.
+- `wekruit-scraping` should not change in the first shared-tags migration unless source adapters later emit canonical tags/tag events.
+- Dashboard should use a backend taxonomy API endpoint for v1, not a new JS build step.
+- Migration should be additive first: keep existing legacy labels as primary, add `canonicalTags`, show a secondary "Canonical tags preview", and only later promote canonical labels to primary filters/pills after compatibility is proven.
+- Current package findings:
+  - `packages/shared-tags/package.json` is still `private: true`, which blocks npm publishing until package-owner/publish metadata changes are made. This does not mean GitHub Packages must be public.
+  - The shared package registry key is `skillBucket`; sourcing can still expose user-facing `canonicalTags.skills` as objects with validated `bucket` values.
+  - Proposed deterministic mappings were read-only checked against shared package source arrays/no-abbreviation rules and produced `failures: []`.
+  - Fresh clone package tests could not run yet because dependencies are not installed in `wekruit-pa` (`tsc` / `tsx` missing). This is an environment/install preflight item, not a package logic failure.
+- Waiting on teammate response:
+  - Is `@wekruit/shared-tags` already published privately to GitHub Packages, and which version should core-service use?
+  - If not published, should Codex prepare a `wekruit-pa` publish-metadata branch/PR or should the teammate publish it?
+  - How should core-service authenticate to install the private package during deploy: local token, GitHub Actions repo access, or another approach?
 
 ## Current Remaining Work Triage
 
-The core v1 workflow is proven locally and against the live `wekruit-dev-env` Firebase project. Completed milestones are kept below as historical verification; this triage list now contains only forward-looking work.
+This list is forward-looking only. Completed Bright Data and earlier phase details are preserved below as verification/archive material.
 
-Current priority order:
+1. **Personal website enrichment.**
+   - Status: execution-planned, not implemented.
+   - Implement the fake provider/domain/API/UI/enrichment path first.
+   - Verify with the synthetic Sunwoo candidate in the local Firebase emulator and browser before any staging work.
+   - Add the real Crawl4AI worker only after the fake HITL workflow is proven.
 
-1. **Bright Data professional LinkedIn profile enrichment integration.**
-   - Status: completed baseline on `codex/brightdata-integration-plan`; Phase 6.5A preflight, Phase 6.5B domain/provider-contract work, Phase 6.5C backend service/repository flow, Phase 6.5D API routes/error contract, Phase 6.5E enrichment/profile lineage integration, Phase 6.5F Approved tab dashboard UX, Phase 6.5G local end-to-end verification, Phase 6.5H scoped deploy/read-only staging verification, Phase 6.5I isolated live staging smoke, and Phase 6.5J rich-normalization implementation/local/staging verification are complete.
-   - Recommended first version: manual LinkedIn URL scrape for an approved candidate after identity review and merge-blocker checks.
-   - Bright Data results should become reviewer-visible vendor evidence/context. They should not silently mutate approved entities, final profiles, or unified tags.
-   - Phase 6.5J resolved the known normalization/display issue: the deployed integration now preserves richer normalized public professional context from Bright Data's allowed fields when returned. Remaining quality risk: Bright Data may still return a thin public payload for some LinkedIn profiles, as happened with the fresh synthetic Spencer live verification.
-   - Implementation started with a fake/provider contract and focused tests before any live Bright Data call.
-   - Remaining stance: keep Bright Data as a useful but variable LinkedIn enrichment signal. Do not reopen Bright Data richness experiments unless the team explicitly chooses that later.
+2. **Unified tag package migration.**
+   - Status: execution-planned, not implemented.
+   - Waiting on teammate/package-auth answers before production dependency wiring.
+   - Add core-service dependency, deterministic mapping layer, additive `canonicalTags`, backend taxonomy API, and secondary UI preview after package access is verified.
 
-2. **Personal website enrichment.**
-   - Status: conceptually settled and execution-planned on `codex/website-shared-tags-integration-plan`; implementation is not greenlit yet.
-   - Goal: add a separate reviewer-approved enrichment source for public personal websites/project/demo pages so OpenAI enrichment gets richer evidence than LinkedIn alone can reliably provide.
-   - Recommended path: Bright Data-style HITL flow in core-service, fake provider first, local emulator/browser verification with synthetic Sunwoo candidate and `https://swkang73.github.io/`, then a real Crawl4AI Cloud Run worker after the fake workflow is proven.
-   - Guardrails: no broad web search, no freeform URL input, no LinkedIn scraping on this path, no TreeHacks verification, no raw HTML in Firestore, and no approved website evidence entering enrichment until reviewer approval.
-
-3. **Unified tag package migration.**
-   - Status: package confirmed and planning resumed after 2026-05-12 inspection of teammate-owned package in `/Users/spencerwang/Documents/GitHub/wekruit-pa`.
-   - Current hardcoded taxonomy source remains `wekruit-core-service-cloud-function/src/services/sourcing/domain/records.ts`.
-   - The dashboard currently mirrors values in `wekruit-core-service-cloud-function/web/app.js`.
-   - Migration should make the shared package the source of valid tags and keep Firestore as the source of candidate-specific tag assignments.
-   - Confirmed package location: `wekruit-pa/packages/shared-tags`, package name `@wekruit/shared-tags`, version `0.1.0`, currently `private: true` / workspace-internal.
-   - Confirmed browser-safe export exists at `@wekruit/shared-tags/canonical` for bundled browser consumers.
-   - 2026-05-12 decision: use GitHub Packages/private registry if possible for the real integration path; do not rely on a dev-only sibling path as the production/deploy dependency model.
-   - Important dashboard constraint: the current sourcing dashboard is plain static `web/app.js`, not an npm-bundled app. Decision for v1: expose canonical vocab through a backend taxonomy endpoint rather than adding a dashboard build step solely for shared labels.
-   - Confirmed Python package exists at `wekruit-pa/packages/shared-tags-py`; its README describes the scraping-side tag-event/idempotency write contract. Decision for v1: do not change `wekruit-scraping` for shared labels unless source adapters start emitting canonical tags/tag events.
-   - Migration must be a deliberate schema mapping, not a direct string swap: current sourcing values such as `ai_research`, `business_founder`, `academic_research`, `healthcare_ai`, and `ai_infrastructure` do not all match the shared package's `roleFunction` / `industrySector` axes one-for-one.
-   - Migration should be additive first: preserve existing profile fields while adding shared canonical fields, then fully move UI/consumers to shared package labels after compatibility is proven.
-
-4. **Large queue handling / pagination.**
-   - The live Devpost import proved that the backend can ingest a broad run, but the current review UI intentionally loads a capped review set.
-   - The dashboard now displays the total review-candidate count separately from the currently loaded candidates, but true cursor pagination / next-page review navigation is still future work.
-   - Before another broad import, the team should decide whether reviewers need pagination, source filters, search-first review, or a smaller curated import batch.
+3. **Large queue handling / pagination.**
+   - The live Devpost import proved broad ingest works, but the review UI intentionally loads a capped review set.
+   - The dashboard displays total review-candidate count separately from loaded candidates, but true cursor pagination / next-page review navigation remains future work.
+   - Before another broad import, decide whether reviewers need pagination, source filters, search-first review, or smaller curated batches.
 
 4. **Singleton strength wording cleanup.**
-   - Current issue: Devpost-only singleton review candidates correctly have `strength: weak`, but showing a `Weak` pill can make reviewers think the person is low-quality.
-   - Recommended UI wording: show `Single-source` or `Needs identity review` for singleton review candidates; reserve `Weak/Medium/Strong` language for actual multi-record match strength.
+   - Devpost-only singleton review candidates correctly have `strength: weak`, but showing a `Weak` pill can make reviewers think the person is low-quality.
+   - Recommended UI wording: show `Single-source` or `Needs identity review` for singleton review candidates; reserve `Weak/Medium/Strong` language for multi-record match strength.
 
-5. **Website profile enrichment.**
-   - Candidate personal websites remain a valuable enrichment target because they are often public, already present in Devpost/GitHub records, and can be fetched as supporting evidence.
-   - A future website enrichment worker can fetch only URLs that already exist on source records or approved candidates, extract page title, description/meta tags, visible about/project text, social/profile links, and outbound project/repo links, then store the extracted facts as evidence/context.
-   - This worker should respect robots/rate limits, store source URL + extraction timestamp + raw snapshot pointer, and route meaningful new profile fields through enrichment review instead of silently mutating final profiles.
-   - 2026-05-07 scraper research update:
-     - ScrapeGraphAI remains useful inspiration for LLM-guided structured extraction from a known page or small website, especially when the target page layout is unknown and the desired output is a typed JSON object.
-     - Crawl4AI is also a strong fit for this layer because it is an open-source LLM-friendly crawler/scraper with markdown and structured JSON extraction workflows.
-     - Recommended v1 website path: start with a small deterministic worker for already-known candidate URLs, use one crawler/extractor abstraction, and store extracted website facts as source/evidence context. Do not crawl broadly from the open web until reviewer value, compliance posture, and rate limits are clear.
-     - Website extraction is separate from LinkedIn enrichment. Personal websites can use open-web extraction; LinkedIn should stay behind approved vendor/API policy such as Bright Data.
-   - 2026-05-12 planning update:
-     - Keep core-service as workflow owner because approved candidates, merge guards, HITL decisions, enrichment evidence packs, and Firestore lineage live there.
-     - User decision on 2026-05-12: website scraping must be a separate enrichment source with the same HITL flow as Bright Data. Website facts are gathered after approval, reviewer-approved separately, and only then fed into final OpenAI enrichment where labeling happens.
-     - User decision on 2026-05-12: the website scraper button/action must not exist when the approved candidate has no eligible personal website/project URL in approved source/evidence lineage, matching the Bright Data no-LinkedIn gate.
-     - User decision on 2026-05-12: this generic scraper must never scrape LinkedIn URLs; LinkedIn remains owned by the Bright Data path.
-     - User decision on 2026-05-12: prefer Crawl4AI for the real extraction engine because it is open-source and fits structured extraction best.
-     - The extraction engine can still be a separate service/worker. A Python Cloud Run worker using Crawl4AI is the current recommended real implementation path because it avoids embedding a headless browser stack inside Firebase Functions. ScrapeGraphAI remains a reference/backup option only, not the preferred v1 path.
-     - V1 should be URL-first/manual from the Approved detail panel, just like Bright Data: only eligible homepage/personal website/project URLs already found in approved source/evidence lineage; no broad search by name/company.
-     - V1 should exclude LinkedIn and logged-in social scraping. Public GitHub/Devpost/project pages can remain separate source adapters or website-context sources depending on where the URL came from.
-     - V1 should require reviewer approval of extracted website facts before they enter OpenAI enrichment context.
-     - Suggested normalized fields: `profileUrl`, `pageTitle`, `siteName`, `aboutSummary`, `projectSummaries`, `experienceHighlights`, `skills`, `educationHighlights`, `contactLinks`, `sourcePages`, `extractedAt`, `contentHash`.
-     - First implementation should start with fake provider fixtures and local emulator/browser verification before any live website crawl.
-     - Topic status: conceptually settled; future work can move to implementation planning when greenlit, starting from the documented Crawl4AI + Bright Data-style HITL architecture.
+5. **Re-enrichment and profile versioning.**
+   - First-time enrichment flow works.
+   - Future behavior: when new approved evidence attaches to an existing candidate, compare enrichment-relevant fields, create a new enrichment review only for important changes, and preserve enrichment/profile version history.
 
-6. **LinkedIn/social profile handling.**
-   - For v1, preserve LinkedIn/Twitter/social URLs as clickable reviewer context and optional enrichment context.
-   - Do not implement an unofficial LinkedIn scraper as a production path.
-   - Automated LinkedIn profile fetching should use the approved Bright Data LinkedIn Scraper API path only after the team confirms account access, policy, and field retention. The first version should be URL-first, not broad LinkedIn discovery.
-   - 2026-05-09 decision: LinkedIn profile URLs should be first-class evidence for display, reviewer selection, Bright Data query inputs, and downstream lineage, but they should not become strong dedup evidence or trigger automatic identity merges in v1.
+6. **Feedback loop and metrics.**
+   - Metrics remain valuable but lower priority than reviewer usability, website enrichment, shared-tags migration, and queue handling.
+   - Keep Phase 7 in the roadmap.
 
-7. **Bright Data / Coresignal evaluation.**
-   - Current recommendation after teammate direction: implement Bright Data first for LinkedIn profile enrichment when WeKruit already has a LinkedIn URL from approved source evidence.
-   - Coresignal planning is preserved as a paused alternative for future professional-profile discovery/enrichment, but it is not the active implementation path.
-   - Bright Data is useful as a URL-first structured fetcher for known public profile/company/job/post URLs and niche public-web extraction, but LinkedIn and Devpost/GitHub scraping should stay behind explicit legal/product approval.
-   - Neither vendor should bypass the HITL workflow: any externally enriched professional profile data should become evidence/context and route through enrichment review before profile materialization.
-   - 2026-05-12 Bright Data about-limit planning:
-     - The 89-character `about` values observed in the Spencer and Adam Yang diagnostics are not caused by WeKruit's normalizer cap; the deployed cap is `2500` characters and the redacted field inventory showed Bright Data itself returned `about.length = 89`.
-     - Bright Data docs show the Profiles API can return `about`, `experience`, `projects`, `publications`, and related fields, but also state that LinkedIn collection is limited to publicly available data and does not access login-walled fields.
-     - Current interpretation: the profile endpoint returns whatever public excerpt Bright Data can see for that profile. There is no safe code-only workaround for missing full-about text in the Profiles API response.
-     - Possible next experiments, each requiring explicit data-use/spend approval: test Bright Data LinkedIn Posts by Profile URL for public posts, test Dataset Marketplace/Deep Lookup for richer public-source context, or ask Bright Data support whether account/dataset settings can return a less-truncated profile about field.
-     - Product recommendation: do not treat Bright Data as the sole professional enrichment source. Pair it with personal website/GitHub/Devpost/project-page extraction for richer public context.
-   - 2026-05-07 vendor decision update, superseded by 2026-05-08 Bright Data pivot:
-     - Historical note: this older recommendation preferred Coresignal if the team needed broad professional-profile discovery from partial attributes.
-     - Rationale: Coresignal's API surface is closer to the product problem: search/collect professional employee/profile records, return normalized professional fields, and support discovery from candidate-like attributes.
-     - Bright Data is better when WeKruit already has exact LinkedIn/profile/company/job/post URLs and needs URL-first extraction, but it is less directly aligned with "given a Devpost/GitHub candidate, discover or enrich professional identity."
-     - Proposed integration shape: Coresignal enrichment worker runs only after candidate identity approval or on an explicitly selected source subset; it uses approved evidence fields as query/context; returned professional data becomes enrichment evidence/context; reviewer approval remains required before final profile or unified tag assignment.
-     - This was the prior recommendation. The active plan now uses Bright Data first because the teammate direction is to use the existing Bright Data LinkedIn URL scraper.
-   - 2026-05-08 Coresignal integration planning update, now paused:
-     - Recommendation: integrate Coresignal as a post-identity-approval professional enrichment provider, not as a raw source importer and not as a replacement for the Devpost/GitHub adapters.
-     - First-principles reason: raw source adapters answer "what did we discover from GitHub/Devpost/research?"; dedup/HITL answers "is this a real candidate and which source records belong together?"; Coresignal should answer "can we find additional professional evidence for an already-approved person?" These are different jobs and should stay separated.
-     - If the team pivots back, Coresignal should run after the existing merge-before-enrichment guard. If an approved entity still has unresolved pending merge candidates, block vendor lookup/enrichment until the reviewer resolves identity first.
-     - Coresignal query seeds should come only from approved candidate evidence and source records: name, GitHub URL, Devpost URL, personal website, LinkedIn URL when present, email when already approved, institution, location, source domains, and reviewer-approved signals.
-     - Coresignal output should be stored as vendor evidence/context and routed through enrichment review. It should not silently overwrite approved candidate fields, final profiles, or unified tags.
-     - Secret handling: use local `.env` for local tests and Firebase Secret Manager for deployed functions, with a future `CORESIGNAL_API_KEY`. Do not store API keys in Firestore, source records, run metadata, review notes, or dashboard-visible payloads.
-     - Current code integration point: `generateEnrichmentForApprovedEntity` in `wekruit-core-service-cloud-function/src/services/sourcing/application/service.ts` already builds the approved evidence pack and enforces pending-merge blockers before OpenAI enrichment. A future Coresignal lookup should either run as a separate manual action before OpenAI enrichment or enrich the evidence pack through an explicit provider port before the existing LLM taxonomy step.
-     - Current API/UI integration point: the dashboard already exposes `Generate enrichment` from the Approved detail panel. A future first version can add a separate manual action such as "Find professional profile" or "Run Coresignal lookup" near that control, then show the returned candidate profile match as reviewer-visible evidence before allowing it into final enrichment.
-     - Current Firestore state: sourcing collections currently cover source runs, source records, evidence, dedup candidates, review labels, approved entities, enrichment runs, enrichment review items, and candidate profiles. There is no vendor-enrichment collection yet.
-     - Recommended future Firestore shape:
-       - `sourcing-vendor-enrichment-runs`: provider, approved entity ID, query input hash, requested fields, status, error, created/updated timestamps, and cost/credit metadata when available.
-       - `sourcing-vendor-profile-candidates` or `sourcing-external-profile-matches`: approved entity ID, provider, provider record ID/profile URL, normalized display fields, match rationale, confidence, evidence IDs used as query seeds, reviewer status, and raw payload storage pointer.
-       - Keep large/raw vendor payloads out of hot dashboard documents where practical. Store a compact normalized summary in Firestore and use a storage pointer for full payloads if the team decides raw retention is acceptable.
-     - Recommended future implementation phases:
-       1. Define the provider contract and emulator-only fake Coresignal fixture. No live vendor calls.
-       2. Add manual dashboard/API path for one approved candidate lookup in the local emulator.
-       3. Add Coresignal live connectivity using `CORESIGNAL_API_KEY` with one known test candidate and a small field set.
-       4. Add reviewer selection/approval of the matched professional profile before it becomes enrichment context.
-       5. Feed approved Coresignal evidence into the existing OpenAI enrichment pack so taxonomy generation uses richer evidence while still requiring HITL enrichment approval.
-       6. Only after manual flow is trusted, consider queueing/batching, rate limits, credit budgets, and retry behavior.
-     - Team inputs required before implementation:
-       - Confirm Coresignal account/API access and provide `CORESIGNAL_API_KEY` through local `.env` and deployed Firebase Secret Manager when needed.
-       - Confirm allowed use case, data-use policy, and whether LinkedIn/profile URLs from Devpost/GitHub may be used as lookup seeds.
-       - Confirm budget/credit limits and whether the first implementation should be manual-only.
-       - Confirm which returned fields may be displayed/stored: current title/company, location, skills, education, experience, emails, LinkedIn URL, activity, and/or salary-like fields.
-       - Confirm retention policy for raw vendor payloads versus normalized summaries only.
-     - Vendor comparison:
-       - Coresignal remains useful if WeKruit later needs professional profile discovery/enrichment from partial candidate attributes.
-       - Bright Data is the active choice when WeKruit already has an exact LinkedIn/profile/company/job/post URL and wants URL-first structured fetch.
-       - ScrapeGraphAI/Crawl4AI remain better fits for public personal websites and project pages, not for LinkedIn profile enrichment.
+7. **Post-reseed dashboard walkthrough.**
+   - The Stanford/TreeHacks Devpost staging upload is complete.
+   - The next live action on TreeHacks should be an intentional reviewer walkthrough only: inspect Jobs/Review, confirm links/lifecycle callouts, then manually exercise a small number of approvals/merges/enrichments if the user explicitly starts that validation pass.
 
-8. **Re-enrichment and profile versioning.**
-   - Current first-time enrichment flow works.
-   - Remaining behavior: when new approved evidence attaches to an existing candidate, compare enrichment-relevant fields, create a new enrichment review only for important changes, and preserve enrichment/profile version history.
+## Preserved Completed And Paused Context
 
-9. **Feedback loop and metrics.**
-   - Metrics remain valuable but lower priority than reviewer usability and source adapter hardening.
-   - Keep Phase 7 in the roadmap, but do not block Coresignal planning, tag migration, queue handling, or reviewer usability on metrics work.
-
-10. **Post-reseed dashboard walkthrough.**
-   - The Stanford/TreeHacks Devpost staging source upload is complete.
-   - The next live action should be a reviewer walkthrough in the staging dashboard: inspect Jobs and Review, confirm links/lifecycle callouts, then manually exercise a small number of approvals/merges/enrichments only when the user intentionally starts that validation pass.
-   - Do not approve, merge, enrich, or materialize profiles as part of source upload verification.
-
-11. **TreeHacks weak-strength investigation.**
-   - 2026-05-07 live Firestore read-only check on the active TreeHacks staging dataset found:
-     - `1,001` weak dedup candidates.
-     - `9` strong dedup candidates.
-     - `1,001` candidates have reason code `singleton_review`.
-     - Strong candidates come from exact `github_exact` or `email_exact` matches across two or more source records.
-   - Current conclusion: this is mostly expected for a Devpost-only run. A single-source candidate that has no duplicate partner is intentionally represented as a `singleton_review` candidate with `strength: weak`; this label means weak identity/dedup evidence, not a weak person/candidate.
-   - Current code behavior:
-     - `buildSingletonReviewCandidate` assigns `strength: weak` to every singleton person record.
-     - Exact email/GitHub/ORCID/etc. evidence can produce `strong` multi-record dedup candidates.
-     - Homepage matches can produce `medium` multi-record dedup candidates.
-   - UX risk: showing a `Weak` pill on singleton candidates can make reviewers think the candidate is low quality. Recommended future UI wording: for singleton review candidates, show `Single-source` or `Needs identity review` instead of emphasizing `Weak`; reserve `Weak/Medium/Strong` language for actual multi-record match strength.
+- Bright Data is complete as the current LinkedIn enrichment baseline. It remains useful but variable, because LinkedIn provider output can be thin for some profiles. Do not reopen Bright Data richness experiments unless the team explicitly chooses that later.
+- LinkedIn URLs are first-class evidence for display, reviewer selection, Bright Data lookup inputs, and downstream lineage, but they are not strong dedup evidence in v1.
+- Personal website/project-page extraction is the planned route for more consistent public professional/project context.
+- Coresignal planning is preserved below as a paused alternative for future professional-profile discovery/enrichment. It is not active unless the team pivots back.
+- TreeHacks weak-strength investigation conclusion: most TreeHacks review candidates are expected `singleton_review` candidates with weak identity/dedup evidence, not weak people. Strong candidates come from exact email/GitHub matches across two or more source records; homepage matches can create medium candidates.
 
 ### Clickable Evidence/Lifecycle Local Verification
 
@@ -466,7 +345,7 @@ The preferred path is to productize the existing prototype rather than rebuild i
 
 Last updated: 2026-04-28.
 
-- Initial working branch was created from current `main` and later renamed for the full effort: `codex/candidate-sourcing-pipeline`. Later implementation branches continued from that line of work; the current active branch is recorded in Current Execution State.
+- Initial working branch was created from current `main` and later renamed for the full effort: `codex/candidate-sourcing-pipeline`. Later implementation branches continued from that line of work; the current active branch is recorded in Current Source-Of-Truth Snapshot.
 - `wekruit-scraping` `origin/codex/sourcing-e2e-firebase` is still present and diverges from current `main`.
 - The scraping prototype branch adds a useful source-record contract, deterministic IDs, dry-run upload output, a core-service ingest client, a generic JSON/JSONL/CSV uploader, and focused tests.
 - The scraping prototype branch should be selectively ported/productized into the new implementation branch rather than used as the working branch directly, because current `main` contains newer planning docs and secret-safety work.
@@ -549,8 +428,8 @@ This phase does not add enrichment. It stabilizes the review foundation.
 
 Last updated: 2026-04-28.
 
-- Initial working branch in `wekruit-core-service-cloud-function`: `codex/candidate-sourcing-pipeline`, created from current `main`. Later phase branches continued from this line of work; the current active branch is recorded in Current Execution State.
-- Initial working branch in `wekruit-scraping`: `codex/candidate-sourcing-pipeline`, created from current `main`, continuing to hold the scraping-side source-record upload bridge and durable plan docs. Later phase branches continued from this line of work; the current active branch is recorded in Current Execution State.
+- Initial working branch in `wekruit-core-service-cloud-function`: `codex/candidate-sourcing-pipeline`, created from current `main`. Later phase branches continued from this line of work; the current active branch is recorded in Current Source-Of-Truth Snapshot.
+- Initial working branch in `wekruit-scraping`: `codex/candidate-sourcing-pipeline`, created from current `main`, continuing to hold the scraping-side source-record upload bridge and durable plan docs. Later phase branches continued from this line of work; the current active branch is recorded in Current Source-Of-Truth Snapshot.
 - Core-service sourcing backend, static dashboard, sourcing Firestore collection names, sourcing queue names, and sourcing-only Firebase config were selectively ported from the previous sourcing prototype branch onto current `main`.
 - Scraping-side source-record contract, deterministic source-record conversion, generic file uploader, researcher upload bridge, and tests were selectively ported from the previous sourcing prototype branch onto current `main`.
 - `firebase.sourcing.json` now runs the sourcing-only functions bundle with hosting, functions, and Firestore emulators, avoiding unrelated outbound/matching environment prompts during local sourcing verification.
@@ -980,7 +859,7 @@ Last updated: 2026-05-08.
   - `wekruit-dev-env`: `https://wekruit-dev-env.web.app`
   - `wekruit-sourcing`: `https://wekruit-sourcing.web.app`
 - Phase 3.5 is no longer blocked. The live tiny-fixture workflow succeeded, and `wekruit-sourcing.web.app` is the active staging dashboard for sourcing work.
-- Later live staging work also reset/reseeded Firestore with the TreeHacks-only Devpost run recorded in Current Open Decisions And Waiting State.
+- Later live staging work also reset/reseeded Firestore with the TreeHacks-only Devpost run recorded in Current Source-Of-Truth Snapshot.
   - `wekruit-outbound-staging`: currently not the sourcing dashboard target
 - `wekruit-dev-env` has deployed Cloud Function `sourcing-api` in `us-central1`, runtime `nodejs20`, codebase `core-service`, entry point `sourcing.api`.
 - `wekruit-dev-env` also has many unrelated default-codebase functions, so Phase 3.5 deploys must target only sourcing resources.
