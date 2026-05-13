@@ -115,8 +115,10 @@ This is the current single source of truth after the successful Phase 3.5 live s
   - LinkedIn URLs should become first-class evidence for display, reviewer selection, vendor lookup inputs, and lineage, but not strong dedup evidence in v1.
 - Paused Coresignal waiting items:
   - Keep the Coresignal API key, field, retention, and budget decisions below for future reference only. Coresignal is not the active implementation path unless the team pivots back.
-- Current tag-system waiting item:
-  - Wait for the teammate-owned unified tag npm package, then migrate hardcoded taxonomy definitions out of `records.ts` / `web/app.js` duplication.
+- Current tag-system integration item:
+  - The teammate-owned unified tag package is now confirmed present and considered ready for integration planning in the permanent sibling clone `/Users/spencerwang/Documents/GitHub/wekruit-pa`.
+  - Package location: `/Users/spencerwang/Documents/GitHub/wekruit-pa/packages/shared-tags`; package name: `@wekruit/shared-tags`; current version: `0.1.0`.
+  - The remaining work is not "create the package"; it is to choose the dependency/distribution path, map sourcing's existing enrichment taxonomy to the shared axes, and remove the hardcoded `records.ts` / `web/app.js` duplication without breaking existing candidate profile reads.
 - Current reviewer workflow caution:
   - Do not approve, merge, enrich, materialize profiles, or run Bright Data lookup against the TreeHacks staging dataset unless the user/team intentionally starts a separate validation pass.
   - The Bright Data live smoke and Phase 6.5J verification should use only isolated synthetic `Spencer Wang` test run/job candidates with LinkedIn URL `https://www.linkedin.com/in/spencerwang1`. Do not use TreeHacks Devpost source data as the verification basis for the normalization patch.
@@ -136,10 +138,15 @@ Current priority order:
    - Team input required: Bright Data API key, account access to the LinkedIn Profiles scraper, allowed fields, lookup policy, budget expectations, and retention policy.
 
 2. **Unified tag package migration.**
-   - Status: waiting on teammate-owned npm package.
+   - Status: package confirmed and planning resumed after 2026-05-12 inspection of teammate-owned package in `/Users/spencerwang/Documents/GitHub/wekruit-pa`.
    - Current hardcoded taxonomy source remains `wekruit-core-service-cloud-function/src/services/sourcing/domain/records.ts`.
    - The dashboard currently mirrors values in `wekruit-core-service-cloud-function/web/app.js`.
    - Migration should make the shared package the source of valid tags and keep Firestore as the source of candidate-specific tag assignments.
+   - Confirmed package location: `wekruit-pa/packages/shared-tags`, package name `@wekruit/shared-tags`, version `0.1.0`, currently `private: true` / workspace-internal.
+   - Confirmed browser-safe export exists at `@wekruit/shared-tags/canonical` for bundled browser consumers.
+   - Important dashboard constraint: the current sourcing dashboard is plain static `web/app.js`, not an npm-bundled app. A browser-safe package export is useful, but the dashboard still needs either a build step or a backend taxonomy endpoint before it can stop duplicating arrays.
+   - Confirmed Python package exists at `wekruit-pa/packages/shared-tags-py`; its README describes the scraping-side tag-event/idempotency write contract. Before changing `wekruit-scraping`, verify whether the teammate-finished package now intentionally covers canonical vocab consumption for Python, or whether scraping should keep emitting source records without canonical tag validation for this phase.
+   - Migration must be a deliberate schema mapping, not a direct string swap: current sourcing values such as `ai_research`, `business_founder`, `academic_research`, `healthcare_ai`, and `ai_infrastructure` do not all match the shared package's `roleFunction` / `industrySector` axes one-for-one.
 
 3. **Large queue handling / pagination.**
    - The live Devpost import proved that the backend can ingest a broad run, but the current review UI intentionally loads a capped review set.
@@ -159,6 +166,14 @@ Current priority order:
      - Crawl4AI is also a strong fit for this layer because it is an open-source LLM-friendly crawler/scraper with markdown and structured JSON extraction workflows.
      - Recommended v1 website path: start with a small deterministic worker for already-known candidate URLs, use one crawler/extractor abstraction, and store extracted website facts as source/evidence context. Do not crawl broadly from the open web until reviewer value, compliance posture, and rate limits are clear.
      - Website extraction is separate from LinkedIn enrichment. Personal websites can use open-web extraction; LinkedIn should stay behind approved vendor/API policy such as Bright Data.
+   - 2026-05-12 planning update:
+     - Keep core-service as workflow owner because approved candidates, merge guards, HITL decisions, enrichment evidence packs, and Firestore lineage live there.
+     - The extraction engine can still be a separate service/worker. A Python Cloud Run worker using Crawl4AI is likely cleaner than embedding a headless browser stack inside Firebase Functions; a ScrapeGraphAI API provider is the shortest vendor-assisted path if the team accepts another paid external API.
+     - V1 should be URL-first/manual from the Approved detail panel, just like Bright Data: only eligible homepage/personal website/project URLs already found in approved source/evidence lineage; no broad search by name/company.
+     - V1 should exclude LinkedIn and logged-in social scraping. Public GitHub/Devpost/project pages can remain separate source adapters or website-context sources depending on where the URL came from.
+     - V1 should require reviewer approval of extracted website facts before they enter OpenAI enrichment context.
+     - Suggested normalized fields: `profileUrl`, `pageTitle`, `siteName`, `aboutSummary`, `projectSummaries`, `experienceHighlights`, `skills`, `educationHighlights`, `contactLinks`, `sourcePages`, `extractedAt`, `contentHash`.
+     - First implementation should start with fake provider fixtures and local emulator/browser verification before any live website crawl.
 
 6. **LinkedIn/social profile handling.**
    - For v1, preserve LinkedIn/Twitter/social URLs as clickable reviewer context and optional enrichment context.
@@ -171,6 +186,12 @@ Current priority order:
    - Coresignal planning is preserved as a paused alternative for future professional-profile discovery/enrichment, but it is not the active implementation path.
    - Bright Data is useful as a URL-first structured fetcher for known public profile/company/job/post URLs and niche public-web extraction, but LinkedIn and Devpost/GitHub scraping should stay behind explicit legal/product approval.
    - Neither vendor should bypass the HITL workflow: any externally enriched professional profile data should become evidence/context and route through enrichment review before profile materialization.
+   - 2026-05-12 Bright Data about-limit planning:
+     - The 89-character `about` values observed in the Spencer and Adam Yang diagnostics are not caused by WeKruit's normalizer cap; the deployed cap is `2500` characters and the redacted field inventory showed Bright Data itself returned `about.length = 89`.
+     - Bright Data docs show the Profiles API can return `about`, `experience`, `projects`, `publications`, and related fields, but also state that LinkedIn collection is limited to publicly available data and does not access login-walled fields.
+     - Current interpretation: the profile endpoint returns whatever public excerpt Bright Data can see for that profile. There is no safe code-only workaround for missing full-about text in the Profiles API response.
+     - Possible next experiments, each requiring explicit data-use/spend approval: test Bright Data LinkedIn Posts by Profile URL for public posts, test Dataset Marketplace/Deep Lookup for richer public-source context, or ask Bright Data support whether account/dataset settings can return a less-truncated profile about field.
+     - Product recommendation: do not treat Bright Data as the sole professional enrichment source. Pair it with personal website/GitHub/Devpost/project-page extraction for richer public context.
    - 2026-05-07 vendor decision update, superseded by 2026-05-08 Bright Data pivot:
      - Historical note: this older recommendation preferred Coresignal if the team needed broad professional-profile discovery from partial attributes.
      - Rationale: Coresignal's API surface is closer to the product problem: search/collect professional employee/profile records, return normalized professional fields, and support discovery from candidate-like attributes.
@@ -3417,6 +3438,117 @@ Additional Phase 6.5K live diagnostic on 2026-05-10:
   - However, this second test still did not return work-history `experience` rows. For the profiles tested so far, Bright Data's profile endpoint is better at returning public project/publication context than full experience descriptions.
   - Recommended next product stance: keep Bright Data LinkedIn profile scraping as useful but variable enrichment evidence. For consistent richness, prioritize additional approved public sources such as personal websites, GitHub repos, Devpost project pages, and possibly a future explicit policy decision for LinkedIn public activity/posts or another professional data provider.
 
+#### 2026-05-12 Forward Planning: Website Enrichment, Shared Tags, Bright Data Richness
+
+Status: discussion/planning only. No code change, deploy, live provider call, Firestore write, candidate approval, enrichment approval, or profile materialization is authorized by this section.
+
+User prompts for this planning slice:
+
+- Discuss a generic personal-website scraper/enrichment path for candidate homepages and project pages, separate from LinkedIn.
+- Inspect the teammate-owned shared labeling/tag package in `https://github.com/WeKruit/wekruit-pa`, now cloned permanently at `/Users/spencerwang/Documents/GitHub/wekruit-pa`.
+- Revisit whether WeKruit can get around the observed Bright Data `about` excerpt length of 89 characters.
+
+Personal website enrichment recommendation:
+
+- Root requirement: get richer, evidence-grounded professional context into the OpenAI enrichment step than LinkedIn alone can reliably provide.
+- Keep `wekruit-core-service-cloud-function` as workflow owner because approved candidates, merge blockers, HITL decisions, enrichment evidence packs, final profile materialization, and deployed secrets already live there.
+- Add a provider abstraction later, e.g. `WebsiteProfileLookupPort`, parallel to `ProfessionalProfileLookupPort`, so the workflow can start with a fake provider and then use one real extraction engine without changing reviewer semantics.
+- V1 should be URL-first and manual from the Approved detail panel:
+  - derive eligible URLs only from approved source/evidence lineage;
+  - include personal homepages, portfolio sites, GitHub Pages, project/demo pages, and source-linked project pages;
+  - exclude LinkedIn and logged-in social sites from this generic scraper path;
+  - do not search the open web by candidate name/company in v1.
+- V1 should preserve the same evidence discipline as Bright Data:
+  - extracted website facts become vendor/source context, not automatic entity mutations;
+  - reviewer must approve/reject/ignore website extraction results before they enter OpenAI enrichment context;
+  - approved website evidence should set or preserve `needsEnrichment=true` for already-materialized profiles, without complex profile diffing/versioning yet.
+- Suggested normalized website fields:
+  - `profileUrl`, `siteName`, `pageTitle`, `aboutSummary`, `projectSummaries`, `experienceHighlights`, `skills`, `educationHighlights`, `contactLinks`, `sourcePages`, `extractedAt`, `contentHash`.
+- Storage policy recommendation:
+  - keep hot Firestore docs normalized and bounded;
+  - store `sourcePages` and content hashes for auditability;
+  - do not store broad raw HTML in Firestore;
+  - if raw snapshots become necessary, use an explicit GCS retention policy rather than silently expanding Firestore docs.
+- Execution-engine options:
+  - Shortest deterministic path: a backend worker that fetches static HTML plus metadata and uses a constrained extractor. Lower infrastructure cost, but weaker on JavaScript-heavy websites.
+  - Stronger open-source path: a Python Cloud Run worker using Crawl4AI, because Crawl4AI is designed to return clean markdown and structured extraction inputs for LLM workflows and can use browser crawling when needed.
+  - Shortest vendor-assisted path: ScrapeGraphAI API, because it exposes hosted scrape/extract/crawl endpoints that return JSON from a URL/prompt. This adds another paid external API and secret-management/compliance decision.
+- Current recommendation:
+  - Start with the `WebsiteProfileLookupPort` and fake fixtures first.
+  - For the first real implementation, prefer a separate Cloud Run extraction worker over embedding browser automation in Firebase Functions, unless the team intentionally chooses a simpler static-only fetcher.
+  - Reuse the existing Bright Data HITL pattern where possible: Approved detail trigger, lookup run card, pending/approved/rejected/ignored match card, enrichment evidence-pack inclusion only after approval.
+- Verification plan for future implementation:
+  - local fake-provider unit tests for normalized rich website facts;
+  - local emulator/browser flow using a synthetic approved candidate with a local/static test website URL;
+  - one explicit user-approved public website smoke after fake-provider verification;
+  - no TreeHacks candidate approvals or broad crawls during the first website test.
+
+Shared tag package findings:
+
+- Permanent clone inspected: `/Users/spencerwang/Documents/GitHub/wekruit-pa`.
+- `packages/shared-tags/package.json` declares package `@wekruit/shared-tags`, version `0.1.0`, `private: true`, `type: module`, dependency `zod`, and optional peer dependency `firebase-admin`.
+- The TypeScript package exports:
+  - `.` for server/node consumers;
+  - `./canonical` for browser-safe canonical vocab consumers.
+- The package README defines two active systems:
+  - tag-event/idempotency Firestore write contract for `pa-canonical-tags`, `pa-tag-events`, and `pa-entity-tags`;
+  - v1.6 per-axis canonical vocabs.
+- The canonical vocab axes are:
+  - `roleFunction`;
+  - `industrySector`;
+  - `major`;
+  - `visa`;
+  - `jobType`;
+  - `careerStage`;
+  - `location`;
+  - `relevantTags`;
+  - `skills`.
+- `wekruit-pa` already consumes `@wekruit/shared-tags` from multiple TypeScript workspaces, including dashboard/functions/job-rec/parser packages.
+- `packages/shared-tags-py` exists and is useful for Python tag-event writes. Its README currently emphasizes idempotent tag-event parity, not the same per-axis canonical vocab export used by the TypeScript package. Treat Python canonical-vocab support as a verification item before changing `wekruit-scraping`.
+- Teammate signal: the package is finished and ready from the package-owner side. WeKruit sourcing should now plan integration, not wait for package creation.
+
+Shared tag migration analysis:
+
+- Current sourcing enrichment schema is not isomorphic with the shared package:
+  - `primaryTrack` / `scoredTracks` roughly overlap with `roleFunction`, but values such as `ai_research`, `business_founder`, and `academic_research` need mapping decisions.
+  - `industryDomainInterests` roughly overlap with `industrySector`, but values such as `ai_infrastructure`, `developer_tools`, `healthcare_ai`, `research_tools`, and `open_source` may belong in `relevantTags` or multiple fields rather than a single closed industry sector.
+  - `specializations` likely belong in `relevantTags` or `skills`, not a direct shared closed enum.
+  - `careerStage` overlaps with shared `careerStage`, but current values `early_career`, `academic_researcher`, and `unknown` need explicit handling because the shared axis has `entry_level`, `junior`, `mid_level`, `founder`, etc.
+  - `contactability` has no shared axis and should remain a sourcing-specific field unless the package owner adds a contactability axis later.
+- Migration should be an adapter/schema migration, not a blind enum replacement.
+- Recommended migration shape:
+  1. Choose dependency/distribution path for `@wekruit/shared-tags` in `wekruit-core-service-cloud-function`.
+     - Preferred production path: package published to a private registry/GitHub Packages, with lockfile pinning.
+     - Acceptable local-development path: sibling workspace/path install for dev only.
+     - Avoid long-term vendoring of copied vocab arrays unless it is explicitly framed as a temporary generated artifact with drift checks.
+  2. Add a sourcing-owned mapping layer that converts current enrichment outputs into shared canonical axes and validates them against the package.
+  3. Preserve existing candidate profile fields during migration so already-materialized profiles and dashboard filters do not break.
+  4. Add new canonical/shared tag fields alongside existing fields first, then migrate reads/UI filters after data compatibility is proven.
+  5. Update the OpenAI enrichment schema/prompt only after the adapter and tests prove the shared axes can represent current sourcing use cases.
+  6. Replace hardcoded dashboard arrays only after deciding whether the static dashboard gets a build step or fetches a backend taxonomy endpoint.
+  7. Decide separately whether `wekruit-scraping` should consume Python canonical vocab support, emit tag events only, or continue producing source records without labeling-package coupling for this phase.
+- Example mapping questions to resolve before implementation:
+  - Should `ai_research` become `roleFunction=data_analysis` plus `industrySector=artificial_intelligence_and_machine_learning` plus `relevantTags=["artificial_intelligence_research"]`, or should research remain only a tag/sector signal?
+  - Should `business_founder` be represented by `careerStage=founder` and `roleFunction=management_and_executive`, or by a relevant tag plus founder stage only?
+  - Should `academic_research` map to `industrySector=research_and_academia` with no forced role function?
+  - Should `healthcare_ai` map to both `healthcare_and_life_sciences` and `artificial_intelligence_and_machine_learning`, or one sector plus a relevant tag?
+  - Should current `unknown_other` / `unknown` values remain as sourcing-local fallback values, since the shared package intentionally rejects weak/ambiguous canonical tokens?
+
+Bright Data `about` length / richness analysis:
+
+- The observed 89-character `aboutSummary` is not caused by WeKruit's v1 normalizer cap. The current allowed normalized field cap is much larger than 89 characters, and controlled diagnostics showed Bright Data itself returned `about.length = 89` for the Spencer and Shixiang/Adam test URLs.
+- Bright Data's public docs show the LinkedIn Profiles endpoint can return richer profile fields such as `about`, `experience`, `education`, `projects`, `publications`, certifications, organizations, honors/awards, and activity/post fields. WeKruit's current v1 field allowlist intentionally uses only the professional subset and excludes contact/private/sensitive/social-graph/media fields.
+- Bright Data's own LinkedIn collection-options docs say the LinkedIn options collect publicly available data only and do not access data behind LinkedIn's login wall. If the returned public profile payload is already truncated, WeKruit should not try to reconstruct hidden profile text through unofficial scraping.
+- The canonical Bright Data request shape is now used by WeKruit, and a diagnostic confirmed it did not make Spencer's profile richer.
+- Current conclusion:
+  - There is no safe code-only patch that can turn a provider-returned 89-character public excerpt into a fuller LinkedIn about section.
+  - Bright Data remains useful but variable: it can return richer project/publication context for some profiles, but so far it has not reliably returned full work-history descriptions for tested profiles.
+- Possible future experiments, each requiring explicit approval because they may spend credits or alter policy:
+  1. Ask Bright Data support whether another Profiles dataset option, account entitlement, async mode, Marketplace purchase, or Deep Lookup path returns less-truncated about/experience descriptions for known profile URLs.
+  2. Test Bright Data LinkedIn Posts by profile URL as a separate evidence type only if the team approves public activity/post content as enrichment context.
+  3. Test one more explicitly approved LinkedIn URL known to have public projects/experience, using the existing redacted field-inventory script and no Firestore writes.
+  4. Prioritize personal-website/project-page extraction for consistent richness instead of expecting LinkedIn to carry the full enrichment burden.
+
 #### Immediate Blockers Before Full Live Completion
 
 - Deployed Firebase Secret Manager `BRIGHTDATA_API_KEY` for `wekruit-dev-env` is now set and metadata-confirmed as version `1` / `ENABLED`; the value was not exposed.
@@ -3693,7 +3825,7 @@ Dates above are placeholders. The sequencing matters more than the exact dates.
 - [x] Real Devpost and GitHub source adapters have local and controlled live verification.
 - [x] Staging dashboard has clickable evidence/source links and lifecycle callouts.
 - [ ] Bright Data professional LinkedIn enrichment is integrated only after policy/key/field decisions are confirmed.
-- [ ] Unified tag package is integrated after the teammate-owned package is ready.
+- [ ] Unified tag package is integrated after dependency distribution, sourcing-to-shared-axis mapping, and dashboard taxonomy delivery are decided.
 - [ ] Review queue pagination or an equivalent large-queue strategy exists for broad imports.
 - [ ] Singleton review wording avoids implying low candidate quality.
 - [ ] Metrics exist for review outcomes and enrichment edits.
