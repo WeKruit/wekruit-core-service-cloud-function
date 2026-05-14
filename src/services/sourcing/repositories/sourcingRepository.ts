@@ -213,4 +213,36 @@ export class SourcingRepository {
       .map((doc) => doc.data() as ApprovedEntity)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
+
+  async getApprovedEntity(id: string): Promise<ApprovedEntity | null> {
+    const doc = await this.approvedEntityCollection.doc(id).get();
+    return doc.exists ? (doc.data() as ApprovedEntity) : null;
+  }
+
+  async getSourceRecord(id: string): Promise<SourceRecord | null> {
+    const doc = await this.sourceRecordCollection.doc(id).get();
+    return doc.exists ? (doc.data() as SourceRecord) : null;
+  }
+
+  /** P3 vendor enrichment — write match doc. */
+  async upsertVendorProfileMatch(match: {
+    id: string;
+    [k: string]: unknown;
+  }): Promise<void> {
+    await this.db
+      .collection(sourcingCollections.vendorProfileMatches)
+      .doc(match.id)
+      .set(match, { merge: true });
+  }
+
+  /** P3 vendor enrichment — write run doc (audit trail). */
+  async upsertVendorEnrichmentRun(run: {
+    id: string;
+    [k: string]: unknown;
+  }): Promise<void> {
+    await this.db
+      .collection(sourcingCollections.vendorEnrichmentRuns)
+      .doc(run.id)
+      .set(run, { merge: true });
+  }
 }

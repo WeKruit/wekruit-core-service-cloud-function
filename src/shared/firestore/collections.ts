@@ -13,6 +13,8 @@ export const sourcingCollections = {
   dedupCandidates: 'sourcing-dedup-candidates',
   reviewLabels: 'sourcing-review-labels',
   approvedEntities: 'sourcing-approved-entities',
+  vendorEnrichmentRuns: 'sourcing-vendor-enrichment-runs',
+  vendorProfileMatches: 'sourcing-vendor-profile-matches',
 } as const;
 
 export const matchingCollections = {
