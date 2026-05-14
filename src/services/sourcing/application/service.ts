@@ -22,6 +22,11 @@ import type {
   SourceRunRecord,
 } from '../domain/records';
 import { SourcingRepository } from '../repositories/sourcingRepository';
+import {
+  isLikelyLinkedInUrl,
+  triggerLinkedInLookup,
+  type BrightDataLinkedInProfile,
+} from '../integrations/brightdata';
 
 function sortedUnique(values: string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
@@ -46,6 +51,22 @@ function buildSourceRecordId(input: {
 
 function stringFromRecord(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * Pull a LinkedIn URL from a source-record's `sourceUrl` or nested
+ * `raw.linkedinUrl` / `raw.canonicalLinkedInUrl`. Used by P3 vendor lookup.
+ */
+function pickLinkedInUrlFromSourceRecord(record: { sourceUrl?: string; raw?: Record<string, unknown> }): string | null {
+  if (record.sourceUrl && isLikelyLinkedInUrl(record.sourceUrl)) {
+    return record.sourceUrl;
+  }
+  const raw = record.raw ?? {};
+  const candidates = [raw.linkedinUrl, raw.canonicalLinkedInUrl, raw.linkedin_url];
+  for (const c of candidates) {
+    if (typeof c === 'string' && isLikelyLinkedInUrl(c)) return c;
+  }
+  return null;
 }
 
 function pickDisplayField(record: {
@@ -312,6 +333,134 @@ export class SourcingService {
 
   async listApprovedEntities(): Promise<ApprovedEntity[]> {
     return this.repository.listApprovedEntities();
+  }
+
+  /**
+   * P3 — resolve a LinkedIn URL from the caller's input + call BrightData,
+   * persist the result, return the enrichment payload.
+   *
+   * Resolution order:
+   *   1. explicit `linkedinUrl`
+   *   2. `sourceRecordId` → source-record (sourceUrl preferred, then raw.linkedinUrl)
+   *   3. `approvedEntityId` → first matching source-record with a linkedin url
+   *
+   * Idempotency: the (entityId, snapshotId) tuple keys the vendor-profile-match
+   * doc. A second call for the same input creates a fresh BrightData snapshot.
+   */
+  async runVendorProfileLookup(input: {
+    sourceRecordId?: string;
+    approvedEntityId?: string;
+    linkedinUrl?: string;
+  }): Promise<{
+    matchId: string;
+    runId: string;
+    vendor: 'brightdata';
+    linkedinUrl: string;
+    snapshotId: string;
+    status: 'ready' | 'building' | 'failed';
+    profile: Record<string, unknown> | null;
+    subjectId: string;
+    subjectKind: 'linkedinUrl' | 'sourceRecord' | 'approvedEntity';
+  }> {
+    let url = input.linkedinUrl?.trim();
+    let subjectId = url ?? '';
+    let subjectKind: 'linkedinUrl' | 'sourceRecord' | 'approvedEntity' = 'linkedinUrl';
+
+    if (!url && input.sourceRecordId) {
+      const record = await this.repository.getSourceRecord(input.sourceRecordId);
+      if (!record) throw new Error(`source_record_not_found:${input.sourceRecordId}`);
+      url = pickLinkedInUrlFromSourceRecord(record) ?? undefined;
+      subjectId = input.sourceRecordId;
+      subjectKind = 'sourceRecord';
+    }
+
+    if (!url && input.approvedEntityId) {
+      const entity = await this.repository.getApprovedEntity(input.approvedEntityId);
+      if (!entity) throw new Error(`approved_entity_not_found:${input.approvedEntityId}`);
+      const records = await this.repository.getSourceRecordsByIds(entity.sourceRecordIds);
+      for (const r of records) {
+        const candidate = pickLinkedInUrlFromSourceRecord(r);
+        if (candidate) {
+          url = candidate;
+          break;
+        }
+      }
+      subjectId = input.approvedEntityId;
+      subjectKind = 'approvedEntity';
+    }
+
+    if (!url || !isLikelyLinkedInUrl(url)) {
+      throw new Error(`linkedin_url_not_resolved`);
+    }
+
+    const runId = randomUUID();
+    const now = new Date().toISOString();
+
+    // Audit-trail run doc — written before the BrightData call so debugging
+    // a 5xx can find the attempt.
+    await this.repository.upsertVendorEnrichmentRun({
+      id: runId,
+      vendor: 'brightdata',
+      dataset: 'linkedin-profile-by-url',
+      subjectKind,
+      subjectId,
+      linkedinUrl: url,
+      status: 'running',
+      createdAt: now,
+    });
+
+    let triggerResult: Awaited<ReturnType<typeof triggerLinkedInLookup>>;
+    try {
+      triggerResult = await triggerLinkedInLookup([url]);
+    } catch (error) {
+      await this.repository.upsertVendorEnrichmentRun({
+        id: runId,
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        completedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
+
+    const firstRow: BrightDataLinkedInProfile | undefined = triggerResult.rows[0];
+    const profile = firstRow?.raw ?? null;
+    const status = triggerResult.status;
+    const matchId = `${subjectId}__${triggerResult.snapshotId || runId}`;
+
+    await Promise.all([
+      this.repository.upsertVendorProfileMatch({
+        id: matchId,
+        runId,
+        vendor: 'brightdata',
+        dataset: 'linkedin-profile-by-url',
+        subjectKind,
+        subjectId,
+        linkedinUrl: url,
+        snapshotId: triggerResult.snapshotId,
+        status,
+        profile,
+        createdAt: now,
+        updatedAt: new Date().toISOString(),
+      }),
+      this.repository.upsertVendorEnrichmentRun({
+        id: runId,
+        status,
+        snapshotId: triggerResult.snapshotId,
+        completedAt: new Date().toISOString(),
+      }),
+    ]);
+
+    return {
+      matchId,
+      runId,
+      vendor: 'brightdata',
+      linkedinUrl: url,
+      snapshotId: triggerResult.snapshotId,
+      status,
+      profile,
+      subjectId,
+      subjectKind,
+    };
   }
 
   private async refreshRunCounts(runId: string, now: string): Promise<SourceRunRecord> {
