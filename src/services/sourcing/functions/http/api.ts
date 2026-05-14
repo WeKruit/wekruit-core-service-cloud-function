@@ -1,18 +1,12 @@
 import cors from 'cors';
 import express from 'express';
 import { onRequest } from 'firebase-functions/v2/https';
+import { defineSecret } from 'firebase-functions/params';
 import { z } from 'zod';
 
-// BRIGHT_DATA_API_KEY secret binding is intentionally NOT declared here while
-// the secret has no enabled versions (Adam revoked the leaked key; no rotated
-// key set yet). The runtime layer in `integrations/brightdata.ts` reads
-// `process.env.BRIGHT_DATA_API_KEY` and returns 503 when absent. Once Adam
-// adds a new version via
-//   echo -n "<KEY>" | gcloud secrets versions add BRIGHT_DATA_API_KEY \
-//     --project=wekruit-5f89b --data-file=-
-// re-add `import { defineSecret } from 'firebase-functions/params'` +
-// `const brightDataApiKey = defineSecret('BRIGHT_DATA_API_KEY')` + add
-// `secrets: [brightDataApiKey]` to the onRequest config below, then deploy.
+// BrightData LinkedIn enrichment secret binding. Adam set the production
+// secret version on 2026-05-14; runtime reads via process.env at cold start.
+const brightDataApiKey = defineSecret('BRIGHT_DATA_API_KEY');
 
 import {
   batchUpsertSourceRecordsSchema,
@@ -206,6 +200,35 @@ const vendorLookupBodySchema = z.object({
   linkedinUrl: z.string().trim().url().optional(),
 });
 
+// Poll: when LinkedIn lookup returned status='building', the dashboard hits
+// this to fetch the latest snapshot state. Same body shape as the lookup
+// trigger so the caller doesn't need to remember runId/matchId.
+app.post('/api/sourcing/vendor-profile-poll', async (req, res, next) => {
+  try {
+    const parsed = vendorLookupBodySchema.parse(req.body);
+    const data = await service.pollVendorEnrichment(parsed);
+    res.status(200).json({ data });
+  } catch (error) {
+    if (error instanceof BrightDataKeyMissingError) {
+      jsonError(res, 503, error.message);
+      return;
+    }
+    if (error instanceof BrightDataHttpError) {
+      jsonError(res, 502, error.message);
+      return;
+    }
+    if (error instanceof z.ZodError) {
+      jsonError(res, 422, error.message);
+      return;
+    }
+    if (error instanceof Error && /no_pending_match/i.test(error.message)) {
+      jsonError(res, 404, error.message);
+      return;
+    }
+    next(error);
+  }
+});
+
 app.post('/api/sourcing/vendor-profile-lookup:run', async (req, res, next) => {
   try {
     const parsed = vendorLookupBodySchema.parse(req.body);
@@ -295,7 +318,8 @@ export const sourcingApi = onRequest(
   {
     region: 'us-central1',
     invoker: 'public',
-    timeoutSeconds: 120,
+    secrets: [brightDataApiKey],
+    timeoutSeconds: 180,
   },
   app,
 );
