@@ -23,6 +23,7 @@ import type {
 } from '../domain/records';
 import { SourcingRepository } from '../repositories/sourcingRepository';
 import {
+  fetchSnapshot,
   isLikelyLinkedInUrl,
   triggerLinkedInLookup,
   type BrightDataLinkedInProfile,
@@ -369,6 +370,94 @@ export class SourcingService {
 
   async listApprovedEntities(): Promise<ApprovedEntity[]> {
     return this.repository.listApprovedEntities();
+  }
+
+  /**
+   * Poll an outstanding BrightData snapshot. Looks up the most-recent
+   * vendor-profile-match doc for this subject+vendor, calls BrightData's
+   * snapshot endpoint, and rewrites the match doc + run doc when the
+   * snapshot transitions building → ready.
+   *
+   * Returns the latest state. Dashboard hits this when status=building.
+   */
+  async pollVendorEnrichment(input: {
+    sourceRecordId?: string;
+    approvedEntityId?: string;
+    linkedinUrl?: string;
+  }): Promise<{
+    matchId: string;
+    runId: string;
+    vendor: 'brightdata';
+    linkedinUrl: string;
+    snapshotId: string;
+    status: 'ready' | 'building' | 'failed';
+    profile: Record<string, unknown> | null;
+  }> {
+    // Find the latest brightdata match for this subject. Single-field filter
+    // (subjectId / linkedinUrl) so no composite index needed. Vendor filter +
+    // sort done in code over the (small) result set.
+    const matchesCol = this.repository.vendorMatchesCollection;
+    let q;
+    if (input.sourceRecordId) q = matchesCol.where('subjectId', '==', input.sourceRecordId).limit(20);
+    else if (input.approvedEntityId) q = matchesCol.where('subjectId', '==', input.approvedEntityId).limit(20);
+    else if (input.linkedinUrl) q = matchesCol.where('linkedinUrl', '==', input.linkedinUrl).limit(20);
+    else throw new Error('one_of_sourceRecordId_approvedEntityId_linkedinUrl_required');
+    const snap = await q.get();
+    const brightdataMatches = snap.docs
+      .map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }))
+      .filter((m) => m.data.vendor === 'brightdata')
+      .sort((a, b) => String(b.data.createdAt ?? '').localeCompare(String(a.data.createdAt ?? '')));
+    if (brightdataMatches.length === 0) throw new Error('no_pending_match_found');
+    const matchId = brightdataMatches[0]!.id;
+    const match = brightdataMatches[0]!.data as unknown as {
+      runId: string;
+      snapshotId: string;
+      linkedinUrl: string;
+      status: 'ready' | 'building' | 'failed';
+      profile?: Record<string, unknown> | null;
+    };
+
+    // Already terminal — return as-is.
+    if (match.status === 'ready' || match.status === 'failed') {
+      return {
+        matchId,
+        runId: match.runId,
+        vendor: 'brightdata',
+        linkedinUrl: match.linkedinUrl,
+        snapshotId: match.snapshotId,
+        status: match.status,
+        profile: (match.profile as Record<string, unknown> | null) ?? null,
+      };
+    }
+
+    // Building — poll BrightData.
+    const result = await fetchSnapshot(match.snapshotId, [match.linkedinUrl]);
+    const profile = (result.rows[0]?.raw ?? null) as Record<string, unknown> | null;
+    const newStatus = result.status;
+    const now = new Date().toISOString();
+    await Promise.all([
+      this.repository.upsertVendorProfileMatch({
+        id: matchId,
+        status: newStatus,
+        profile,
+        updatedAt: now,
+      }),
+      this.repository.upsertVendorEnrichmentRun({
+        id: match.runId,
+        status: newStatus,
+        completedAt: newStatus !== 'building' ? now : undefined,
+      }),
+    ]);
+
+    return {
+      matchId,
+      runId: match.runId,
+      vendor: 'brightdata',
+      linkedinUrl: match.linkedinUrl,
+      snapshotId: match.snapshotId,
+      status: newStatus,
+      profile,
+    };
   }
 
   /**

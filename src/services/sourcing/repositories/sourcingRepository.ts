@@ -207,6 +207,11 @@ export class SourcingRepository {
     return entity;
   }
 
+  /** Exposed for service.pollVendorEnrichment query shape. */
+  get vendorMatchesCollection() {
+    return this.db.collection(sourcingCollections.vendorProfileMatches);
+  }
+
   async listApprovedEntities(): Promise<ApprovedEntity[]> {
     const snapshot = await this.approvedEntityCollection.limit(200).get();
     return snapshot.docs
