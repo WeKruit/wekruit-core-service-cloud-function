@@ -1,10 +1,18 @@
 import cors from 'cors';
 import express from 'express';
 import { onRequest } from 'firebase-functions/v2/https';
-import { defineSecret } from 'firebase-functions/params';
 import { z } from 'zod';
 
-const brightDataApiKey = defineSecret('BRIGHT_DATA_API_KEY');
+// BRIGHT_DATA_API_KEY secret binding is intentionally NOT declared here while
+// the secret has no enabled versions (Adam revoked the leaked key; no rotated
+// key set yet). The runtime layer in `integrations/brightdata.ts` reads
+// `process.env.BRIGHT_DATA_API_KEY` and returns 503 when absent. Once Adam
+// adds a new version via
+//   echo -n "<KEY>" | gcloud secrets versions add BRIGHT_DATA_API_KEY \
+//     --project=wekruit-5f89b --data-file=-
+// re-add `import { defineSecret } from 'firebase-functions/params'` +
+// `const brightDataApiKey = defineSecret('BRIGHT_DATA_API_KEY')` + add
+// `secrets: [brightDataApiKey]` to the onRequest config below, then deploy.
 
 import {
   batchUpsertSourceRecordsSchema,
@@ -240,7 +248,6 @@ export const sourcingApi = onRequest(
   {
     region: 'us-central1',
     invoker: 'public',
-    secrets: [brightDataApiKey],
     timeoutSeconds: 120,
   },
   app,
