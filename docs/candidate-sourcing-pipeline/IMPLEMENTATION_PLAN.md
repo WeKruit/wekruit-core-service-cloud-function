@@ -113,17 +113,18 @@ This section is the authoritative "where are we now?" view. Historical phase not
   - The shared package registry key is `skillBucket`; sourcing can still expose user-facing `canonicalTags.skills` as objects with validated `bucket` values.
   - Proposed deterministic mappings were read-only checked against shared package source arrays/no-abbreviation rules and produced `failures: []`.
   - Fresh clone package tests could not run yet because dependencies are not installed in `wekruit-pa` (`tsc` / `tsx` missing). This is an environment/install preflight item, not a package logic failure.
-  - 2026-05-13 teammate clarification/investigation: teammate showed that the `WeKruit/wekruit-pa` repository is public, but that does not prove the npm/GitHub Packages package is published. Read-only checks from this machine found:
+  - 2026-05-13 teammate clarification/investigation: teammate confirmed `@wekruit/shared-tags` is workspace-internal at version `0.1.0` and is **not yet published** to GitHub Packages; "Wave 2" is the intended publish step. The `WeKruit/wekruit-pa` repository being public does not make the npm package installable outside that monorepo. Read-only checks from this machine found:
     - `gh repo view WeKruit/wekruit-pa` reports repository visibility `PUBLIC`.
     - `npm view @wekruit/shared-tags` against the public npm registry returns `404 Not Found`.
     - `npm view @wekruit/shared-tags --registry=https://npm.pkg.github.com` returns `404` / package does not exist under owner `wekruit`.
     - `gh api /orgs/WeKruit/packages?package_type=npm` cannot list packages with the current GitHub token because it lacks `read:packages`.
     - Exact GitHub package lookup for `/orgs/WeKruit/packages/npm/%40wekruit%2Fshared-tags` returns `404 Package not found`.
     - Core-service currently has no project-level `@wekruit:registry=https://npm.pkg.github.com` mapping; user-level npm config has a protected GitHub Packages token, but the package still could not be found.
-  - Current conclusion: `wekruit-pa` is public, but `@wekruit/shared-tags` is not confirmed as an installable npm/GitHub Packages dependency. Treat package publication/install access as unresolved until teammate provides a package URL/install command/version or authorizes publishing.
-- Waiting on teammate response:
-  - Is `@wekruit/shared-tags` already published privately to GitHub Packages, and which version should core-service use?
-  - If not published, should Codex prepare a `wekruit-pa` publish-metadata branch/PR or should the teammate publish it?
+    - `wekruit-matching` does not npm-install or import `@wekruit/shared-tags`; it is a Python/uv repo with no package.json/npm lockfile. Its docs/comments reference `wekruit-pa/packages/shared-tags` as the canonical owner and rely on the Firestore/Cloud Function bridge instead.
+    - `wekruit-pa` consumes `@wekruit/shared-tags` internally through npm/pnpm workspace links. That same-monorepo consumption works today, but it is not the same thing as a cross-repo install path for core-service.
+  - Current conclusion: `@wekruit/shared-tags` exists as source in `wekruit-pa` and is actively used by PA workspaces, but it is not yet an installable external dependency for `wekruit-core-service-cloud-function`. Treat package publish/access/deploy auth as a Phase T0 blocker before adding a core-service production dependency.
+- Waiting on teammate/package-owner response:
+  - Should Codex prepare a `wekruit-pa` publish-metadata branch/PR, or will the teammate publish `@wekruit/shared-tags` to private GitHub Packages from their branch?
   - How should core-service authenticate to install the private package during deploy: local token, GitHub Actions repo access, or another approach?
 
 ## Current Remaining Work Triage
@@ -3432,7 +3433,8 @@ Shared tag package findings:
   - `location`;
   - `relevantTags`;
   - `skills`.
-- `wekruit-pa` already consumes `@wekruit/shared-tags` from multiple TypeScript workspaces, including dashboard/functions/job-rec/parser packages.
+- `wekruit-pa` already consumes `@wekruit/shared-tags` from multiple TypeScript workspaces via local workspace links, including dashboard/functions/job-rec/core-types/orchestrator/resume-parser/job-tag-enricher packages.
+- 2026-05-13 teammate clarification and local verification: `wekruit-matching` does **not** consume the package directly. It is a Python repo that writes raw hints through core-service/Firestore; canonical mapping happens in `wekruit-pa` Cloud Functions that do import the package.
 - `packages/shared-tags-py` exists and is useful for Python tag-event writes. Its README currently emphasizes idempotent tag-event parity, not the same per-axis canonical vocab export used by the TypeScript package. Treat Python canonical-vocab support as a verification item before changing `wekruit-scraping`.
 - Teammate signal: the package is finished and ready from the package-owner side. WeKruit sourcing should now plan integration, not wait for package creation.
 - User preference as of 2026-05-12:
@@ -3650,6 +3652,7 @@ Website enrichment implementation plan:
 Shared-tags implementation plan:
 
 1. Phase T0 - Package publishing/auth preflight.
+   - Current verified state as of 2026-05-13: `@wekruit/shared-tags` is workspace-internal and **not yet published** to GitHub Packages. Same-monorepo PA apps/packages can consume it through workspace links; core-service cannot use that path safely because it is a separate Firebase-deployed repo.
    - Confirm whether the package owner wants Codex to modify `wekruit-pa` or whether the teammate will publish `@wekruit/shared-tags` from their own branch.
    - Required package metadata before GitHub Packages publish likely includes changing package publishability from `private: true`, adding `publishConfig.registry = "https://npm.pkg.github.com"`, and ensuring the `repository` field associates the package with the WeKruit repo/org.
    - Publishing to GitHub Packages should keep the package private/internal to WeKruit, but visibility and repository access must be verified immediately after first publish.
