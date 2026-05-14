@@ -14,3 +14,10 @@ export const sourcingCollections = {
   reviewLabels: 'sourcing-review-labels',
   approvedEntities: 'sourcing-approved-entities',
 } as const;
+
+export const matchingCollections = {
+  platformUsers: 'platform-users',
+  jobs: 'matching-jobs',
+  feedback: 'matching-feedback',
+  savedJobs: 'matching-saved-jobs',
+} as const;

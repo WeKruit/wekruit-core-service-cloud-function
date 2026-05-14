@@ -11,6 +11,7 @@ if (exportMode !== 'sourcing') {
   const { outboundRetellWebhook } = require('./services/outbound/functions/http/retellWebhook') as typeof import('./services/outbound/functions/http/retellWebhook');
   const { outboundSendReminder } = require('./services/outbound/functions/tasks/sendReminder') as typeof import('./services/outbound/functions/tasks/sendReminder');
   const { outboundStartCall } = require('./services/outbound/functions/tasks/startCall') as typeof import('./services/outbound/functions/tasks/startCall');
+  const { matchingApi } = require('./services/matching/functions/http/api') as typeof import('./services/matching/functions/http/api');
 
   firebaseExports.outbound = {
     api: outboundApi,
@@ -23,6 +24,9 @@ if (exportMode !== 'sourcing') {
     start: {
       call: outboundStartCall,
     },
+  };
+  firebaseExports.matching = {
+    api: matchingApi,
   };
 }
 

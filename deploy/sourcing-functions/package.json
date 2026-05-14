@@ -1,0 +1,24 @@
+{
+  "name": "wekruit-core-service-cloud-function",
+  "version": "0.1.0",
+  "private": true,
+  "main": "lib/index.js",
+  "scripts": {
+    "start": "node lib/index.js"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "@google-cloud/tasks": "^6.1.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "firebase-admin": "^13.5.0",
+    "firebase-functions": "^6.6.0",
+    "googleapis": "^157.0.0",
+    "luxon": "^3.7.2",
+    "mailgun.js": "^12.1.0",
+    "retell-sdk": "^5.9.0",
+    "zod": "^4.1.11"
+  }
+}

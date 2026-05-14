@@ -1,4 +1,99 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "matching-jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "matching-jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "sponsorship", "order": "ASCENDING" },
+        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "matching-jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "industryKey", "order": "ASCENDING" },
+        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "matching-jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "jobType", "order": "ASCENDING" },
+        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "matching-jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "jobType", "order": "ASCENDING" },
+        { "fieldPath": "sponsorship", "order": "ASCENDING" },
+        { "fieldPath": "industryKey", "order": "ASCENDING" },
+        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "matching-jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "locationBuckets", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "matching-jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "locationBuckets", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "jobType", "order": "ASCENDING" },
+        { "fieldPath": "sponsorship", "order": "ASCENDING" },
+        { "fieldPath": "industryKey", "order": "ASCENDING" },
+        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "matching-jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "searchTokens", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "matching-jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "requiredSkillsIndex", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "matching-jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "seniorityLevel", "order": "ASCENDING" },
+        { "fieldPath": "firstSeenAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": []
 }
