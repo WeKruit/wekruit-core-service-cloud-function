@@ -24,6 +24,7 @@ import {
   BrightDataHttpError,
   BrightDataKeyMissingError,
 } from '../../integrations/brightdata';
+import { GitHubHttpError } from '../../integrations/github';
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -232,6 +233,52 @@ app.post('/api/sourcing/vendor-profile-lookup:run', async (req, res, next) => {
       return;
     }
     if (error instanceof Error && /linkedin/i.test(error.message)) {
+      jsonError(res, 400, error.message);
+      return;
+    }
+    next(error);
+  }
+});
+
+/**
+ * P3.2 — GitHub public-profile enrichment.
+ *
+ * No secret needed; the GitHub REST API answers public profiles without auth
+ * (rate-limited to 60 req/hr per IP). If GITHUB_API_TOKEN is set as a env
+ * var, requests carry it for the 5000 req/hr authenticated quota.
+ */
+const githubLookupBodySchema = z.object({
+  sourceRecordId: z.string().trim().min(1).optional(),
+  approvedEntityId: z.string().trim().min(1).optional(),
+  githubUrl: z.string().trim().url().optional(),
+});
+
+// Path-style action separator (`:run`) collides with Express colon-param
+// syntax. Both LinkedIn and GitHub routes use plain hyphenated paths
+// instead; the `:run` suffix on the LinkedIn route is grandfathered.
+app.post('/api/sourcing/github-profile-lookup', async (req, res, next) => {
+  try {
+    const parsed = githubLookupBodySchema.parse(req.body);
+    if (!parsed.sourceRecordId && !parsed.approvedEntityId && !parsed.githubUrl) {
+      jsonError(res, 400, 'one_of_sourceRecordId_approvedEntityId_githubUrl_required');
+      return;
+    }
+    const data = await service.runGitHubProfileLookup(parsed);
+    res.status(200).json({ data });
+  } catch (error) {
+    if (error instanceof GitHubHttpError) {
+      jsonError(res, 502, error.message);
+      return;
+    }
+    if (error instanceof z.ZodError) {
+      jsonError(res, 422, error.message);
+      return;
+    }
+    if (error instanceof Error && /not[_ ]found/i.test(error.message)) {
+      jsonError(res, 404, error.message);
+      return;
+    }
+    if (error instanceof Error && /github/i.test(error.message)) {
       jsonError(res, 400, error.message);
       return;
     }

@@ -27,6 +27,11 @@ import {
   triggerLinkedInLookup,
   type BrightDataLinkedInProfile,
 } from '../integrations/brightdata';
+import {
+  extractGitHubUsername,
+  fetchGitHubProfile,
+  isLikelyGitHubUrl,
+} from '../integrations/github';
 
 function sortedUnique(values: string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
@@ -53,6 +58,7 @@ function stringFromRecord(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+
 /**
  * Pull a LinkedIn URL from a source-record's `sourceUrl` or nested
  * `raw.linkedinUrl` / `raw.canonicalLinkedInUrl`. Used by P3 vendor lookup.
@@ -65,6 +71,36 @@ function pickLinkedInUrlFromSourceRecord(record: { sourceUrl?: string; raw?: Rec
   const candidates = [raw.linkedinUrl, raw.canonicalLinkedInUrl, raw.linkedin_url];
   for (const c of candidates) {
     if (typeof c === 'string' && isLikelyLinkedInUrl(c)) return c;
+  }
+  // Fall back to scanning `enrichment.links[]` which v2.3 multi-link parser
+  // emits even when no standalone canonicalLinkedInUrl was extracted.
+  const enrichment = (raw.enrichment ?? {}) as { links?: Array<{ url?: unknown; kind?: unknown }> };
+  for (const link of enrichment.links ?? []) {
+    if (link?.kind === 'linkedin' && typeof link.url === 'string' && isLikelyLinkedInUrl(link.url)) {
+      return link.url;
+    }
+  }
+  return null;
+}
+
+/**
+ * Pull a GitHub profile URL from a source-record. Same fallback chain as the
+ * LinkedIn picker.
+ */
+function pickGitHubUrlFromSourceRecord(record: { sourceUrl?: string; raw?: Record<string, unknown> }): string | null {
+  if (record.sourceUrl && isLikelyGitHubUrl(record.sourceUrl)) {
+    return record.sourceUrl;
+  }
+  const raw = record.raw ?? {};
+  const candidates = [raw.githubUrl, raw.github_url, raw.html_url];
+  for (const c of candidates) {
+    if (typeof c === 'string' && isLikelyGitHubUrl(c)) return c;
+  }
+  const enrichment = (raw.enrichment ?? {}) as { links?: Array<{ url?: unknown; kind?: unknown }> };
+  for (const link of enrichment.links ?? []) {
+    if (link?.kind === 'github' && typeof link.url === 'string' && isLikelyGitHubUrl(link.url)) {
+      return link.url;
+    }
   }
   return null;
 }
@@ -336,6 +372,128 @@ export class SourcingService {
   }
 
   /**
+   * P3.2 — resolve a GitHub URL from the caller's input + call the GitHub
+   * public REST API + persist match. Mirrors the LinkedIn flow but no
+   * snapshot-id concept since GitHub's API answers synchronously.
+   */
+  async runGitHubProfileLookup(input: {
+    sourceRecordId?: string;
+    approvedEntityId?: string;
+    githubUrl?: string;
+  }): Promise<{
+    matchId: string;
+    runId: string;
+    vendor: 'github';
+    githubUrl: string;
+    username: string;
+    status: 'ready' | 'failed';
+    profile: Record<string, unknown> | null;
+    subjectId: string;
+    subjectKind: 'githubUrl' | 'sourceRecord' | 'approvedEntity';
+    rateLimit?: { remaining: number; reset: number };
+  }> {
+    let url = input.githubUrl?.trim();
+    let subjectId = url ?? '';
+    let subjectKind: 'githubUrl' | 'sourceRecord' | 'approvedEntity' = 'githubUrl';
+
+    if (!url && input.sourceRecordId) {
+      const record = await this.repository.getSourceRecord(input.sourceRecordId);
+      if (!record) throw new Error(`source_record_not_found:${input.sourceRecordId}`);
+      url = pickGitHubUrlFromSourceRecord(record) ?? undefined;
+      subjectId = input.sourceRecordId;
+      subjectKind = 'sourceRecord';
+    }
+
+    if (!url && input.approvedEntityId) {
+      const entity = await this.repository.getApprovedEntity(input.approvedEntityId);
+      if (!entity) throw new Error(`approved_entity_not_found:${input.approvedEntityId}`);
+      const records = await this.repository.getSourceRecordsByIds(entity.sourceRecordIds);
+      for (const r of records) {
+        const candidate = pickGitHubUrlFromSourceRecord(r);
+        if (candidate) {
+          url = candidate;
+          break;
+        }
+      }
+      subjectId = input.approvedEntityId;
+      subjectKind = 'approvedEntity';
+    }
+
+    if (!url || !isLikelyGitHubUrl(url)) {
+      throw new Error('github_url_not_resolved');
+    }
+    const username = extractGitHubUsername(url);
+    if (!username) throw new Error('github_username_not_resolved');
+
+    const runId = randomUUID();
+    const now = new Date().toISOString();
+    await this.repository.upsertVendorEnrichmentRun({
+      id: runId,
+      vendor: 'github',
+      dataset: 'github-public-profile',
+      subjectKind,
+      subjectId,
+      githubUrl: url,
+      username,
+      status: 'running',
+      createdAt: now,
+    });
+
+    let lookup;
+    try {
+      lookup = await fetchGitHubProfile(username);
+    } catch (error) {
+      await this.repository.upsertVendorEnrichmentRun({
+        id: runId,
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        completedAt: new Date().toISOString(),
+      });
+      throw error;
+    }
+
+    // matchId is a UUID — URL / username live as queryable fields on the
+    // doc instead of being baked into the path. Avoids re-keying when a
+    // candidate changes their handle and removes PII from doc-ids.
+    const matchId = randomUUID();
+    await Promise.all([
+      this.repository.upsertVendorProfileMatch({
+        id: matchId,
+        runId,
+        vendor: 'github',
+        dataset: 'github-public-profile',
+        subjectKind,
+        subjectId,
+        githubUrl: url,
+        username,
+        status: lookup.status,
+        profile: lookup.profile as Record<string, unknown> | null,
+        createdAt: now,
+        updatedAt: new Date().toISOString(),
+      }),
+      this.repository.upsertVendorEnrichmentRun({
+        id: runId,
+        status: lookup.status,
+        completedAt: new Date().toISOString(),
+        rateLimitRemaining: lookup.rateLimit?.remaining,
+      }),
+    ]);
+
+    return {
+      matchId,
+      runId,
+      vendor: 'github',
+      githubUrl: url,
+      username,
+      status: lookup.status,
+      profile: (lookup.profile as Record<string, unknown> | null) ?? null,
+      subjectId,
+      subjectKind,
+      rateLimit: lookup.rateLimit,
+    };
+  }
+
+  /**
    * P3 — resolve a LinkedIn URL from the caller's input + call BrightData,
    * persist the result, return the enrichment payload.
    *
@@ -425,7 +583,10 @@ export class SourcingService {
     const firstRow: BrightDataLinkedInProfile | undefined = triggerResult.rows[0];
     const profile = firstRow?.raw ?? null;
     const status = triggerResult.status;
-    const matchId = `${subjectId}__${triggerResult.snapshotId || runId}`;
+    // matchId = UUID (NOT sanitized URL). subjectId + linkedinUrl + snapshotId
+    // are queryable fields on the doc so we can find "all matches for X" via
+    // .where().
+    const matchId = randomUUID();
 
     await Promise.all([
       this.repository.upsertVendorProfileMatch({
