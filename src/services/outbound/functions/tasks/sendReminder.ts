@@ -1,7 +1,7 @@
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { DateTime } from 'luxon';
 
-import { outboundSecrets } from '../../../../bootstrap/secrets';
+import { outboundSecrets } from '../../../../bootstrap/outboundSecrets';
 import { outboundQueueNames } from '../../../../shared/tasks/queueNames';
 import { buildBookingBaseUrl } from '../../application/http';
 import { getOutboundRuntimeConfig } from '../../application/runtime';

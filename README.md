@@ -13,6 +13,7 @@ This repo is not "the outbound repo moved into Firebase". It is the shared backe
 Current live service coverage:
 
 - `outbound`
+- `sourcing`
 - `matching` (implemented in repo, pending deploy)
 
 Related repos:
@@ -43,6 +44,7 @@ If a service does not fit those rules, it should not be added here.
 | Service | Status | Resource Prefix | Notes |
 |---|---|---|---|
 | `outbound` | live | `outbound-*` | interview booking, invite sends, reminders, Retell calls |
+| `sourcing` | prototype | `sourcing-*` | scraping source-record ingest, evidence extraction, human dedup review |
 | `matching` | implemented | `matching-*` + `platform-*` | VALET user sync, Mac Mini job sync, TypeScript matching API, Firestore job board |
 
 ## Firebase Environment Model
@@ -68,6 +70,25 @@ Copy [.firebaserc.example](/Users/adam/Desktop/WeKruit/wekruit-core-service-clou
 
 - `staging`
 - `production`
+
+For isolated service deploys, set `CORE_SERVICE_EXPORT_MODE` in the ignored
+project env file:
+
+- `CORE_SERVICE_EXPORT_MODE=sourcing` exports only `sourcing-api`
+- `CORE_SERVICE_EXPORT_MODE=outbound` exports only outbound functions
+- unset exports every service
+
+This keeps a sourcing-only deploy from requiring outbound Secret Manager values.
+Use `firebase.sourcing.json` for sourcing-only deploys; it builds a generated
+`deploy/sourcing-functions` bundle containing only `sourcing-api` dependencies,
+so outbound Secret Manager params are not registered during Firebase analysis.
+
+For the web review console, do not assume the shared default site
+`wekruit-dev-env.web.app` is dedicated to sourcing. Use a preview channel or a
+dedicated Hosting site/target for sourcing review. Current staging preview
+pattern:
+
+- `firebase hosting:channel:deploy sourcing-review --config firebase.sourcing.json --project staging`
 
 ## Directory Contract
 
@@ -240,6 +261,40 @@ The naming rule is simple:
 - `OUTBOUND_BOOKING_WORKDAY_END_HOUR`
 - `OUTBOUND_BOOKING_LEAD_HOURS`
 - `OUTBOUND_BOOKING_REMINDER_HOURS`
+
+### Current `sourcing` resources
+
+#### Functions
+
+- `sourcing-api`
+
+#### Firestore collections
+
+- `sourcing-source-runs`
+- `sourcing-source-records`
+- `sourcing-evidence`
+- `sourcing-dedup-candidates`
+- `sourcing-review-labels`
+- `sourcing-approved-entities`
+
+#### Hosting
+
+- static operator console under `web/`
+- `/api/sourcing/**` Hosting rewrite to `sourcing-api`
+
+#### API routes
+
+- `POST /api/sourcing/source-runs`
+- `POST /api/sourcing/source-records:batchUpsert`
+- `POST /api/sourcing/source-runs/:runId/complete`
+- `GET /api/sourcing/dedup-candidates?status=pending_review`
+- `GET /api/sourcing/dedup-candidates?status=pending_review&include=details`
+- `POST /api/sourcing/review-labels`
+- `GET /api/sourcing/approved-entities`
+
+#### Cloud Tasks queues
+
+- `sourcing-materialize-approved-entity`
 
 ### Current `matching` resources
 

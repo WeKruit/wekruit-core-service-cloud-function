@@ -6,6 +6,15 @@ export const outboundCollections = {
   callArtifacts: 'outbound-call-artifacts'
 } as const;
 
+export const sourcingCollections = {
+  sourceRuns: 'sourcing-source-runs',
+  sourceRecords: 'sourcing-source-records',
+  evidence: 'sourcing-evidence',
+  dedupCandidates: 'sourcing-dedup-candidates',
+  reviewLabels: 'sourcing-review-labels',
+  approvedEntities: 'sourcing-approved-entities',
+} as const;
+
 export const matchingCollections = {
   platformUsers: 'platform-users',
   jobs: 'matching-jobs',
