@@ -82,9 +82,9 @@ This section is the authoritative "where are we now?" view. Historical phase not
 
 - Current active workstream: personal website enrichment plus shared tag package migration.
 - Current branch: `codex/website-shared-tags-integration-plan`.
-- Current status: shared-tags Phase T2 is complete. `@wekruit/shared-tags@0.1.1` is a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, and enrichment review drafts/final profiles now receive deterministic additive `canonicalTags` computed from existing legacy enrichment labels. Legacy labels remain primary and unchanged. Next step is Phase T3 taxonomy API when greenlit.
+- Current status: shared-tags Phase T3 is complete. `@wekruit/shared-tags@0.1.1` is a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, enrichment review drafts/final profiles receive deterministic additive `canonicalTags` computed from existing legacy enrichment labels, and the static sourcing dashboard now loads legacy/canonical taxonomy from the backend `GET /api/sourcing/taxonomy` endpoint. Legacy labels remain primary and unchanged. Next step is Phase T4 reviewer/profile canonical preview when greenlit.
 - Website enrichment is not implemented yet.
-- Shared-tags migration has package/auth, adapter, and deterministic legacy mapping implemented, but taxonomy API and UI preview are not implemented yet.
+- Shared-tags migration has package/auth, adapter, deterministic legacy mapping, and taxonomy API implemented, but the secondary dashboard canonical preview is not implemented yet.
 - Coresignal remains a paused archive. No Coresignal implementation has started.
 
 **Website Enrichment Decisions**
@@ -153,6 +153,14 @@ This section is the authoritative "where are we now?" view. Historical phase not
     - Verification passed: `npm run build`; focused canonical mapping/adapter/service/enrichment tests (`30/30`); all sourcing tests (`52/52`); `NODE_AUTH_TOKEN` deploy-bundle build; deploy-shaped `npm ci --omit=dev --ignore-scripts`; deploy-shaped runtime smoke for `mapEnrichmentDraftToCanonicalTags` returning `roleFunctions: ["software_engineering"]` and `schemaVersion: "shared-tags-v1"`; `git diff --check`.
     - No token was printed or committed. The generated `deploy/sourcing-functions/.npmrc` was removed after deploy-shaped verification and root/deploy `.npmrc` token checks passed.
     - T2 conclusion: deterministic canonical mapping is implemented and verified locally. Proceed to T3 taxonomy API when greenlit.
+  - 2026-05-16 T3 taxonomy API completion:
+    - Added `src/services/sourcing/domain/taxonomy.ts` as the backend-owned sourcing taxonomy module. It returns `schemaVersion: "sourcing-taxonomy-v1"`, legacy sourcing options, and shared canonical options sourced through the shared-tags adapter.
+    - Added `GET /api/sourcing/taxonomy`; the response shape is `{ data: { schemaVersion, legacy, canonical } }`, with `legacy.{tracks,specializations,industryDomains,careerStages,contactability}` and `canonical.{roleFunctions,industrySectors,careerStages,relevantTags,skillBuckets,skillProficiencies}`.
+    - Updated the static dashboard `web/app.js` to fetch `/taxonomy` during startup, validate the backend taxonomy payload, and use the backend legacy option arrays for current dropdowns/filters instead of hardcoded browser arrays.
+    - The dashboard intentionally does not import `@wekruit/shared-tags` in the browser and does not duplicate canonical arrays. If taxonomy loading or validation fails, the dashboard enters a visible refresh-failed state instead of silently using a divergent fallback.
+    - Verification passed: `npm run build`; focused API test `node --test lib/services/sourcing/functions/http/api.test.js` (`5/5`); all sourcing tests `node --test lib/services/sourcing/**/*.test.js` (`53/53`); `node --check web/app.js`; `git diff --check`; hosted emulator/browser verification at `http://127.0.0.1:5100/#profiles` showing `Ready`; hosted rewrite `curl` to `/api/sourcing/taxonomy` returning `sourcing-taxonomy-v1`, `legacyTracks: 10`, `canonicalRoleFunctions: 17`, `relevantTagsMax: 12`, and `skillBuckets: 10`.
+    - Deploy-bundle/emulator verification used `NODE_AUTH_TOKEN` only as package-manager auth; after verification, the emulator was stopped and the generated `deploy/sourcing-functions/.npmrc` was removed so no deploy token file remains in the repo directory.
+    - T3 conclusion: backend taxonomy delivery is implemented and verified. Proceed to T4 to add the secondary canonical preview UI when greenlit.
   - 2026-05-16 core-service preflight:
     - Current core-service branch and scraping mirror branch were clean and plan docs were byte-identical before checks.
     - Core-service `tsconfig.json` uses `"module": "commonjs"` and `"moduleResolution": "node"`; root `package.json` has no `"type": "module"`, so emitted runtime is CommonJS.
@@ -3755,10 +3763,11 @@ Shared-tags implementation plan:
    - Skills are intentionally conservative: obvious bucketable skills map into `canonicalTags.skills`; uncertain names/abbreviations stay in `unmappedLegacyLabels.skills`.
 
 4. Phase T3 - Taxonomy API for the static dashboard.
-   - Add `GET /api/sourcing/taxonomy` or equivalent to return legacy sourcing taxonomy plus shared canonical taxonomy/options from the backend.
-   - The static `web/app.js` should fetch the taxonomy from the backend rather than importing npm package code or duplicating canonical arrays.
+   - Completed on 2026-05-16.
+   - Added `GET /api/sourcing/taxonomy` to return legacy sourcing taxonomy plus shared canonical taxonomy/options from the backend.
+   - The static `web/app.js` now fetches the taxonomy from the backend rather than importing npm package code or duplicating canonical arrays.
    - Do not add a dashboard JS build step solely for shared tags in v1.
-   - UI should fail visibly if backend taxonomy is unavailable; do not add a second divergent canonical source in the browser.
+   - UI fails visibly if backend taxonomy is unavailable or malformed; no second divergent canonical source exists in the browser.
 
 5. Phase T4 - Reviewer/profile UI migration.
    - Keep legacy labels as primary reviewer-facing labels during additive migration.

@@ -15,6 +15,7 @@ import {
   candidateIndustryDomainSchema,
   candidateTrackSchema,
 } from '../../domain/records';
+import { getSourcingTaxonomy } from '../../domain/taxonomy';
 import {
   PendingMergeReviewBlockError,
   SourcingService,
@@ -88,6 +89,10 @@ export function createSourcingApiApp(
 
 app.get('/health', sendHealth);
 app.get('/api/sourcing/health', sendHealth);
+
+app.get('/api/sourcing/taxonomy', (_req, res) => {
+  res.status(200).json({ data: getSourcingTaxonomy() });
+});
 
 app.get('/api/sourcing/source-runs', async (req, res, next) => {
   try {

@@ -54,64 +54,9 @@ const REVIEW_STATUS_OPTIONS = [
   ["suppressed", "Suppressed"],
 ];
 
-const TRACK_VALUES = [
-  "software_engineering",
-  "ai_research",
-  "data_science",
-  "product_design",
-  "product_management",
-  "marketing_growth",
-  "business_founder",
-  "hardware_mechanical",
-  "academic_research",
-  "unknown_other",
-];
-
-const SPECIALIZATION_VALUES = [
-  "frontend_engineering",
-  "backend_engineering",
-  "full_stack_engineering",
-  "mobile_engineering",
-  "machine_learning",
-  "natural_language_processing",
-  "computer_vision",
-  "data_engineering",
-  "data_analysis",
-  "academic_publishing",
-  "developer_experience",
-  "product_strategy",
-  "growth_marketing",
-  "mechanical_design",
-  "embedded_systems",
-  "robotics",
-  "ux_ui_design",
-  "unknown_other",
-];
-
-const INDUSTRY_DOMAIN_VALUES = [
-  "artificial_intelligence",
-  "ai_infrastructure",
-  "developer_tools",
-  "healthcare_ai",
-  "robotics",
-  "education_technology",
-  "climate_energy",
-  "finance_fintech",
-  "biotech_life_sciences",
-  "enterprise_saas",
-  "cybersecurity",
-  "gaming_media",
-  "accessibility_assistive_technology",
-  "research_tools",
-  "open_source",
-  "unknown_other",
-];
-
-const CAREER_STAGE_VALUES = ["student", "early_career", "mid_career", "senior", "founder", "academic_researcher", "unknown"];
-const CONTACTABILITY_VALUES = ["high", "medium", "low", "unknown"];
-
 const state = {
   page: normalizePage(window.location.hash.replace(/^#/, "") || "review"),
+  taxonomy: null,
   runs: [],
   candidates: [],
   approved: [],
@@ -278,6 +223,70 @@ function normalizeListPayload(payload) {
     return payload;
   }
   return payload ? [payload] : [];
+}
+
+function requireTaxonomyValues(taxonomy, group, key) {
+  const values = arrayValue(taxonomy?.[group]?.[key]).map((value) => stringValue(value)).filter(Boolean);
+  if (!values.length) {
+    throw new Error(`Taxonomy is missing ${group}.${key}.`);
+  }
+  return values;
+}
+
+function normalizeTaxonomyPayload(payload) {
+  const taxonomy = payload?.data || payload;
+  const legacy = {
+    tracks: requireTaxonomyValues(taxonomy, "legacy", "tracks"),
+    specializations: requireTaxonomyValues(taxonomy, "legacy", "specializations"),
+    industryDomains: requireTaxonomyValues(taxonomy, "legacy", "industryDomains"),
+    careerStages: requireTaxonomyValues(taxonomy, "legacy", "careerStages"),
+    contactability: requireTaxonomyValues(taxonomy, "legacy", "contactability"),
+  };
+  const canonical = {
+    roleFunctions: requireTaxonomyValues(taxonomy, "canonical", "roleFunctions"),
+    industrySectors: requireTaxonomyValues(taxonomy, "canonical", "industrySectors"),
+    careerStages: requireTaxonomyValues(taxonomy, "canonical", "careerStages"),
+    skillBuckets: requireTaxonomyValues(taxonomy, "canonical", "skillBuckets"),
+    skillProficiencies: requireTaxonomyValues(taxonomy, "canonical", "skillProficiencies"),
+    relevantTags: {
+      max: numberValue(taxonomy?.canonical?.relevantTags?.max),
+      pattern: stringValue(taxonomy?.canonical?.relevantTags?.pattern),
+    },
+  };
+
+  if (!canonical.relevantTags.max || !canonical.relevantTags.pattern) {
+    throw new Error("Taxonomy is missing canonical.relevantTags rules.");
+  }
+
+  return {
+    schemaVersion: stringValue(taxonomy?.schemaVersion) || "sourcing-taxonomy-v1",
+    legacy,
+    canonical,
+  };
+}
+
+function legacyTaxonomyValues(key) {
+  return arrayValue(state.taxonomy?.legacy?.[key]).map((value) => stringValue(value)).filter(Boolean);
+}
+
+function trackValues() {
+  return legacyTaxonomyValues("tracks");
+}
+
+function specializationValues() {
+  return legacyTaxonomyValues("specializations");
+}
+
+function industryDomainValues() {
+  return legacyTaxonomyValues("industryDomains");
+}
+
+function careerStageValues() {
+  return legacyTaxonomyValues("careerStages");
+}
+
+function contactabilityValues() {
+  return legacyTaxonomyValues("contactability");
 }
 
 function humanizeToken(value) {
@@ -2393,30 +2402,30 @@ function renderEnrichmentDetail() {
       <div class="edit-grid">
         <label class="field" for="enrichmentPrimaryTrack">
           <span>Primary track</span>
-          <select id="enrichmentPrimaryTrack" data-enrichment-primary-track>${renderOptions(TRACK_VALUES, [draft.primaryTrack || "unknown_other"])}</select>
+          <select id="enrichmentPrimaryTrack" data-enrichment-primary-track>${renderOptions(trackValues(), [draft.primaryTrack || "unknown_other"])}</select>
         </label>
         <label class="field" for="enrichmentCareerStage">
           <span>Career stage</span>
-          <select id="enrichmentCareerStage" data-enrichment-career-stage>${renderOptions(CAREER_STAGE_VALUES, [draft.careerStage?.value || "unknown"])}</select>
+          <select id="enrichmentCareerStage" data-enrichment-career-stage>${renderOptions(careerStageValues(), [draft.careerStage?.value || "unknown"])}</select>
         </label>
         <label class="field" for="enrichmentContactability">
           <span>Contactability</span>
-          <select id="enrichmentContactability" data-enrichment-contactability>${renderOptions(CONTACTABILITY_VALUES, [draft.contactability?.value || "unknown"])}</select>
+          <select id="enrichmentContactability" data-enrichment-contactability>${renderOptions(contactabilityValues(), [draft.contactability?.value || "unknown"])}</select>
         </label>
       </div>
 
       <div class="edit-grid edit-grid--stacked">
         <label class="field" for="enrichmentTracks">
           <span>Tracks</span>
-          ${renderMultiSelect("enrichmentTracks", TRACK_VALUES, selectedTracks)}
+          ${renderMultiSelect("enrichmentTracks", trackValues(), selectedTracks)}
         </label>
         <label class="field" for="enrichmentSpecializations">
           <span>Specializations</span>
-          ${renderMultiSelect("enrichmentSpecializations", SPECIALIZATION_VALUES, selectedSpecializations)}
+          ${renderMultiSelect("enrichmentSpecializations", specializationValues(), selectedSpecializations)}
         </label>
         <label class="field" for="enrichmentDomains">
           <span>Industry/domain interests</span>
-          ${renderMultiSelect("enrichmentDomains", INDUSTRY_DOMAIN_VALUES, selectedDomains)}
+          ${renderMultiSelect("enrichmentDomains", industryDomainValues(), selectedDomains)}
         </label>
         <label class="field" for="enrichmentSkills">
           <span>Skills</span>
@@ -2483,13 +2492,13 @@ function renderProfileFilters() {
 
   elements.profileTrackFilter.innerHTML = [
     `<option value="">All tracks</option>`,
-    ...TRACK_VALUES.map((track) => `<option value="${escapeHtml(track)}">${escapeHtml(displayLabel(track))}</option>`),
+    ...trackValues().map((track) => `<option value="${escapeHtml(track)}">${escapeHtml(displayLabel(track))}</option>`),
   ].join("");
   elements.profileTrackFilter.value = state.profileTrackFilter;
 
   elements.profileDomainFilter.innerHTML = [
     `<option value="">All domains</option>`,
-    ...INDUSTRY_DOMAIN_VALUES.map((domain) => `<option value="${escapeHtml(domain)}">${escapeHtml(displayLabel(domain))}</option>`),
+    ...industryDomainValues().map((domain) => `<option value="${escapeHtml(domain)}">${escapeHtml(displayLabel(domain))}</option>`),
   ].join("");
   elements.profileDomainFilter.value = state.profileDomainFilter;
 
@@ -2501,7 +2510,7 @@ function renderProfileFilters() {
 
   elements.profileContactabilityFilter.innerHTML = [
     `<option value="">Any contactability</option>`,
-    ...CONTACTABILITY_VALUES.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(displayLabel(value))}</option>`),
+    ...contactabilityValues().map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(displayLabel(value))}</option>`),
   ].join("");
   elements.profileContactabilityFilter.value = state.profileContactabilityFilter;
 }
@@ -2767,6 +2776,8 @@ async function loadData() {
 
   try {
     await requestJson("/health");
+    const taxonomyPayload = await requestJson("/taxonomy");
+    state.taxonomy = normalizeTaxonomyPayload(taxonomyPayload);
     const [runsPayload, candidatesPayload, approvedPayload, enrichmentPayload, profilesPayload] = await Promise.all([
       requestJson("/source-runs?limit=50"),
       requestJson("/dedup-candidates?include=details"),
@@ -2799,6 +2810,13 @@ async function loadData() {
     setConnectionStatus("Refresh failed", "error");
     elements.reviewResult.textContent = error.message;
     elements.reviewResult.dataset.status = "error";
+    state.approvedMessage = error.message;
+    state.approvedMessageStatus = "error";
+    state.enrichmentMessage = error.message;
+    state.enrichmentMessageStatus = "error";
+    state.profileMessage = error.message;
+    state.profileMessageStatus = "error";
+    render();
   }
 }
 

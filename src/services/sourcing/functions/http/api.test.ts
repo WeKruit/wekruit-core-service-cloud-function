@@ -32,6 +32,40 @@ async function withTestServer(
   }
 }
 
+test('taxonomy route returns legacy and canonical sourcing options', async () => {
+  await withTestServer(
+    {},
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/sourcing/taxonomy`);
+      const body = await response.json() as {
+        data?: {
+          schemaVersion?: string;
+          legacy?: {
+            tracks?: string[];
+            industryDomains?: string[];
+          };
+          canonical?: {
+            roleFunctions?: string[];
+            industrySectors?: string[];
+            relevantTags?: { max?: number; pattern?: string };
+            skillBuckets?: string[];
+          };
+        };
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.data?.schemaVersion, 'sourcing-taxonomy-v1');
+      assert.ok(body.data?.legacy?.tracks?.includes('software_engineering'));
+      assert.ok(body.data?.legacy?.industryDomains?.includes('healthcare_ai'));
+      assert.ok(body.data?.canonical?.roleFunctions?.includes('software_engineering'));
+      assert.ok(body.data?.canonical?.industrySectors?.includes('artificial_intelligence_and_machine_learning'));
+      assert.equal(body.data?.canonical?.relevantTags?.max, 12);
+      assert.equal(body.data?.canonical?.relevantTags?.pattern, '^[a-z][a-z0-9_]{1,79}$');
+      assert.ok(body.data?.canonical?.skillBuckets?.includes('programming_languages'));
+    },
+  );
+});
+
 test('vendor profile match list route returns normalized lookup state', async () => {
   await withTestServer(
     {
