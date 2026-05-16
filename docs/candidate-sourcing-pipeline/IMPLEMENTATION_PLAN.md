@@ -82,7 +82,7 @@ This section is the authoritative "where are we now?" view. Historical phase not
 
 - Current active workstream: personal website enrichment plus shared tag package migration.
 - Current branch: `codex/website-shared-tags-integration-plan`.
-- Current status: planning is complete enough to implement later; `@wekruit/shared-tags@0.1.0` is published to GitHub Packages with restricted access and verified installable, but 2026-05-16 core-service preflight found a module-format blocker before integration: the package is ESM/import-only while core-service compiles to CommonJS. Core-service integration has not started yet.
+- Current status: planning is complete enough to implement later; `@wekruit/shared-tags@0.1.0` is published to GitHub Packages with restricted access and verified installable, but 2026-05-16 core-service preflight found a module-format blocker before integration: the package is ESM/import-only while core-service compiles to CommonJS. PA PR `https://github.com/WeKruit/wekruit-pa/pull/89` is open to publish a future `0.1.1` patch with CommonJS-compatible exports. Core-service integration has not started yet.
 - Website enrichment is not implemented yet.
 - Shared-tags migration is not implemented yet.
 - Coresignal remains a paused archive. No Coresignal implementation has started.
@@ -132,6 +132,12 @@ This section is the authoritative "where are we now?" view. Historical phase not
     - Baseline core-service checks: `npm run build` passed; `npm run build:sourcing-bundle` passed and produced no tracked diffs; targeted sourcing tests passed `45/45`.
     - Full `npm test` currently fails `2/75` in existing matching-service tests, unrelated to sourcing/shared-tags: expected recency contribution remains `0.966667`, actual recency is `0`, causing expected scores `0.946667` vs actual `0.85` and `0.876667` vs actual `0.78`.
     - Local runtime warning: current shell is Node `v22.22.1` / npm `10.9.4`, while core-service `package.json` declares engine `node: 20`; use Node 20 for final deploy-shaped verification if possible.
+  - 2026-05-16 PA package patch branch/PR:
+    - Created PA branch `codex/shared-tags-cjs-0.1.1` from clean synced PA `main`; do not merge this branch directly.
+    - Opened review PR `https://github.com/WeKruit/wekruit-pa/pull/89` into PA `main`.
+    - PR changes bump `@wekruit/shared-tags` to `0.1.1`, keep the existing ESM/browser exports, add a generated `dist-cjs` CommonJS build, add `exports.require` entries for `.` and `./canonical`, add `typesVersions` for core-service-style TypeScript `moduleResolution: node`, and update internal PA workspace references to `0.1.1`.
+    - PR verification passed: `npm run typecheck --workspace=@wekruit/shared-tags`; `npm run build --workspace=@wekruit/shared-tags`; `npm run test --workspace=@wekruit/shared-tags` (`101/101`); `npm pack --workspace=@wekruit/shared-tags --dry-run --json`; tarball ESM import smoke; tarball CommonJS `require` smoke; tarball core-service-like TypeScript consumer with `module: commonjs` / `moduleResolution: node`; `npm run build --workspace=@pa/core-types`; `npm run build --workspace=@pa/job-tag-enricher`; `npm run build --workspace=@pa/dashboard-web` (existing Vite warnings only); and `npm publish --workspace=@wekruit/shared-tags --dry-run --registry=https://npm.pkg.github.com` for `0.1.1` with restricted access.
+    - Next step after Spencer manually merges PR #89: publish `@wekruit/shared-tags@0.1.1` from PA `main`, then rerun core-service preflight against the published `0.1.1` package before starting T1 integration.
 
 ## Current Remaining Work Triage
 
@@ -3664,7 +3670,7 @@ Shared-tags implementation plan:
    - Registry verification passed with `npm view @wekruit/shared-tags name version dist.tarball --registry=https://npm.pkg.github.com`; version is `0.1.0`.
    - Clean temp consumer verification passed with `npm install @wekruit/shared-tags@0.1.0` and imports from both `@wekruit/shared-tags/canonical` and the main `@wekruit/shared-tags` barrel.
    - Publishing to GitHub Packages used restricted access and should keep the package private/internal to WeKruit; still verify package/repo access in GitHub UI before relying on unattended deploys.
-   - 2026-05-16 core-service import/runtime preflight found a blocker: `@wekruit/shared-tags@0.1.0` is ESM/import-only while core-service compiles to CommonJS. Do not start T1 against `0.1.0`; publish a compatible package patch or explicitly choose a core-service module-system migration first.
+   - 2026-05-16 core-service import/runtime preflight found a blocker: `@wekruit/shared-tags@0.1.0` is ESM/import-only while core-service compiles to CommonJS. Do not start T1 against `0.1.0`; PA PR `https://github.com/WeKruit/wekruit-pa/pull/89` is open with a `0.1.1` compatible package patch. Wait for Spencer to merge it, then publish `0.1.1` from PA `main`.
    - Core-service local install needs a safe npm auth path. Current local user-level npm auth is verified for GitHub Packages as `Spec700` after PAT setup, but no token may be committed and app runtime `.env` must not be treated as npm auth.
    - Important deploy risk: the current Firebase sourcing bundle copies `package.json` and `package-lock.json` into `deploy/sourcing-functions`, ignores `node_modules`, and has no deploy-source `.npmrc`. A private GitHub package dependency will not deploy unless build/install auth is solved in the deploy-bundle shape.
    - Candidate deploy-auth solutions, to be tested rather than guessed:
