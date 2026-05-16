@@ -82,9 +82,9 @@ This section is the authoritative "where are we now?" view. Historical phase not
 
 - Current active workstream: personal website enrichment plus shared tag package migration.
 - Current branch: `codex/website-shared-tags-integration-plan`.
-- Current status: shared-tags Phase T1 is complete. `@wekruit/shared-tags@0.1.1` is now a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, and enrichment review drafts/final profiles now receive an additive empty `canonicalTags` envelope without replacing any legacy labels. No deterministic legacy-to-canonical mapping has been implemented yet; next step is Phase T2 when greenlit.
+- Current status: shared-tags Phase T2 is complete. `@wekruit/shared-tags@0.1.1` is a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, and enrichment review drafts/final profiles now receive deterministic additive `canonicalTags` computed from existing legacy enrichment labels. Legacy labels remain primary and unchanged. Next step is Phase T3 taxonomy API when greenlit.
 - Website enrichment is not implemented yet.
-- Shared-tags migration has its package/adapter foundation implemented, but deterministic mapping, taxonomy API, and UI preview are not implemented yet.
+- Shared-tags migration has package/auth, adapter, and deterministic legacy mapping implemented, but taxonomy API and UI preview are not implemented yet.
 - Coresignal remains a paused archive. No Coresignal implementation has started.
 
 **Website Enrichment Decisions**
@@ -142,6 +142,17 @@ This section is the authoritative "where are we now?" view. Historical phase not
     - Verification passed: `npm run build`; focused canonical/service/enrichment tests (`26/26`); all sourcing tests (`48/48`); `NODE_AUTH_TOKEN` deploy-bundle build; deploy-shaped `npm ci --omit=dev --ignore-scripts`; deploy-shaped CommonJS `require("@wekruit/shared-tags/canonical")` with `roleCount: 17` and `relevantTagsMax: 12`; `git diff --check`.
     - No token was printed or committed. The generated `deploy/sourcing-functions/.npmrc` was removed after deploy-shaped verification so no token remains in the ignored deploy directory.
     - T1 conclusion: the shared-tags package is safely installed and available behind a core-service adapter. Proceed to T2 to implement deterministic legacy-label mapping into `canonicalTags`.
+  - 2026-05-16 T2 deterministic mapping completion:
+    - Added `src/services/sourcing/domain/canonicalTagMapping.ts` with deterministic mapping from existing sourcing enrichment labels into the shared `canonicalTags` envelope.
+    - Mapping sources are existing validated legacy fields only: `scoredTracks`, `specializations`, `industryDomainInterests`, `careerStage`, and conservatively bucketed `skills`. `contactability` remains outside `canonicalTags`.
+    - Mapping preserves confidence, evidence IDs, and lineage using `mappedFrom` plus `mappingSource: "legacy_enrichment_mapping"`. Duplicate canonical outputs merge evidence IDs/mapped-from lineage and keep the highest contributing confidence.
+    - Conservative policy implemented: `unknown_other` / `unknown` produce no canonical value and are recorded in `unmappedLegacyLabels`; `business_founder` maps to `relevantTags: ["startup_founder"]` and uses `careerStage: "founder"` only as a fallback when no direct canonical career stage exists; it does not force `roleFunctions: ["management_and_executive"]` without a separate stronger role signal.
+    - Skills are mapped only when a deterministic shared skill bucket is obvious, e.g. `typescript -> programming_languages`; abbreviations or uncertain skills such as `ts` are recorded in `unmappedLegacyLabels.skills`.
+    - `validateCandidateEnrichmentDraft` now recomputes `canonicalTags` from the sanitized draft, so both generated enrichment review items and reviewer-edited approved drafts feed canonical tags into final profiles.
+    - Tests cover the planned tricky fixtures: `ai_research`, `academic_research`, `business_founder`, `healthcare_ai`, `ai_infrastructure`, `open_source`, `early_career`, `academic_researcher`, and `unknown_other`.
+    - Verification passed: `npm run build`; focused canonical mapping/adapter/service/enrichment tests (`30/30`); all sourcing tests (`52/52`); `NODE_AUTH_TOKEN` deploy-bundle build; deploy-shaped `npm ci --omit=dev --ignore-scripts`; deploy-shaped runtime smoke for `mapEnrichmentDraftToCanonicalTags` returning `roleFunctions: ["software_engineering"]` and `schemaVersion: "shared-tags-v1"`; `git diff --check`.
+    - No token was printed or committed. The generated `deploy/sourcing-functions/.npmrc` was removed after deploy-shaped verification and root/deploy `.npmrc` token checks passed.
+    - T2 conclusion: deterministic canonical mapping is implemented and verified locally. Proceed to T3 taxonomy API when greenlit.
   - 2026-05-16 core-service preflight:
     - Current core-service branch and scraping mirror branch were clean and plan docs were byte-identical before checks.
     - Core-service `tsconfig.json` uses `"module": "commonjs"` and `"moduleResolution": "node"`; root `package.json` has no `"type": "module"`, so emitted runtime is CommonJS.
@@ -3735,11 +3746,13 @@ Shared-tags implementation plan:
    - T1 intentionally does not populate mapped canonical values yet. The current generated field is an empty valid `shared-tags-v1` envelope; T2 owns deterministic mapping and diagnostics.
 
 3. Phase T2 - Deterministic legacy mapping and validation.
-   - Compute `canonicalTags` deterministically from the already-approved enrichment draft at first. Do not ask OpenAI to output canonical tags directly until the bridge is proven.
-   - Preserve evidence IDs/confidence from legacy fields.
-   - Keep `contactability` outside `canonicalTags`; it remains sourcing-specific operational metadata.
-   - The current proposed mapping table was read-only validated against package source arrays/no-abbreviation rules with zero failures, but implementation must add tests that import the real package and assert every mapping stays valid.
-   - Add fixture tests for tricky values: `ai_research`, `academic_research`, `business_founder`, `healthcare_ai`, `ai_infrastructure`, `open_source`, `early_career`, `academic_researcher`, and `unknown_other`.
+   - Completed on 2026-05-16.
+   - Computes `canonicalTags` deterministically from the already-approved/validated enrichment draft. OpenAI is not asked to output canonical tags directly yet.
+   - Preserves evidence IDs/confidence from legacy fields and records lineage through `mappedFrom` / `mappingSource`.
+   - Keeps `contactability` outside `canonicalTags`; it remains sourcing-specific operational metadata.
+   - The implemented mapping table is validated by tests that import the real shared package-backed schema and assert every configured mapping stays valid.
+   - Fixture tests cover tricky values: `ai_research`, `academic_research`, `business_founder`, `healthcare_ai`, `ai_infrastructure`, `open_source`, `early_career`, `academic_researcher`, and `unknown_other`.
+   - Skills are intentionally conservative: obvious bucketable skills map into `canonicalTags.skills`; uncertain names/abbreviations stay in `unmappedLegacyLabels.skills`.
 
 4. Phase T3 - Taxonomy API for the static dashboard.
    - Add `GET /api/sourcing/taxonomy` or equivalent to return legacy sourcing taxonomy plus shared canonical taxonomy/options from the backend.

@@ -1281,13 +1281,34 @@ test('generateEnrichmentForApprovedEntity creates review item and approval mater
   assert.equal(generated.reviewItem.status, 'pending_review');
   assert.equal(generated.reviewItem.draft.primaryTrack, 'software_engineering');
   assert.equal(generated.reviewItem.draft.canonicalTags?.schemaVersion, CANONICAL_TAGS_SCHEMA_VERSION);
-  assert.deepEqual(generated.reviewItem.draft.canonicalTags?.roleFunctions, []);
+  assert.deepEqual(
+    generated.reviewItem.draft.canonicalTags?.roleFunctions.map((entry) => entry.value),
+    ['software_engineering'],
+  );
+  assert.deepEqual(
+    generated.reviewItem.draft.canonicalTags?.relevantTags.map((entry) => entry.value),
+    ['developer_experience', 'developer_tools'],
+  );
+  assert.deepEqual(
+    generated.reviewItem.draft.canonicalTags?.skills.map((entry) => `${entry.name}:${entry.bucket}`),
+    ['typescript:programming_languages'],
+  );
   assert.equal(approvedEntitiesById.get(approvedEntity.id)?.enrichmentStatus, 'in_review');
 
   const approved = await service.submitEnrichmentReviewDecision(generated.reviewItem.id, {
     action: 'approve',
     reviewerId: 'phase5-test',
     notes: 'Looks correct.',
+    reviewedDraft: {
+      ...generated.reviewItem.draft,
+      industryDomainInterests: [
+        {
+          domain: 'open_source',
+          confidence: 0.8,
+          evidenceIds: ['evidence_github_alex'],
+        },
+      ],
+    },
   });
 
   assert.equal(approved.reviewItem.status, 'approved');
@@ -1295,7 +1316,14 @@ test('generateEnrichmentForApprovedEntity creates review item and approval mater
   assert.equal(approved.candidateProfile.primaryTrack, 'software_engineering');
   assert.equal(approved.candidateProfile.profileVersion, 1);
   assert.equal(approved.candidateProfile.canonicalTags?.schemaVersion, CANONICAL_TAGS_SCHEMA_VERSION);
-  assert.deepEqual(approved.candidateProfile.canonicalTags?.roleFunctions, []);
+  assert.deepEqual(
+    approved.candidateProfile.canonicalTags?.roleFunctions.map((entry) => entry.value),
+    ['software_engineering'],
+  );
+  assert.deepEqual(
+    approved.candidateProfile.canonicalTags?.relevantTags.map((entry) => entry.value),
+    ['developer_experience', 'open_source'],
+  );
   assert.equal(approvedEntitiesById.get(approvedEntity.id)?.enrichmentStatus, 'enriched');
   assert.equal(approvedEntitiesById.get(approvedEntity.id)?.needsEnrichment, false);
 });

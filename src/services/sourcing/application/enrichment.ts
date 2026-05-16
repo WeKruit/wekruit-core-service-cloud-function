@@ -1,5 +1,5 @@
 import { stableHash } from './extraction';
-import { createEmptyCanonicalTags } from '../domain/canonicalTags';
+import { mapEnrichmentDraftToCanonicalTags } from '../domain/canonicalTagMapping';
 import {
   candidateEnrichmentDraftSchema,
   type ApprovedEntity,
@@ -472,7 +472,6 @@ export function validateCandidateEnrichmentDraft(input: unknown, approvedEvidenc
       warnings.push(`Dropped proposed tag "${tag.tag}" because it did not include approved evidence.`);
       return false;
     }),
-    canonicalTags: parsedDraft.canonicalTags ?? createEmptyCanonicalTags(),
   };
 
   if (parsedDraft.careerStage.value !== 'unknown' && draft.careerStage.value === 'unknown') {
@@ -527,8 +526,13 @@ export function validateCandidateEnrichmentDraft(input: unknown, approvedEvidenc
     );
   }
 
+  const draftWithCanonicalTags: CandidateEnrichmentDraft = {
+    ...draft,
+    canonicalTags: mapEnrichmentDraftToCanonicalTags(draft),
+  };
+
   return {
-    draft: deriveDraftFieldEvidence(draft),
+    draft: deriveDraftFieldEvidence(draftWithCanonicalTags),
     warnings: sortedUnique([...draft.warnings, ...warnings]),
   };
 }
