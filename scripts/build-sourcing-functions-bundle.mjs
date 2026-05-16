@@ -22,6 +22,7 @@ const pkg = {
 
 writeFileSync(join(out, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
 copy('package-lock.json', 'package-lock.json');
+writeDeployNpmrc(pkg);
 copy('lib/bootstrap/firebase.js', 'lib/bootstrap/firebase.js');
 copy('lib/bootstrap/secrets.js', 'lib/bootstrap/secrets.js');
 copy('lib/shared', 'lib/shared');
@@ -47,4 +48,20 @@ module.exports = {
 async function BunlessReadJson(path) {
   const { readFile } = await import('node:fs/promises');
   return readFile(path, 'utf8');
+}
+
+function writeDeployNpmrc(pkg) {
+  const lines = ['@wekruit:registry=https://npm.pkg.github.com'];
+  const token = process.env.NODE_AUTH_TOKEN?.trim();
+  const usesPrivateWekruitPackage = Boolean(pkg.dependencies?.['@wekruit/shared-tags']);
+
+  if (token) {
+    lines.push(`//npm.pkg.github.com/:_authToken=${token}`);
+  } else if (usesPrivateWekruitPackage) {
+    throw new Error(
+      'NODE_AUTH_TOKEN is required to build the sourcing functions deploy bundle with private @wekruit packages.',
+    );
+  }
+
+  writeFileSync(join(out, '.npmrc'), `${lines.join('\n')}\n`);
 }

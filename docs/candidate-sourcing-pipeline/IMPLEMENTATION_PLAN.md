@@ -82,7 +82,7 @@ This section is the authoritative "where are we now?" view. Historical phase not
 
 - Current active workstream: personal website enrichment plus shared tag package migration.
 - Current branch: `codex/website-shared-tags-integration-plan`.
-- Current status: planning is complete enough to implement later; `@wekruit/shared-tags@0.1.1` is published to GitHub Packages with restricted access and verified installable from a clean temp consumer with scoped `@wekruit` registry mapping. The `0.1.1` patch adds CommonJS-compatible exports for core-service while preserving the existing ESM/browser exports. Core-service integration has not started yet; next step is a deploy-shaped package install/auth preflight against published `0.1.1` before T1 implementation.
+- Current status: shared-tags Phase T0 package/auth preflight is complete. `@wekruit/shared-tags@0.1.1` is published to GitHub Packages with restricted access, verified installable from a clean temp consumer, and verified in the core-service root/deploy-bundle install shapes with scoped `@wekruit` registry mapping. The `0.1.1` patch adds CommonJS-compatible exports for core-service while preserving the existing ESM/browser exports. No shared-tags business logic or production dependency has been added yet; next step is Phase T1 when greenlit.
 - Website enrichment is not implemented yet.
 - Shared-tags migration is not implemented yet.
 - Coresignal remains a paused archive. No Coresignal implementation has started.
@@ -123,6 +123,16 @@ This section is the authoritative "where are we now?" view. Historical phase not
   - Proposed deterministic mappings were read-only checked against shared package source arrays/no-abbreviation rules and produced `failures: []`.
   - Core-service uses npm lockfile v3 and its sourcing deploy bundle writes `deploy/sourcing-functions/package.json`, copies `package-lock.json`, ignores `node_modules`, and currently has no `.npmrc`/scope mapping in either root or deploy bundle. Private package registry mapping and token injection must be verified in the same shape Firebase deploy uses before depending on the package in deployed functions.
   - Local user-level GitHub Packages npm auth is verified for `Spec700`; do not commit token material and do not move it into app runtime `.env`.
+  - 2026-05-16 T0 package/auth preflight completion:
+    - Added a committed root `.npmrc` with only `@wekruit:registry=https://npm.pkg.github.com`; no token is committed.
+    - Updated `scripts/build-sourcing-functions-bundle.mjs` so the generated `deploy/sourcing-functions/.npmrc` always has the scoped `@wekruit` registry mapping and only receives a GitHub Packages auth token from `NODE_AUTH_TOKEN` when the bundle actually depends on `@wekruit/shared-tags`.
+    - Verified `npm run build:sourcing-bundle` without `NODE_AUTH_TOKEN` still passes before the package dependency is added and regenerates a token-free deploy `.npmrc`.
+    - Verified the deploy-shaped private package path with a protected local package token exposed only as `NODE_AUTH_TOKEN`: bundle generation produced the expected deploy `.npmrc`, `npm install @wekruit/shared-tags@0.1.1 --package-lock-only --ignore-scripts` passed inside `deploy/sourcing-functions`, `npm ci --omit=dev --ignore-scripts` passed, and `require("@wekruit/shared-tags/canonical")` returned `roleCount: 17`.
+    - Regenerated the deploy bundle again without `NODE_AUTH_TOKEN` after the test and confirmed `deploy/sourcing-functions/.npmrc` contains no `_authToken` line.
+    - Verified root install access without mutating package files via `npm install --dry-run --ignore-scripts @wekruit/shared-tags@0.1.1`.
+    - Verified baseline code health after the T0 auth/bundle change: `npm run build`; `npm run build:sourcing-bundle`; `git diff --check`; and `node --test lib/services/sourcing/**/*.test.js` passed `45/45`.
+    - Known non-blocking local warning: this shell uses Node `v22.22.1` / npm `10.9.4`, while core-service declares engine `node: 20`. Final deploy verification should still use the project's Node 20 runtime.
+    - T0 conclusion: package/runtime compatibility and core-service deploy-shaped package install/auth are proven enough to proceed to Phase T1 when greenlit. Actual deploys after T1 adds the production dependency must provide a read-only `read:packages` token via `NODE_AUTH_TOKEN` or equivalent package-manager auth at bundle/deploy time.
   - 2026-05-16 core-service preflight:
     - Current core-service branch and scraping mirror branch were clean and plan docs were byte-identical before checks.
     - Core-service `tsconfig.json` uses `"module": "commonjs"` and `"moduleResolution": "node"`; root `package.json` has no `"type": "module"`, so emitted runtime is CommonJS.
@@ -3680,6 +3690,12 @@ Shared-tags implementation plan:
    - Core-service local install needs a safe npm auth path. Current local user-level npm auth is verified for GitHub Packages as `Spec700` after PAT setup, but no token may be committed and app runtime `.env` must not be treated as npm auth.
    - Important npm install lesson: do not set global/default `registry=https://npm.pkg.github.com` for core-service. That makes npm look for public dependencies such as `firebase-admin` in GitHub Packages. Use a scoped registry mapping such as `@wekruit:registry=https://npm.pkg.github.com` and keep the auth token in developer/user-level config, env, or deploy secrets.
    - Important deploy risk: the current Firebase sourcing bundle copies `package.json` and `package-lock.json` into `deploy/sourcing-functions`, ignores `node_modules`, and has no deploy-source `.npmrc`. A private GitHub package dependency will not deploy unless build/install auth is solved in the deploy-bundle shape.
+   - 2026-05-16 T0 completion:
+     - Core-service now has a committed root `.npmrc` with only the scoped `@wekruit` registry mapping.
+     - The sourcing deploy bundle builder now writes `deploy/sourcing-functions/.npmrc` with the scoped registry mapping and conditionally injects an auth line from `NODE_AUTH_TOKEN` only when `@wekruit/shared-tags` is present in the generated production dependencies.
+     - No token was printed or committed. After verification, the generated deploy `.npmrc` was regenerated token-free and checked for absence of `_authToken`.
+     - Verified no-token baseline bundle generation, root dry-run package access, deploy-shaped `npm install --package-lock-only`, deploy-shaped `npm ci --omit=dev`, CommonJS require from `@wekruit/shared-tags/canonical`, root build, sourcing bundle build, diff whitespace check, and targeted sourcing tests (`45/45`).
+     - T0 is complete; Phase T1 may add the dependency and adapter when greenlit.
    - 2026-05-16 planning re-review after publish:
      - Local user-level npm config currently maps `@wekruit` to `https://npm.pkg.github.com` and has protected auth for `Spec700`, but the core-service repo has no committed `.npmrc` and the generated `deploy/` directory is gitignored.
      - `@wekruit/shared-tags@0.1.1` depends on `zod@^3.24.0` and has optional `firebase-admin@^13.0.0` peer metadata. Core-service already depends on `firebase-admin@^13.5.0` and `zod@^4.1.11`; implementation should import the browser-safe `@wekruit/shared-tags/canonical` subpath for taxonomy/mapping and avoid composing shared zod-v3 schemas into core-service zod-v4 schemas unless explicitly wrapped at the boundary.
@@ -3746,7 +3762,7 @@ Combined execution order recommendation:
 Open blockers / human-input points before implementation can be fully complete:
 
 - Package ownership/publishing: resolved on 2026-05-16. `@wekruit/shared-tags@0.1.1` is merged to PA `main`, published to GitHub Packages with restricted access, and verified installable.
-- Active blocker before code integration: private package deploy auth in the exact `deploy/sourcing-functions` Firebase/Cloud Run function source shape. Codex may need either a read-only `read:packages` token exposed as package-manager auth during deploy, or package/repo access configuration that lets the deploy/install environment read the GitHub package. This token must not be committed and should not be treated as an app runtime secret.
+- Private package deploy auth: T0 proved the exact `deploy/sourcing-functions` install shape works when package-manager auth is supplied via `NODE_AUTH_TOKEN`, and no token is committed. After T1 adds `@wekruit/shared-tags` as a production dependency, any real deploy must provide a read-only `read:packages` token or equivalent GitHub Packages auth during bundle/deploy install. This token must not be committed and should not be treated as an app runtime secret.
 - Active implementation constraint: use scoped npm registry config for `@wekruit` only; do not set the global/default registry to GitHub Packages.
 - Active implementation constraint: import `@wekruit/shared-tags/canonical` for taxonomy/mapping in core-service; avoid coupling core-service's zod-v4 domain schemas directly to shared package zod-v3 schema instances unless a boundary adapter explicitly parses and reprojects values.
 - Crawl4AI deployment: local worker development is self-contained, but deploying a real Cloud Run worker may require confirming the target Google Cloud project/service name/region and whether the service should be private to the core-service function.
