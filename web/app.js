@@ -299,6 +299,10 @@ function displayLabel(value) {
   return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : "";
 }
 
+function displayFieldLabel(value) {
+  return displayLabel(stringValue(value).replace(/([a-z0-9])([A-Z])/g, "$1_$2"));
+}
+
 function formatDateTime(value) {
   if (!value) {
     return "Unknown";
@@ -2445,6 +2449,11 @@ function renderEnrichmentDetail() {
     </section>
 
     <section class="detail-section">
+      <h4>Canonical tags preview</h4>
+      ${renderCanonicalTagsPreview(draft.canonicalTags)}
+    </section>
+
+    <section class="detail-section">
       <h4>Proposed tags</h4>
       ${renderProposedTagControls(item)}
     </section>
@@ -2477,6 +2486,146 @@ function confidencePercent(value) {
     return "";
   }
   return `${Math.round(number * 100)}%`;
+}
+
+function formatCanonicalMappedFrom(value) {
+  const token = stringValue(value);
+  if (!token) {
+    return "";
+  }
+  const [field, ...rest] = token.split(":");
+  const rawValue = rest.join(":");
+  if (!rawValue) {
+    return displayLabel(token);
+  }
+  return `${displayFieldLabel(field)}: ${displayLabel(rawValue)}`;
+}
+
+function canonicalEntryMeta(entry) {
+  const confidence = confidencePercent(entry?.confidence);
+  const mappedFrom = arrayValue(entry?.mappedFrom).map((value) => formatCanonicalMappedFrom(value)).filter(Boolean);
+  const evidenceCount = arrayValue(entry?.evidenceIds).length;
+  return [
+    confidence,
+    mappedFrom.length ? `from ${mappedFrom.slice(0, 3).join(", ")}${mappedFrom.length > 3 ? ` +${mappedFrom.length - 3}` : ""}` : "",
+    evidenceCount ? `${evidenceCount} evidence` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function renderCanonicalEntryItems(entries, valueKey = "value") {
+  const rows = arrayValue(entries).filter((entry) => stringValue(entry?.[valueKey]));
+  if (!rows.length) {
+    return "—";
+  }
+  return `
+    <div class="row-stack">
+      ${rows
+        .map((entry) => {
+          const meta = canonicalEntryMeta(entry);
+          return `
+            <div class="row-stack">
+              <div class="pill-row">${renderPill(displayLabel(entry[valueKey]), "neutral")}</div>
+              ${meta ? `<span class="cell-subtle">${escapeHtml(meta)}</span>` : ""}
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderCanonicalSkillItems(skills) {
+  const rows = arrayValue(skills).filter((entry) => stringValue(entry?.name));
+  if (!rows.length) {
+    return "—";
+  }
+  return `
+    <div class="row-stack">
+      ${rows
+        .map((entry) => {
+          const meta = [
+            stringValue(entry.bucket) ? displayLabel(entry.bucket) : "",
+            stringValue(entry.proficiency) ? displayLabel(entry.proficiency) : "",
+            canonicalEntryMeta(entry),
+          ].filter(Boolean).join(" · ");
+          return `
+            <div class="row-stack">
+              <div class="pill-row">
+                ${renderPill(entry.name, "neutral")}
+                ${entry.bucket ? renderPill(displayLabel(entry.bucket), "accent") : ""}
+              </div>
+              ${meta ? `<span class="cell-subtle">${escapeHtml(meta)}</span>` : ""}
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderUnmappedCanonicalLabels(unmappedLegacyLabels) {
+  if (!isPlainObject(unmappedLegacyLabels)) {
+    return "—";
+  }
+  const rows = Object.entries(unmappedLegacyLabels)
+    .map(([field, values]) => ({
+      field,
+      values: arrayValue(values).map((value) => stringValue(value)).filter(Boolean),
+    }))
+    .filter((row) => row.values.length);
+
+  if (!rows.length) {
+    return "—";
+  }
+
+  return `
+    <div class="row-stack">
+      ${rows
+        .map((row) => `
+          <div class="row-stack">
+            <span class="cell-subtle">${escapeHtml(displayFieldLabel(row.field))}</span>
+            <div class="pill-row">${row.values.map((value) => renderPill(displayLabel(value), "warning")).join("")}</div>
+          </div>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
+function hasCanonicalTagContent(canonicalTags) {
+  if (!isPlainObject(canonicalTags)) {
+    return false;
+  }
+  const hasUnmapped = isPlainObject(canonicalTags.unmappedLegacyLabels) && Object.values(canonicalTags.unmappedLegacyLabels)
+    .some((values) => arrayValue(values).length);
+  return Boolean(
+    arrayValue(canonicalTags.roleFunctions).length ||
+    arrayValue(canonicalTags.industrySectors).length ||
+    canonicalTags.careerStage ||
+    arrayValue(canonicalTags.relevantTags).length ||
+    arrayValue(canonicalTags.skills).length ||
+    hasUnmapped
+  );
+}
+
+function renderCanonicalTagsPreview(canonicalTags) {
+  if (!isPlainObject(canonicalTags)) {
+    return `<p class="empty-detail">No canonical tags saved.</p>`;
+  }
+  if (!hasCanonicalTagContent(canonicalTags)) {
+    return `<div class="subtle-callout">No canonical tags mapped from the saved legacy labels.</div>`;
+  }
+  return `
+    <div class="fact-grid">
+      <div class="fact-row"><span class="fact-label">Schema</span><div class="fact-value">${escapeHtml(canonicalTags.schemaVersion || "—")}</div></div>
+      <div class="fact-row"><span class="fact-label">Roles</span><div class="fact-value">${renderCanonicalEntryItems(canonicalTags.roleFunctions)}</div></div>
+      <div class="fact-row"><span class="fact-label">Sectors</span><div class="fact-value">${renderCanonicalEntryItems(canonicalTags.industrySectors)}</div></div>
+      <div class="fact-row"><span class="fact-label">Stage</span><div class="fact-value">${canonicalTags.careerStage ? renderCanonicalEntryItems([canonicalTags.careerStage]) : "—"}</div></div>
+      <div class="fact-row"><span class="fact-label">Tags</span><div class="fact-value">${renderCanonicalEntryItems(canonicalTags.relevantTags)}</div></div>
+      <div class="fact-row"><span class="fact-label">Skills</span><div class="fact-value">${renderCanonicalSkillItems(canonicalTags.skills)}</div></div>
+      <div class="fact-row"><span class="fact-label">Unmapped</span><div class="fact-value">${renderUnmappedCanonicalLabels(canonicalTags.unmappedLegacyLabels)}</div></div>
+    </div>
+  `;
 }
 
 function renderProfileFilters() {
@@ -2659,6 +2808,7 @@ function renderProfileReviewLineage(details) {
 function renderProfileDetail() {
   const profile = getSelectedProfile();
   const details = getSelectedProfileDetails();
+  const detailProfile = details?.profile || profile;
   const loading = state.profileDetailsLoadingId && state.profileDetailsLoadingId === state.selectedProfileId;
 
   if (!profile) {
@@ -2699,6 +2849,11 @@ function renderProfileDetail() {
         <div class="fact-row"><span class="fact-label">Contactability</span><div class="fact-value">${escapeHtml(`${displayLabel(profile.contactability?.value || "unknown")} ${confidencePercent(profile.contactability?.confidence)}`.trim())}</div></div>
         <div class="fact-row"><span class="fact-label">Career stage</span><div class="fact-value">${escapeHtml(`${displayLabel(profile.careerStage?.value || "unknown")} ${confidencePercent(profile.careerStage?.confidence)}`.trim())}</div></div>
       </div>
+    </section>
+
+    <section class="detail-section">
+      <h4>Canonical tags preview</h4>
+      ${renderCanonicalTagsPreview(detailProfile?.canonicalTags)}
     </section>
 
     <section class="detail-section">

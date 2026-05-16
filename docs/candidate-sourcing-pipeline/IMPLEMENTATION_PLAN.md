@@ -82,9 +82,9 @@ This section is the authoritative "where are we now?" view. Historical phase not
 
 - Current active workstream: personal website enrichment plus shared tag package migration.
 - Current branch: `codex/website-shared-tags-integration-plan`.
-- Current status: shared-tags Phase T3 is complete. `@wekruit/shared-tags@0.1.1` is a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, enrichment review drafts/final profiles receive deterministic additive `canonicalTags` computed from existing legacy enrichment labels, and the static sourcing dashboard now loads legacy/canonical taxonomy from the backend `GET /api/sourcing/taxonomy` endpoint. Legacy labels remain primary and unchanged. Next step is Phase T4 reviewer/profile canonical preview when greenlit.
+- Current status: shared-tags Phase T4 is complete. `@wekruit/shared-tags@0.1.1` is a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, enrichment review drafts/final profiles receive deterministic additive `canonicalTags` computed from existing legacy enrichment labels, the static sourcing dashboard loads legacy/canonical taxonomy from the backend `GET /api/sourcing/taxonomy` endpoint, and Enrichment/Profile detail panels show a read-only "Canonical tags preview". Legacy labels remain primary and unchanged. Next shared-tags step is broader T5/local-to-deploy verification when greenlit.
 - Website enrichment is not implemented yet.
-- Shared-tags migration has package/auth, adapter, deterministic legacy mapping, and taxonomy API implemented, but the secondary dashboard canonical preview is not implemented yet.
+- Shared-tags migration has package/auth, adapter, deterministic legacy mapping, taxonomy API, and secondary dashboard canonical preview implemented. Canonical labels are not primary filters/search/pills yet.
 - Coresignal remains a paused archive. No Coresignal implementation has started.
 
 **Website Enrichment Decisions**
@@ -161,6 +161,13 @@ This section is the authoritative "where are we now?" view. Historical phase not
     - Verification passed: `npm run build`; focused API test `node --test lib/services/sourcing/functions/http/api.test.js` (`5/5`); all sourcing tests `node --test lib/services/sourcing/**/*.test.js` (`53/53`); `node --check web/app.js`; `git diff --check`; hosted emulator/browser verification at `http://127.0.0.1:5100/#profiles` showing `Ready`; hosted rewrite `curl` to `/api/sourcing/taxonomy` returning `sourcing-taxonomy-v1`, `legacyTracks: 10`, `canonicalRoleFunctions: 17`, `relevantTagsMax: 12`, and `skillBuckets: 10`.
     - Deploy-bundle/emulator verification used `NODE_AUTH_TOKEN` only as package-manager auth; after verification, the emulator was stopped and the generated `deploy/sourcing-functions/.npmrc` was removed so no deploy token file remains in the repo directory.
     - T3 conclusion: backend taxonomy delivery is implemented and verified. Proceed to T4 to add the secondary canonical preview UI when greenlit.
+  - 2026-05-16 T4 reviewer/profile UI completion:
+    - Added read-only `Canonical tags preview` sections to the Enrichment review detail panel and the final Profile detail panel.
+    - The preview renders backend-computed `canonicalTags` only. It shows schema version, canonical role functions, industry sectors, career stage, relevant tags, skills with bucket/proficiency, confidence/evidence counts, mapped-from lineage, and unmapped legacy labels.
+    - T4 intentionally does not add canonical editing, client-side canonical remapping, canonical profile filters, canonical search behavior, or primary canonical pills. Legacy labels remain the reviewer-facing primary fields.
+    - Older or thin items with no saved canonical tags display an explicit empty state instead of mutating or recomputing data in the browser.
+    - Verification passed: `node --check web/app.js`; `npm run build`; all sourcing tests `node --test lib/services/sourcing/**/*.test.js` (`53/53`); local Firebase hosting/functions/firestore emulator; seeded one isolated synthetic emulator enrichment item `t4-enrichment-review` and final profile `t4-canonical-profile` with `canonicalTags`; browser verification at `http://127.0.0.1:5100/#enrichment` and `http://127.0.0.1:5100/#profiles` confirmed the preview appeared with `shared-tags-v1`, `Software engineering`, `typescript`, and unmapped `Ts` diagnostics while the dashboard status remained `Ready`.
+    - T4 conclusion: canonical output is now visible in the reviewer/profile UI without changing reviewer workflow semantics. Proceed to T5 broader verification/deploy planning when greenlit.
   - 2026-05-16 core-service preflight:
     - Current core-service branch and scraping mirror branch were clean and plan docs were byte-identical before checks.
     - Core-service `tsconfig.json` uses `"module": "commonjs"` and `"moduleResolution": "node"`; root `package.json` has no `"type": "module"`, so emitted runtime is CommonJS.
@@ -3770,9 +3777,10 @@ Shared-tags implementation plan:
    - UI fails visibly if backend taxonomy is unavailable or malformed; no second divergent canonical source exists in the browser.
 
 5. Phase T4 - Reviewer/profile UI migration.
-   - Keep legacy labels as primary reviewer-facing labels during additive migration.
-   - Add a secondary "Canonical tags preview" area in enrichment review/profile details so reviewers can compare old labels to shared canonical output.
-   - Do not change profile filters/search to canonical fields until data compatibility is proven.
+   - Completed on 2026-05-16.
+   - Legacy labels remain the primary reviewer-facing labels during additive migration.
+   - Added a secondary "Canonical tags preview" area in enrichment review/profile details so reviewers can compare old labels to shared canonical output.
+   - Profile filters/search still use legacy fields; no canonical field cutover happened in T4.
    - After the additive phase is proven, a separate future cutover can promote canonical labels to primary pills/filters and retire old hardcoded arrays.
 
 6. Phase T5 - Verification.
