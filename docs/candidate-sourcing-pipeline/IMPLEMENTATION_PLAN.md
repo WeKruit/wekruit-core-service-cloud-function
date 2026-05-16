@@ -82,9 +82,9 @@ This section is the authoritative "where are we now?" view. Historical phase not
 
 - Current active workstream: personal website enrichment plus shared tag package migration.
 - Current branch: `codex/website-shared-tags-integration-plan`.
-- Current status: shared-tags Phase T4 is complete. `@wekruit/shared-tags@0.1.1` is a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, enrichment review drafts/final profiles receive deterministic additive `canonicalTags` computed from existing legacy enrichment labels, the static sourcing dashboard loads legacy/canonical taxonomy from the backend `GET /api/sourcing/taxonomy` endpoint, and Enrichment/Profile detail panels show a read-only "Canonical tags preview". Legacy labels remain primary and unchanged. Next shared-tags step is broader T5/local-to-deploy verification when greenlit.
+- Current status: shared-tags Phase T5 verification is complete. `@wekruit/shared-tags@0.1.1` is a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, enrichment review drafts/final profiles receive deterministic additive `canonicalTags` computed from existing legacy enrichment labels, the static sourcing dashboard loads legacy/canonical taxonomy from the backend `GET /api/sourcing/taxonomy` endpoint, and Enrichment/Profile detail panels show a read-only "Canonical tags preview". Legacy labels remain primary and unchanged. The shared-tags additive migration is ready for staging deploy when the deploy command is run with GitHub Packages read auth; no staging deploy was performed during T5.
 - Website enrichment is not implemented yet.
-- Shared-tags migration has package/auth, adapter, deterministic legacy mapping, taxonomy API, and secondary dashboard canonical preview implemented. Canonical labels are not primary filters/search/pills yet.
+- Shared-tags migration has package/auth, adapter, deterministic legacy mapping, taxonomy API, secondary dashboard canonical preview, and local-to-deploy verification completed. Canonical labels are not primary filters/search/pills yet.
 - Coresignal remains a paused archive. No Coresignal implementation has started.
 
 **Website Enrichment Decisions**
@@ -168,6 +168,17 @@ This section is the authoritative "where are we now?" view. Historical phase not
     - Older or thin items with no saved canonical tags display an explicit empty state instead of mutating or recomputing data in the browser.
     - Verification passed: `node --check web/app.js`; `npm run build`; all sourcing tests `node --test lib/services/sourcing/**/*.test.js` (`53/53`); local Firebase hosting/functions/firestore emulator; seeded one isolated synthetic emulator enrichment item `t4-enrichment-review` and final profile `t4-canonical-profile` with `canonicalTags`; browser verification at `http://127.0.0.1:5100/#enrichment` and `http://127.0.0.1:5100/#profiles` confirmed the preview appeared with `shared-tags-v1`, `Software engineering`, `typescript`, and unmapped `Ts` diagnostics while the dashboard status remained `Ready`.
     - T4 conclusion: canonical output is now visible in the reviewer/profile UI without changing reviewer workflow semantics. Proceed to T5 broader verification/deploy planning when greenlit.
+  - 2026-05-16 T5 verification / deploy-readiness completion:
+    - No staging deploy was performed in T5 per user instruction.
+    - Preflight passed: core-service and scraping workstream branches were clean before T5 verification, and the two plan documents were byte-identical.
+    - Package verification passed: `npm view "@wekruit/shared-tags@0.1.1" version dist-tags.latest --registry=https://npm.pkg.github.com` returned `0.1.1` for both version and latest; `npm install --dry-run --ignore-scripts @wekruit/shared-tags@0.1.1` passed; CommonJS `require("@wekruit/shared-tags/canonical")` returned `roleCount: 17`, `skillBucketCount: 10`, and `relevantTagsMax: 12`.
+    - Core-service verification passed: `node --check web/app.js`; `npm run build`; all sourcing tests `node --test lib/services/sourcing/**/*.test.js` passed `53/53`.
+    - Deploy-bundle verification passed with package-manager auth supplied only through `NODE_AUTH_TOKEN`: `npm run build:sourcing-bundle`; `npm ci --omit=dev --ignore-scripts` inside `deploy/sourcing-functions`; deploy-shaped CommonJS `require("@wekruit/shared-tags/canonical")` returned `roleCount: 17` and `relevantTagsMax: 12`.
+    - Local emulator verification passed: started Firebase hosting/functions/firestore with generated sourcing bundle, seeded isolated synthetic emulator records `t5-enrichment-review` and `t5-canonical-profile`, confirmed API returned those records with legacy labels and `canonicalTags`, and verified the actual dashboard at `http://127.0.0.1:5100`.
+    - Browser verification passed: Enrichment showed dashboard `Ready`, synthetic `T5 Canonical Candidate`, editable legacy labels, and `Canonical tags preview` containing `shared-tags-v1`, `Software engineering`, `typescript`, and unmapped `Ts`; Profiles showed dashboard `Ready`, synthetic profile, same canonical preview, and legacy profile filters (`Track`, `Domain`, `Source`, `Contact`) populated from legacy taxonomy.
+    - Cleanup passed: emulator stopped; ports `5100`, `5101`, `8180` closed; generated `deploy/sourcing-functions/.npmrc` removed; token scan over repo/deploy npmrc files found no `_authToken`; `git diff --check` passed.
+    - Observed non-blocking local warnings: local shell is Node `v22.22.1` while project declares Node `20`; functions emulator on demo project cannot access real Secret Manager values, expected for this read-only local dashboard path; deploy-shaped `npm ci` reported existing dependency audit findings. None blocked shared-tags additive migration verification.
+    - T5 conclusion: shared-tags additive migration is ready for staging deploy. Required condition for deploy: run functions deploy/predeploy with GitHub Packages read auth available as `NODE_AUTH_TOKEN` or equivalent package-manager auth. The token must not be committed and is not app runtime `.env`. After deploy, run staged browser smoke on `https://wekruit-sourcing.web.app` with isolated synthetic data, not TreeHacks candidates.
   - 2026-05-16 core-service preflight:
     - Current core-service branch and scraping mirror branch were clean and plan docs were byte-identical before checks.
     - Core-service `tsconfig.json` uses `"module": "commonjs"` and `"moduleResolution": "node"`; root `package.json` has no `"type": "module"`, so emitted runtime is CommonJS.
@@ -3784,11 +3795,10 @@ Shared-tags implementation plan:
    - After the additive phase is proven, a separate future cutover can promote canonical labels to primary pills/filters and retire old hardcoded arrays.
 
 6. Phase T5 - Verification.
-   - Install `wekruit-pa` dependencies using the package-owner's expected package manager and run `@wekruit/shared-tags` typecheck/tests before relying on it.
-   - Run core-service build/tests and a focused mapping validation test that imports the package.
-   - Run local Firebase emulator full-chain verification using a synthetic candidate. If website enrichment has landed first, use the same Sunwoo candidate so approved website facts feed enrichment, then verify `canonicalTags` on the enrichment review and final profile.
-   - Browser/Ruflo must verify the secondary canonical preview appears and that existing labels/filters remain intact.
-   - Deploy only after private package install/auth works in the same shape the Firebase deploy will use.
+   - Completed on 2026-05-16.
+   - Verified published package access, core-service build/tests, web syntax, deploy-bundle install shape, local emulator API, and browser-rendered dashboard preview.
+   - Verified secondary canonical preview appears in Enrichment and Profiles while existing legacy labels/filters remain intact.
+   - Staging deploy was intentionally not run. The branch is ready for staging deploy when the deploy/predeploy environment supplies GitHub Packages read auth through `NODE_AUTH_TOKEN` or equivalent package-manager auth.
 
 Combined execution order recommendation:
 
@@ -3803,7 +3813,7 @@ Combined execution order recommendation:
 Open blockers / human-input points before implementation can be fully complete:
 
 - Package ownership/publishing: resolved on 2026-05-16. `@wekruit/shared-tags@0.1.1` is merged to PA `main`, published to GitHub Packages with restricted access, and verified installable.
-- Private package deploy auth: T0 proved the exact `deploy/sourcing-functions` install shape works when package-manager auth is supplied via `NODE_AUTH_TOKEN`, and no token is committed. After T1 adds `@wekruit/shared-tags` as a production dependency, any real deploy must provide a read-only `read:packages` token or equivalent GitHub Packages auth during bundle/deploy install. This token must not be committed and should not be treated as an app runtime secret.
+- Private package deploy auth: T0/T5 proved the exact `deploy/sourcing-functions` install shape works when package-manager auth is supplied via `NODE_AUTH_TOKEN`, and no token is committed. Because `@wekruit/shared-tags` is now a production dependency, any real deploy must provide a read-only `read:packages` token or equivalent GitHub Packages auth during bundle/deploy install. This token must not be committed and should not be treated as an app runtime secret.
 - Active implementation constraint: use scoped npm registry config for `@wekruit` only; do not set the global/default registry to GitHub Packages.
 - Active implementation constraint: import `@wekruit/shared-tags/canonical` for taxonomy/mapping in core-service; avoid coupling core-service's zod-v4 domain schemas directly to shared package zod-v3 schema instances unless a boundary adapter explicitly parses and reprojects values.
 - Crawl4AI deployment: local worker development is self-contained, but deploying a real Cloud Run worker may require confirming the target Google Cloud project/service name/region and whether the service should be private to the core-service function.
