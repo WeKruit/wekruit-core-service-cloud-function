@@ -3680,6 +3680,11 @@ Shared-tags implementation plan:
    - Core-service local install needs a safe npm auth path. Current local user-level npm auth is verified for GitHub Packages as `Spec700` after PAT setup, but no token may be committed and app runtime `.env` must not be treated as npm auth.
    - Important npm install lesson: do not set global/default `registry=https://npm.pkg.github.com` for core-service. That makes npm look for public dependencies such as `firebase-admin` in GitHub Packages. Use a scoped registry mapping such as `@wekruit:registry=https://npm.pkg.github.com` and keep the auth token in developer/user-level config, env, or deploy secrets.
    - Important deploy risk: the current Firebase sourcing bundle copies `package.json` and `package-lock.json` into `deploy/sourcing-functions`, ignores `node_modules`, and has no deploy-source `.npmrc`. A private GitHub package dependency will not deploy unless build/install auth is solved in the deploy-bundle shape.
+   - 2026-05-16 planning re-review after publish:
+     - Local user-level npm config currently maps `@wekruit` to `https://npm.pkg.github.com` and has protected auth for `Spec700`, but the core-service repo has no committed `.npmrc` and the generated `deploy/` directory is gitignored.
+     - `@wekruit/shared-tags@0.1.1` depends on `zod@^3.24.0` and has optional `firebase-admin@^13.0.0` peer metadata. Core-service already depends on `firebase-admin@^13.5.0` and `zod@^4.1.11`; implementation should import the browser-safe `@wekruit/shared-tags/canonical` subpath for taxonomy/mapping and avoid composing shared zod-v3 schemas into core-service zod-v4 schemas unless explicitly wrapped at the boundary.
+     - The safest implementation gate is: first verify root install with a scoped `@wekruit` registry mapping, then verify the generated `deploy/sourcing-functions` install shape with the same mapping and a read-only package token path, then add production imports.
+     - Do not rely on local `node_modules`; Cloud Run/Firebase function deployment installs declared dependencies from the function source `package.json` and lockfile, and private modules require registry auth settings in the function directory.
    - Candidate deploy-auth solutions, to be tested rather than guessed:
      - grant the core-service repository/package workflow access and use `GITHUB_TOKEN` for GitHub Actions installs where relevant;
      - use a read-only `read:packages` PAT / `NODE_AUTH_TOKEN` for local deploy packaging without committing it;
@@ -3740,8 +3745,10 @@ Combined execution order recommendation:
 
 Open blockers / human-input points before implementation can be fully complete:
 
-- Package ownership/publishing: decide whether Codex should branch and update `wekruit-pa` package publish metadata, or whether the teammate/package owner will publish `@wekruit/shared-tags` privately to GitHub Packages.
-- Private package deploy auth: if GitHub Packages is used, Codex may need a safe `read:packages` token or package/repo access configuration for local/Firebase deploy. This token must not be committed and should not be a runtime app secret.
+- Package ownership/publishing: resolved on 2026-05-16. `@wekruit/shared-tags@0.1.1` is merged to PA `main`, published to GitHub Packages with restricted access, and verified installable.
+- Active blocker before code integration: private package deploy auth in the exact `deploy/sourcing-functions` Firebase/Cloud Run function source shape. Codex may need either a read-only `read:packages` token exposed as package-manager auth during deploy, or package/repo access configuration that lets the deploy/install environment read the GitHub package. This token must not be committed and should not be treated as an app runtime secret.
+- Active implementation constraint: use scoped npm registry config for `@wekruit` only; do not set the global/default registry to GitHub Packages.
+- Active implementation constraint: import `@wekruit/shared-tags/canonical` for taxonomy/mapping in core-service; avoid coupling core-service's zod-v4 domain schemas directly to shared package zod-v3 schema instances unless a boundary adapter explicitly parses and reprojects values.
 - Crawl4AI deployment: local worker development is self-contained, but deploying a real Cloud Run worker may require confirming the target Google Cloud project/service name/region and whether the service should be private to the core-service function.
 - Data scope: current website v1 excludes LinkedIn, social/logged-in domains, GitHub.com, and Devpost.com source pages. If the team wants Devpost project-page crawling or GitHub repo-page crawling as a website evidence source later, that should be an explicit separate decision.
 
