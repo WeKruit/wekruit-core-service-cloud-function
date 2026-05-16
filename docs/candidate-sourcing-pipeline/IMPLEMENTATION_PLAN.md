@@ -82,7 +82,7 @@ This section is the authoritative "where are we now?" view. Historical phase not
 
 - Current active workstream: personal website enrichment plus shared tag package migration.
 - Current branch: `codex/website-shared-tags-integration-plan`.
-- Current status: planning is complete enough to implement later; `@wekruit/shared-tags@0.1.0` is now published to GitHub Packages with restricted access and verified installable from a clean temp npm consumer. Core-service integration has not started yet.
+- Current status: planning is complete enough to implement later; `@wekruit/shared-tags@0.1.0` is published to GitHub Packages with restricted access and verified installable, but 2026-05-16 core-service preflight found a module-format blocker before integration: the package is ESM/import-only while core-service compiles to CommonJS. Core-service integration has not started yet.
 - Website enrichment is not implemented yet.
 - Shared-tags migration is not implemented yet.
 - Coresignal remains a paused archive. No Coresignal implementation has started.
@@ -119,6 +119,19 @@ This section is the authoritative "where are we now?" view. Historical phase not
   - Proposed deterministic mappings were read-only checked against shared package source arrays/no-abbreviation rules and produced `failures: []`.
   - Core-service uses npm lockfile v3 and its sourcing deploy bundle writes `deploy/sourcing-functions/package.json`, copies `package-lock.json`, ignores `node_modules`, and currently has no `.npmrc`/scope mapping in either root or deploy bundle. Private package registry mapping and token injection must be verified in the same shape Firebase deploy uses before depending on the package in deployed functions.
   - Local user-level GitHub Packages npm auth is verified for `Spec700`; do not commit token material and do not move it into app runtime `.env`.
+  - 2026-05-16 core-service preflight:
+    - Current core-service branch and scraping mirror branch were clean and plan docs were byte-identical before checks.
+    - Core-service `tsconfig.json` uses `"module": "commonjs"` and `"moduleResolution": "node"`; root `package.json` has no `"type": "module"`, so emitted runtime is CommonJS.
+    - Published `@wekruit/shared-tags@0.1.0` metadata is `"type": "module"` with export conditions that only define `"import"` for `.` and `./canonical`; there is no `"require"` export.
+    - Throwaway CommonJS runtime check failed for both `require("@wekruit/shared-tags")` and `require("@wekruit/shared-tags/canonical")` with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+    - Throwaway TypeScript check using core-service-like `module: commonjs` / `moduleResolution: node` failed to resolve `@wekruit/shared-tags/canonical` (`TS2307`) and the emitted CommonJS runtime also failed on the package export map.
+    - Conclusion: do **not** integrate `@wekruit/shared-tags@0.1.0` directly into core-service. Shortest correct path is likely a package patch release, e.g. `@wekruit/shared-tags@0.1.1`, that provides CommonJS-compatible `require` exports and compatible type resolution for core-service, rather than migrating the whole core-service repo to ESM/NodeNext in this workstream.
+    - Local package install with the added dependency and generated lockfile succeeded in a temp core-service/deploy-shaped project using the developer's existing user-level npm auth: `local user-auth deploy install ok @wekruit/shared-tags 0.1.0`.
+    - No-auth GitHub Packages lookup failed with `401 authentication token not provided`, confirming the package is not public-world-readable and deploys need package auth.
+    - A deploy-shaped `.npmrc` using `${NODE_AUTH_TOKEN}` could not be fully verified from the protected local token because npm refuses to print protected auth config values; this is good secret behavior, but the real deploy/predeploy path still needs an explicit `NODE_AUTH_TOKEN` / read-only `read:packages` token test before production dependency wiring.
+    - Baseline core-service checks: `npm run build` passed; `npm run build:sourcing-bundle` passed and produced no tracked diffs; targeted sourcing tests passed `45/45`.
+    - Full `npm test` currently fails `2/75` in existing matching-service tests, unrelated to sourcing/shared-tags: expected recency contribution remains `0.966667`, actual recency is `0`, causing expected scores `0.946667` vs actual `0.85` and `0.876667` vs actual `0.78`.
+    - Local runtime warning: current shell is Node `v22.22.1` / npm `10.9.4`, while core-service `package.json` declares engine `node: 20`; use Node 20 for final deploy-shaped verification if possible.
 
 ## Current Remaining Work Triage
 
@@ -132,8 +145,8 @@ This list is forward-looking only. Completed Bright Data and earlier phase detai
 
 2. **Unified tag package migration.**
    - Status: execution-planned, not implemented.
-   - Waiting on teammate/package-auth answers before production dependency wiring.
-   - Add core-service dependency, deterministic mapping layer, additive `canonicalTags`, backend taxonomy API, and secondary UI preview after package access is verified.
+   - Package publish is complete, but integration must not start until the package/core-service module-format mismatch and deploy-shaped auth test are resolved.
+   - Add core-service dependency, deterministic mapping layer, additive `canonicalTags`, backend taxonomy API, and secondary UI preview after package import/runtime compatibility and deploy install auth are verified.
 
 3. **Large queue handling / pagination.**
    - The live Devpost import proved broad ingest works, but the review UI intentionally loads a capped review set.
@@ -3651,6 +3664,7 @@ Shared-tags implementation plan:
    - Registry verification passed with `npm view @wekruit/shared-tags name version dist.tarball --registry=https://npm.pkg.github.com`; version is `0.1.0`.
    - Clean temp consumer verification passed with `npm install @wekruit/shared-tags@0.1.0` and imports from both `@wekruit/shared-tags/canonical` and the main `@wekruit/shared-tags` barrel.
    - Publishing to GitHub Packages used restricted access and should keep the package private/internal to WeKruit; still verify package/repo access in GitHub UI before relying on unattended deploys.
+   - 2026-05-16 core-service import/runtime preflight found a blocker: `@wekruit/shared-tags@0.1.0` is ESM/import-only while core-service compiles to CommonJS. Do not start T1 against `0.1.0`; publish a compatible package patch or explicitly choose a core-service module-system migration first.
    - Core-service local install needs a safe npm auth path. Current local user-level npm auth is verified for GitHub Packages as `Spec700` after PAT setup, but no token may be committed and app runtime `.env` must not be treated as npm auth.
    - Important deploy risk: the current Firebase sourcing bundle copies `package.json` and `package-lock.json` into `deploy/sourcing-functions`, ignores `node_modules`, and has no deploy-source `.npmrc`. A private GitHub package dependency will not deploy unless build/install auth is solved in the deploy-bundle shape.
    - Candidate deploy-auth solutions, to be tested rather than guessed:
@@ -3658,7 +3672,7 @@ Shared-tags implementation plan:
      - use a read-only `read:packages` PAT / `NODE_AUTH_TOKEN` for local deploy packaging without committing it;
      - generate a safe `.npmrc` in the deploy bundle containing only registry mapping plus token environment substitution if Firebase/Cloud Build honors it;
      - or, if GitHub Packages deploy auth proves brittle, revisit a Google Artifact Registry mirror because Google Cloud build has automatic Artifact Registry credentials.
-   - Do not add `@wekruit/shared-tags` as a production dependency in core-service until deploy-shaped package install/auth has been verified.
+   - Do not add `@wekruit/shared-tags` as a production dependency in core-service until package import/runtime compatibility and deploy-shaped package install/auth have both been verified.
 
 2. Phase T1 - Add dependency and canonical adapter in core-service.
    - Add the package dependency only after T0 passes.
