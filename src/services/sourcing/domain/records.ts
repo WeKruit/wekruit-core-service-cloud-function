@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { canonicalTagsSchema } from './canonicalTags';
+
 const rawObjectSchema = z.record(z.string(), z.unknown()).default({});
 
 export const sourcingEntityTypeSchema = z.enum([
@@ -421,6 +423,7 @@ export const candidateEnrichmentDraftSchema = z.object({
   matchingSummary: z.string().trim().min(1).max(900),
   fieldEvidence: z.record(z.string(), evidenceIdListSchema).default({}),
   proposedTags: z.array(enrichmentProposedTagSchema).max(12).default([]),
+  canonicalTags: canonicalTagsSchema.optional(),
   warnings: z.array(z.string().trim().min(1).max(280)).max(12).default([]),
 });
 
@@ -535,6 +538,7 @@ export const candidateProfileSchema = z.object({
   matchingSummary: z.string().trim().min(1).max(900),
   fieldEvidence: z.record(z.string(), evidenceIdListSchema),
   proposedTags: z.array(enrichmentProposedTagSchema),
+  canonicalTags: canonicalTagsSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -577,6 +581,7 @@ export type CandidateSpecialization = z.infer<typeof candidateSpecializationSche
 export type CandidateIndustryDomain = z.infer<typeof candidateIndustryDomainSchema>;
 export type CandidateCareerStage = z.infer<typeof candidateCareerStageSchema>;
 export type CandidateContactability = z.infer<typeof candidateContactabilitySchema>;
+export type CanonicalTags = z.infer<typeof canonicalTagsSchema>;
 export type CandidateEnrichmentReviewStatus = z.infer<typeof candidateEnrichmentReviewStatusSchema>;
 export type CandidateEnrichmentRunStatus = z.infer<typeof candidateEnrichmentRunStatusSchema>;
 export type VendorProfileProvider = z.infer<typeof vendorProfileProviderSchema>;

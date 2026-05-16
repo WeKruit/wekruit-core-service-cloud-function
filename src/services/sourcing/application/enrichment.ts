@@ -1,4 +1,5 @@
 import { stableHash } from './extraction';
+import { createEmptyCanonicalTags } from '../domain/canonicalTags';
 import {
   candidateEnrichmentDraftSchema,
   type ApprovedEntity,
@@ -471,6 +472,7 @@ export function validateCandidateEnrichmentDraft(input: unknown, approvedEvidenc
       warnings.push(`Dropped proposed tag "${tag.tag}" because it did not include approved evidence.`);
       return false;
     }),
+    canonicalTags: parsedDraft.canonicalTags ?? createEmptyCanonicalTags(),
   };
 
   if (parsedDraft.careerStage.value !== 'unknown' && draft.careerStage.value === 'unknown') {

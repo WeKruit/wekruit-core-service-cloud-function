@@ -29,6 +29,7 @@ import {
   OpenAISourcingEnrichmentClient,
   type SourcingEnrichmentInferencePort,
 } from '../integrations/openai';
+import { createEmptyCanonicalTags } from '../domain/canonicalTags';
 import {
   BrightDataLinkedInProvider,
   FakeProfessionalProfileLookupProvider,
@@ -1962,6 +1963,7 @@ export class SourcingService {
       matchingSummary: draft.matchingSummary,
       fieldEvidence: draft.fieldEvidence,
       proposedTags: draft.proposedTags,
+      canonicalTags: draft.canonicalTags ?? createEmptyCanonicalTags(),
       createdAt: existingProfile?.createdAt ?? now,
       updatedAt: now,
     };

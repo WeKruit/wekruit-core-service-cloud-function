@@ -17,6 +17,7 @@ import type {
   ProfessionalProfileLookupPort,
   ProfessionalProfileLookupResult,
 } from '../integrations/brightdata';
+import { CANONICAL_TAGS_SCHEMA_VERSION } from '../domain/canonicalTags';
 import type {
   ApprovedEntity,
   CandidateEnrichmentDraft,
@@ -1279,6 +1280,8 @@ test('generateEnrichmentForApprovedEntity creates review item and approval mater
   assert.equal(generated.enrichmentRun?.status, 'completed');
   assert.equal(generated.reviewItem.status, 'pending_review');
   assert.equal(generated.reviewItem.draft.primaryTrack, 'software_engineering');
+  assert.equal(generated.reviewItem.draft.canonicalTags?.schemaVersion, CANONICAL_TAGS_SCHEMA_VERSION);
+  assert.deepEqual(generated.reviewItem.draft.canonicalTags?.roleFunctions, []);
   assert.equal(approvedEntitiesById.get(approvedEntity.id)?.enrichmentStatus, 'in_review');
 
   const approved = await service.submitEnrichmentReviewDecision(generated.reviewItem.id, {
@@ -1291,6 +1294,8 @@ test('generateEnrichmentForApprovedEntity creates review item and approval mater
   assert.ok(approved.candidateProfile);
   assert.equal(approved.candidateProfile.primaryTrack, 'software_engineering');
   assert.equal(approved.candidateProfile.profileVersion, 1);
+  assert.equal(approved.candidateProfile.canonicalTags?.schemaVersion, CANONICAL_TAGS_SCHEMA_VERSION);
+  assert.deepEqual(approved.candidateProfile.canonicalTags?.roleFunctions, []);
   assert.equal(approvedEntitiesById.get(approvedEntity.id)?.enrichmentStatus, 'enriched');
   assert.equal(approvedEntitiesById.get(approvedEntity.id)?.needsEnrichment, false);
 });

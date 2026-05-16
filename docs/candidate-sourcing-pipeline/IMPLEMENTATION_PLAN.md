@@ -82,9 +82,9 @@ This section is the authoritative "where are we now?" view. Historical phase not
 
 - Current active workstream: personal website enrichment plus shared tag package migration.
 - Current branch: `codex/website-shared-tags-integration-plan`.
-- Current status: shared-tags Phase T0 package/auth preflight is complete. `@wekruit/shared-tags@0.1.1` is published to GitHub Packages with restricted access, verified installable from a clean temp consumer, and verified in the core-service root/deploy-bundle install shapes with scoped `@wekruit` registry mapping. The `0.1.1` patch adds CommonJS-compatible exports for core-service while preserving the existing ESM/browser exports. No shared-tags business logic or production dependency has been added yet; next step is Phase T1 when greenlit.
+- Current status: shared-tags Phase T1 is complete. `@wekruit/shared-tags@0.1.1` is now a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, and enrichment review drafts/final profiles now receive an additive empty `canonicalTags` envelope without replacing any legacy labels. No deterministic legacy-to-canonical mapping has been implemented yet; next step is Phase T2 when greenlit.
 - Website enrichment is not implemented yet.
-- Shared-tags migration is not implemented yet.
+- Shared-tags migration has its package/adapter foundation implemented, but deterministic mapping, taxonomy API, and UI preview are not implemented yet.
 - Coresignal remains a paused archive. No Coresignal implementation has started.
 
 **Website Enrichment Decisions**
@@ -133,6 +133,15 @@ This section is the authoritative "where are we now?" view. Historical phase not
     - Verified baseline code health after the T0 auth/bundle change: `npm run build`; `npm run build:sourcing-bundle`; `git diff --check`; and `node --test lib/services/sourcing/**/*.test.js` passed `45/45`.
     - Known non-blocking local warning: this shell uses Node `v22.22.1` / npm `10.9.4`, while core-service declares engine `node: 20`. Final deploy verification should still use the project's Node 20 runtime.
     - T0 conclusion: package/runtime compatibility and core-service deploy-shaped package install/auth are proven enough to proceed to Phase T1 when greenlit. Actual deploys after T1 adds the production dependency must provide a read-only `read:packages` token via `NODE_AUTH_TOKEN` or equivalent package-manager auth at bundle/deploy time.
+  - 2026-05-16 T1 dependency/adapter completion:
+    - Added `@wekruit/shared-tags@^0.1.1` to core-service `package.json` and `package-lock.json`. Lockfile resolves `@wekruit/shared-tags@0.1.1` from GitHub Packages and installs its private `zod@3.25.76` dependency under the package, while core-service continues using root `zod@4.3.6`.
+    - Added sourcing-owned adapter `src/services/sourcing/domain/canonicalTags.ts` that imports only `@wekruit/shared-tags/canonical`, exports the shared canonical vocab handles, defines core-service zod-v4 schemas for the v1 `canonicalTags` envelope, and avoids composing shared package zod-v3 schemas into core-service domain schemas.
+    - Added `canonicalTags` as an optional additive field on `CandidateEnrichmentDraft` and `CandidateProfile`; existing legacy labels remain unchanged and primary.
+    - `validateCandidateEnrichmentDraft` now fills missing canonical tags with an empty `shared-tags-v1` envelope, and profile materialization copies `draft.canonicalTags` or creates the same empty envelope. This means generated enrichment review items and newly materialized profiles carry the field even before T2 mapping.
+    - Added tests proving the adapter reads the real shared package vocab values, accepts valid canonical payloads, rejects noncanonical tokens such as `swe`/`ts`, allows drafts to carry `canonicalTags` additively, and verifies the generate/approve enrichment workflow produces empty canonical envelopes on review drafts and final profiles.
+    - Verification passed: `npm run build`; focused canonical/service/enrichment tests (`26/26`); all sourcing tests (`48/48`); `NODE_AUTH_TOKEN` deploy-bundle build; deploy-shaped `npm ci --omit=dev --ignore-scripts`; deploy-shaped CommonJS `require("@wekruit/shared-tags/canonical")` with `roleCount: 17` and `relevantTagsMax: 12`; `git diff --check`.
+    - No token was printed or committed. The generated `deploy/sourcing-functions/.npmrc` was removed after deploy-shaped verification so no token remains in the ignored deploy directory.
+    - T1 conclusion: the shared-tags package is safely installed and available behind a core-service adapter. Proceed to T2 to implement deterministic legacy-label mapping into `canonicalTags`.
   - 2026-05-16 core-service preflight:
     - Current core-service branch and scraping mirror branch were clean and plan docs were byte-identical before checks.
     - Core-service `tsconfig.json` uses `"module": "commonjs"` and `"moduleResolution": "node"`; root `package.json` has no `"type": "module"`, so emitted runtime is CommonJS.
@@ -3709,10 +3718,11 @@ Shared-tags implementation plan:
    - Do not add `@wekruit/shared-tags` as a production dependency in core-service until package import/runtime compatibility and deploy-shaped package install/auth have both been verified.
 
 2. Phase T1 - Add dependency and canonical adapter in core-service.
-   - Add the package dependency only after T0 passes.
-   - Add a sourcing-owned adapter/mapping module, e.g. `src/services/sourcing/domain/canonicalTags.ts`, that imports and validates against `@wekruit/shared-tags/canonical`.
+   - Completed on 2026-05-16.
+   - Added the package dependency only after T0 passed.
+   - Added sourcing-owned adapter module `src/services/sourcing/domain/canonicalTags.ts`, importing and validating against `@wekruit/shared-tags/canonical`.
    - Keep current hardcoded sourcing labels as legacy input/output during the additive migration.
-   - Add `canonicalTags` to enrichment drafts, enrichment review items, and candidate profiles without removing `primaryTrack`, `scoredTracks`, `specializations`, `industryDomainInterests`, `careerStage`, `skills`, `contactability`, or existing filters.
+   - Added optional `canonicalTags` to enrichment drafts, enrichment review items through their draft, and candidate profiles without removing `primaryTrack`, `scoredTracks`, `specializations`, `industryDomainInterests`, `careerStage`, `skills`, `contactability`, or existing filters.
    - `canonicalTags` v1 shape:
      - `schemaVersion: "shared-tags-v1"`;
      - `roleFunctions`: entries with `value`, `confidence`, `evidenceIds`, `mappedFrom`, `mappingSource`;
@@ -3722,6 +3732,7 @@ Shared-tags implementation plan:
      - `skills`: objects with shared-package-valid `name`, shared `bucket`, `proficiency`, `confidence`, `evidenceIds`, `mappedFrom`, `mappingSource`;
      - `unmappedLegacyLabels`: diagnostics-only migration object for legacy values that were intentionally not forced into canonical tokens.
    - Unknown/uncertain legacy values map to null/empty canonical output plus diagnostics, not fake shared-package tokens.
+   - T1 intentionally does not populate mapped canonical values yet. The current generated field is an empty valid `shared-tags-v1` envelope; T2 owns deterministic mapping and diagnostics.
 
 3. Phase T2 - Deterministic legacy mapping and validation.
    - Compute `canonicalTags` deterministically from the already-approved enrichment draft at first. Do not ask OpenAI to output canonical tags directly until the bridge is proven.
