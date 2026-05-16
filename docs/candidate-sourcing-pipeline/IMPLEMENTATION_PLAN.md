@@ -82,7 +82,7 @@ This section is the authoritative "where are we now?" view. Historical phase not
 
 - Current active workstream: personal website enrichment plus shared tag package migration.
 - Current branch: `codex/website-shared-tags-integration-plan`.
-- Current status: shared-tags Phase T5 verification is complete. `@wekruit/shared-tags@0.1.1` is a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, enrichment review drafts/final profiles receive deterministic additive `canonicalTags` computed from existing legacy enrichment labels, the static sourcing dashboard loads legacy/canonical taxonomy from the backend `GET /api/sourcing/taxonomy` endpoint, and Enrichment/Profile detail panels show a read-only "Canonical tags preview". Legacy labels remain primary and unchanged. The shared-tags additive migration is ready for staging deploy when the deploy command is run with GitHub Packages read auth; no staging deploy was performed during T5.
+- Current status: shared-tags Phase T5 verification and staging deployment are complete. `@wekruit/shared-tags@0.1.1` is a core-service production dependency, the sourcing domain has a `canonicalTags` adapter backed by `@wekruit/shared-tags/canonical`, enrichment review drafts/final profiles receive deterministic additive `canonicalTags` computed from existing legacy enrichment labels, the static sourcing dashboard loads legacy/canonical taxonomy from the backend `GET /api/sourcing/taxonomy` endpoint, and Enrichment/Profile detail panels show a read-only "Canonical tags preview". Legacy labels remain primary and unchanged. The shared-tags additive migration is deployed to the staging sourcing dashboard at `https://wekruit-sourcing.web.app`.
 - Website enrichment is not implemented yet.
 - Shared-tags migration has package/auth, adapter, deterministic legacy mapping, taxonomy API, secondary dashboard canonical preview, and local-to-deploy verification completed. Canonical labels are not primary filters/search/pills yet.
 - Coresignal remains a paused archive. No Coresignal implementation has started.
@@ -179,6 +179,20 @@ This section is the authoritative "where are we now?" view. Historical phase not
     - Cleanup passed: emulator stopped; ports `5100`, `5101`, `8180` closed; generated `deploy/sourcing-functions/.npmrc` removed; token scan over repo/deploy npmrc files found no `_authToken`; `git diff --check` passed.
     - Observed non-blocking local warnings: local shell is Node `v22.22.1` while project declares Node `20`; functions emulator on demo project cannot access real Secret Manager values, expected for this read-only local dashboard path; deploy-shaped `npm ci` reported existing dependency audit findings. None blocked shared-tags additive migration verification.
     - T5 conclusion: shared-tags additive migration is ready for staging deploy. Required condition for deploy: run functions deploy/predeploy with GitHub Packages read auth available as `NODE_AUTH_TOKEN` or equivalent package-manager auth. The token must not be committed and is not app runtime `.env`. After deploy, run staged browser smoke on `https://wekruit-sourcing.web.app` with isolated synthetic data, not TreeHacks candidates.
+  - 2026-05-16 T5 staging deployment completion:
+    - User greenlit deployment after T5 local/deploy-readiness verification.
+    - Confirmed the active staging dashboard target is the dedicated Firebase Hosting site `wekruit-sourcing`, served at `https://wekruit-sourcing.web.app`, backed by Firebase project `wekruit-dev-env`.
+    - Used the scoped sourcing deploy shape, not the package.json shortcuts: `npx -y firebase-tools deploy --config firebase.sourcing.json --project wekruit-dev-env --only functions:core-service:sourcing.api,hosting:wekruit-sourcing`.
+    - Ran the same scoped command with `--dry-run` first; it completed successfully and reported Hosting URL `https://wekruit-sourcing.web.app`.
+    - Actual deploy completed successfully: function `core-service:sourcing-api(us-central1)` updated, function URL reported as `https://sourcing-api-s4zwoc37yq-uc.a.run.app`, Hosting site `wekruit-sourcing` finalized and released, and Firebase reported `Deploy complete`.
+    - GitHub Packages read auth was supplied only through `NODE_AUTH_TOKEN` for the deploy/predeploy bundle build. The generated `deploy/sourcing-functions/.npmrc` was removed after deployment.
+    - Read-only live API verification passed:
+      - `GET https://wekruit-sourcing.web.app/api/sourcing/health` returned `200` with `{ ok: true, service: "sourcing", runtime: "firebase-functions" }`.
+      - `GET https://wekruit-sourcing.web.app/api/sourcing/taxonomy` returned `200`, `schemaVersion: "sourcing-taxonomy-v1"`, `legacyTracks: 10`, `canonicalRoleFunctions: 17`, `skillBuckets: 10`, and canonical token arrays containing `software_engineering` and `programming_languages`.
+      - `GET https://wekruit-sourcing.web.app/app.js` returned `200`, `138752` bytes, and contained the deployed strings/routes for `Canonical tags preview` and `/taxonomy`.
+    - Browser verification passed on the live dashboard: opened `https://wekruit-sourcing.web.app/#profiles`, clicked the Profiles tab, confirmed status `Ready`, legacy profile filters (`TRACK`, `DOMAIN`, `SOURCE`, `CONTACT`) remained present, and the `Canonical tags preview` section rendered without page errors.
+    - Expected staging nuance: existing final profiles created before the additive migration can display `Canonical tags preview` with `No canonical tags saved.` The deploy intentionally does not backfill or mutate existing profiles. Newly generated enrichment review items and newly materialized profiles after this deployment should carry deterministic additive `canonicalTags`.
+    - Observed non-blocking deploy warnings: Firebase CLI warned that Node.js 20 runtime is deprecated as of 2026-04-30 and decommissions on 2026-10-30; it also warned that the deployed `firebase-functions` package is outdated. These are follow-up runtime/dependency maintenance items and did not block this scoped staging deploy.
   - 2026-05-16 core-service preflight:
     - Current core-service branch and scraping mirror branch were clean and plan docs were byte-identical before checks.
     - Core-service `tsconfig.json` uses `"module": "commonjs"` and `"moduleResolution": "node"`; root `package.json` has no `"type": "module"`, so emitted runtime is CommonJS.
@@ -3798,7 +3812,9 @@ Shared-tags implementation plan:
    - Completed on 2026-05-16.
    - Verified published package access, core-service build/tests, web syntax, deploy-bundle install shape, local emulator API, and browser-rendered dashboard preview.
    - Verified secondary canonical preview appears in Enrichment and Profiles while existing legacy labels/filters remain intact.
-   - Staging deploy was intentionally not run. The branch is ready for staging deploy when the deploy/predeploy environment supplies GitHub Packages read auth through `NODE_AUTH_TOKEN` or equivalent package-manager auth.
+   - Staging deploy completed on 2026-05-16 after explicit user greenlight using `firebase.sourcing.json` against Firebase project `wekruit-dev-env`.
+   - Live read-only verification passed for `https://wekruit-sourcing.web.app`: health endpoint, taxonomy endpoint, deployed `app.js`, and browser-rendered Profiles tab with legacy filters plus `Canonical tags preview`.
+   - Existing profiles were not backfilled; they may show `No canonical tags saved.` until regenerated/re-enriched after the additive migration.
 
 Combined execution order recommendation:
 
