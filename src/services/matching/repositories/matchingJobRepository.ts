@@ -10,7 +10,12 @@ import type {
   MatchingJobType,
 } from '../domain/job';
 
-const FIRESTORE_BATCH_LIMIT = 500;
+// 2026-05-18 — drop from 500 → 25. Some matching-jobs docs are heavy
+// (embedding 1536 floats + job_description blob → ~100KB each). With 500
+// docs/batch the Firestore commit exceeded the 10 MiB transaction limit
+// ("INVALID_ARGUMENT: Transaction too big"). 25 × 100 KB = 2.5 MiB stays
+// well under the limit and dramatically reduces client retry-split churn.
+const FIRESTORE_BATCH_LIMIT = 25;
 
 export interface MatchingJobCursor {
   firstSeenAt: string;
