@@ -42,6 +42,16 @@ export interface MatchingJobRecord {
   enrichedAt: string | null;
   embeddedAt: string | null;
   syncedAt: string;
+  // v1.6 canonical-vocab fields (D1 / D2). Filled async by the wekruit-pa
+  // side trigger `paMatchingJobsAutoEnrich` (Firestore onDocumentWritten on
+  // matching-jobs/{jobId}) calling `@pa/job-tag-enricher`. Optional here
+  // because the macmini sync builder does not compute them; they land on
+  // the Firestore doc later. Marking them on the type surface keeps the
+  // schema honest end-to-end (matching reader in wekruit-pa already reads
+  // these). When the scraper is taught to emit canonical tags inline (W7),
+  // these stay structurally compatible — no payload migration needed.
+  roleFunction?: string[];      // jobright utm_campaign 17-token vocab (D1)
+  industrySector?: string[];    // 42-token canonical vocab (D2)
 }
 
 export interface MatchingJobSyncState {
