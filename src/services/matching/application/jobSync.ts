@@ -65,6 +65,24 @@ function normalizeStringArray(value: unknown): string[] {
   return [...unique];
 }
 
+/**
+ * Optional variant of `normalizeStringArray`. Returns `undefined` when the
+ * inbound payload omits the field entirely, so we don't write empty arrays
+ * over canonical tags set by the wekruit-pa side enrichment trigger.
+ */
+function optionalStringArray(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const normalized = normalizeStringArray(value);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function normalizeStringArrayIndex(value: string[]) {
   return [...new Set(value.map((item) => item.toLowerCase()))];
 }
@@ -207,6 +225,14 @@ export function buildMatchingJobRecord(input: {
   const { salaryMin, salaryMax } = parseSalaryRange(salaryRange);
 
   const roleTitle = normalizeString(raw.role_title);
+  // v1.6 canonical-vocab fields (D1 / D2). Scraper does not emit them today
+  // (wekruit-pa enrichment trigger fills the Firestore doc post-write). We
+  // forward them through only when present so the receiver stays honest:
+  // when the macmini sync starts emitting canonical tags inline (W7), this
+  // path needs no further change. Absent fields stay `undefined` to avoid
+  // clobbering canonical tags written by the enrichment trigger.
+  const roleFunction = optionalStringArray(raw.role_function);
+  const industrySector = optionalStringArray(raw.industry_sector);
   return {
     id,
     sourceRepo,
@@ -246,6 +272,8 @@ export function buildMatchingJobRecord(input: {
     enrichedAt: normalizeString(raw.enriched_at),
     embeddedAt: normalizeString(raw.embedded_at),
     syncedAt,
+    ...(roleFunction ? { roleFunction } : {}),
+    ...(industrySector ? { industrySector } : {}),
   };
 }
 
