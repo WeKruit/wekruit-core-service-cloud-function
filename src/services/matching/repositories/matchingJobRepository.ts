@@ -130,13 +130,48 @@ export class MatchingJobRepository implements MatchingJobSyncRepository {
 
   async upsertJobs(jobs: MatchingJobRecord[]): Promise<void> {
     for (let index = 0; index < jobs.length; index += FIRESTORE_BATCH_LIMIT) {
-      const batch = this.firestore.batch();
       const chunk = jobs.slice(index, index + FIRESTORE_BATCH_LIMIT);
 
-      for (const job of chunk) {
-        batch.set(this.collection.doc(job.id), job, { merge: true });
+      // Pre-fetch existing snapshots in one RPC (Firestore.getAll), then
+      // skip any doc whose existing status is `inactive` or `dead === true`
+      // so manually-flipped lifecycle state survives the next scrape cycle.
+      // Required precursor to paJobPoolHygiene workstream: protect bad-active
+      // docs that get flipped to inactive from being clobbered by macmini
+      // scrape, which always emits status:"active".
+      const refs = chunk.map((job) => this.collection.doc(job.id));
+      const existing = await this.firestore.getAll(...refs);
+      const protectedIds = new Set(
+        existing
+          .filter((snapshot) => snapshot.exists)
+          .filter((snapshot) => {
+            const data = snapshot.data() as
+              | (Partial<MatchingJobRecord> & { dead?: boolean })
+              | undefined;
+            return data?.status === 'inactive' || data?.dead === true;
+          })
+          .map((snapshot) => snapshot.id),
+      );
+      const writeable = chunk.filter((job) => !protectedIds.has(job.id));
+
+      if (writeable.length < chunk.length) {
+        console.log(
+          JSON.stringify({
+            msg: 'upsertJobs respecting inactive/dead status',
+            skipped: chunk.length - writeable.length,
+            attempted: chunk.length,
+            protectedIds: [...protectedIds],
+          }),
+        );
       }
 
+      if (writeable.length === 0) {
+        continue;
+      }
+
+      const batch = this.firestore.batch();
+      for (const job of writeable) {
+        batch.set(this.collection.doc(job.id), job, { merge: true });
+      }
       await batch.commit();
     }
   }
