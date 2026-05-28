@@ -10,6 +10,14 @@ export type MatchingJobType =
 export interface MatchingJobRecord {
   id: string;
   sourceRepo: string | null;
+  /**
+   * Phase 63 multi-source attribution (e.g. ['vcboard:a16z', 'jobright']).
+   * Carried alongside the legacy single `sourceRepo` so a job that appears
+   * on multiple VC boards or ATS feeds keeps every source after cross-source
+   * dedup. 2026-05-28: previously dropped during sync — `sources` was None on
+   * every Firestore doc even though the scraper emits it.
+   */
+  sources?: string[];
   jobType: MatchingJobType;
   companyName: string | null;
   roleTitle: string | null;

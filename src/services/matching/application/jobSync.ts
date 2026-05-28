@@ -225,6 +225,14 @@ export function buildMatchingJobRecord(input: {
   const { salaryMin, salaryMax } = parseSalaryRange(salaryRange);
 
   const roleTitle = normalizeString(raw.role_title);
+  // Phase 63 multi-source array. Preserve full attribution
+  // (e.g. ['vcboard:a16z']); fall back to [sourceRepo] for older rows.
+  const sources =
+    normalizeStringArray(raw.sources).length > 0
+      ? normalizeStringArray(raw.sources)
+      : sourceRepo
+        ? [sourceRepo]
+        : [];
   // v1.6 canonical-vocab fields (D1 / D2). Scraper does not emit them today
   // (wekruit-pa enrichment trigger fills the Firestore doc post-write). We
   // forward them through only when present so the receiver stays honest:
@@ -236,6 +244,11 @@ export function buildMatchingJobRecord(input: {
   return {
     id,
     sourceRepo,
+    // Phase 63 multi-source array — preserve full attribution
+    // (e.g. ['vcboard:a16z']) instead of just the legacy single
+    // `sourceRepo`. 2026-05-28: was being dropped, so every Firestore
+    // doc had `sources: None`.
+    sources,
     jobType: inferJobType(sourceRepo, roleTitle),
     companyName: normalizeString(raw.company_name),
     roleTitle,
