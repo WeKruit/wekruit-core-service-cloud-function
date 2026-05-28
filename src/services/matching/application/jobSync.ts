@@ -207,9 +207,20 @@ export function buildMatchingJobRecord(input: {
   const { salaryMin, salaryMax } = parseSalaryRange(salaryRange);
 
   const roleTitle = normalizeString(raw.role_title);
+  const sources =
+    normalizeStringArray(raw.sources).length > 0
+      ? normalizeStringArray(raw.sources)
+      : sourceRepo
+        ? [sourceRepo]
+        : [];
   return {
     id,
     sourceRepo,
+    // Phase 63 multi-source array — preserve full attribution
+    // (e.g. ['vcboard:a16z']) instead of just the legacy single
+    // `sourceRepo`. 2026-05-28: was being dropped, so every Firestore
+    // doc had `sources: None`.
+    sources,
     jobType: inferJobType(sourceRepo, roleTitle),
     companyName: normalizeString(raw.company_name),
     roleTitle,
