@@ -137,6 +137,33 @@ test('syncMatchingJobs upserts jobs whose content_hash, status, or embedding syn
   assert.equal(result.inactive, 1);
 });
 
+test('buildMatchingJobRecord forwards roleFunction / industrySector when the payload includes canonical v1.6 tags', () => {
+  const record = buildMatchingJobRecord({
+    raw: {
+      ...buildPayload().jobs[0],
+      role_function: ['software_engineering', 'data_engineering'],
+      industry_sector: ['financial_technology'],
+    },
+    syncedAt: '2026-04-01T14:00:00.000Z',
+  });
+
+  assert.deepEqual(record.roleFunction, ['software_engineering', 'data_engineering']);
+  assert.deepEqual(record.industrySector, ['financial_technology']);
+});
+
+test('buildMatchingJobRecord omits roleFunction / industrySector keys when the payload has no canonical tags (no clobber)', () => {
+  const record = buildMatchingJobRecord({
+    raw: buildPayload().jobs[0],
+    syncedAt: '2026-04-01T14:00:00.000Z',
+  });
+
+  // Important: when absent, the keys must NOT be present on the record so
+  // Firestore `merge:true` cannot overwrite canonical tags written by the
+  // wekruit-pa side enrichment trigger.
+  assert.equal(Object.hasOwn(record, 'roleFunction'), false);
+  assert.equal(Object.hasOwn(record, 'industrySector'), false);
+});
+
 test('syncMatchingJobs repairs an existing doc when Firestore is missing embedding data', async () => {
   const upserts: string[] = [];
   const dependencies: MatchingJobSyncDependencies = {

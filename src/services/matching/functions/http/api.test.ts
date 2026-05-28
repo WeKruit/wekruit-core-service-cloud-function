@@ -312,6 +312,67 @@ test('POST /api/sync/jobs accepts a valid batch and upserts the changed jobs', a
   assert.equal(upsertedJobCount, 1);
 });
 
+test('POST /api/sync/jobs preserves v1.6 role_function / industry_sector canonical tags end-to-end', async () => {
+  const upsertedJobs: Array<{ id: string; roleFunction?: string[]; industrySector?: string[] }> = [];
+
+  await withServer(
+    {
+      userSyncDependencies: buildUserSyncDependencies(),
+      jobSyncDependencies: {
+        ...buildJobSyncDependencies(),
+        repository: {
+          async getSyncStates() {
+            return new Map();
+          },
+          async upsertJobs(jobs) {
+            for (const job of jobs) {
+              upsertedJobs.push({
+                id: job.id,
+                roleFunction: job.roleFunction,
+                industrySector: job.industrySector,
+              });
+            }
+          },
+        },
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/sync/jobs`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': 'phase-20-sync-key',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          collection: 'matching-jobs',
+          mode: 'incremental',
+          jobs: [
+            {
+              job_id: 'job-canonical',
+              source_repo: 'greenhouse:acme',
+              role_title: 'Senior Software Engineer',
+              status: 'active',
+              content_hash: 'hash-canonical',
+              role_function: ['software_engineering'],
+              industry_sector: ['financial_technology'],
+            },
+          ],
+        }),
+      });
+
+      const payload = (await response.json()) as Record<string, unknown>;
+      assert.equal(response.status, 200);
+      assert.equal(payload.ok, true);
+      assert.equal(payload.upserted, 1);
+    },
+  );
+
+  assert.equal(upsertedJobs.length, 1);
+  assert.equal(upsertedJobs[0].id, 'job-canonical');
+  assert.deepEqual(upsertedJobs[0].roleFunction, ['software_engineering']);
+  assert.deepEqual(upsertedJobs[0].industrySector, ['financial_technology']);
+});
+
 test('POST /match returns legacy snake_case matches for the discover flow', async () => {
   await withServer(
     {

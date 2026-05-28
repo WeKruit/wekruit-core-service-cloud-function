@@ -65,6 +65,12 @@ const matchingJobSchema = z
     job_id: z.string().min(1),
     status: z.enum(['active', 'inactive']),
     content_hash: z.string().min(1),
+    // v1.6 canonical-vocab fields (D1 / D2). Optional — scraper does not
+    // emit them today; the wekruit-pa enrichment trigger fills them
+    // server-side. Declared here so the type surface stays honest if/when
+    // the macmini sync starts forwarding canonical tags inline.
+    role_function: z.array(z.string()).optional(),
+    industry_sector: z.array(z.string()).optional(),
   })
   .passthrough();
 
